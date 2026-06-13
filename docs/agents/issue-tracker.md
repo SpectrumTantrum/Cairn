@@ -2,7 +2,7 @@
 
 Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
-> **Repo status (2026-06):** this workspace is **not yet a git repository and has no GitHub remote.** Before any `gh issue` command works you must: `git init`, create the GitHub repo (`gh repo create`), and push. Until then, skills that "publish to the issue tracker" cannot run against GitHub — set this up first, or switch this file to the local-markdown convention if you'd rather track work in-repo.
+> **Repo:** `SpectrumTantrum/Cairn` (public). `gh` infers it automatically when run inside this clone, so no `-R` flag is needed.
 
 ## Conventions
 

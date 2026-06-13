@@ -11,7 +11,7 @@ A **spec-first feasibility workspace**, not an application codebase. There is **
 
 The two relate: **Mneme is effectively the local RAG/indexing layer that Cairn's §6 pipeline needs.** They share the same north star — local-first, no cloud/telemetry, Ollama (local) + BYOK as swappable model providers, citations that jump to the exact source, and a **permissive-license-only** policy. The PRDs do not formally couple them; treat shared findings (embeddings, hybrid retrieval, LanceDB/sqlite-vec, citation anchoring) as transferable.
 
-Not a git repository. The PRDs and feasibility reports are the source of truth.
+Git repo: **github.com/SpectrumTantrum/Cairn** (public, `main`). The PRDs and feasibility reports are the source of truth — there is no app code to consult yet.
 
 ## The reports override the PRDs (read this before implementing anything)
 
@@ -77,7 +77,7 @@ Ollama-dependent spikes need a local server (`ollama serve` on `localhost:11434`
 
 ### Issue tracker
 
-Issues and PRDs are tracked as **GitHub issues** via the `gh` CLI. (Not yet a git repo / no remote — `git init` + create the GitHub repo + push before `gh issue` works.) See `docs/agents/issue-tracker.md`.
+Issues and PRDs are tracked as **GitHub issues** (`SpectrumTantrum/Cairn`) via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

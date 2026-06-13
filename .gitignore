@@ -1,0 +1,16 @@
+# Dependencies (spikes are self-contained; deps are reinstallable via npm/uv)
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.uv/
+
+# Spike scratch / generated artifacts
+*.db
+*.db-wal
+*.db-shm
+
+# OS
+.DS_Store

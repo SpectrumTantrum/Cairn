@@ -14,4 +14,10 @@ When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the 
 
 Edit the right-hand column to match whatever vocabulary you actually use.
 
-> These are the default names. Since this repo has no GitHub labels yet, create them once the repo exists: `gh label create needs-triage`, etc. (or let `triage` create them on first use).
+> `wontfix` already exists (a GitHub default label). The other four still need creating:
+> ```bash
+> gh label create needs-triage   --description "Maintainer needs to evaluate"      --color FBCA04
+> gh label create needs-info     --description "Waiting on reporter"                --color D4C5F9
+> gh label create ready-for-agent --description "Fully specified, AFK-ready"        --color 0E8A16
+> gh label create ready-for-human --description "Needs human implementation"        --color 1D76DB
+> ```
