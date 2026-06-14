@@ -5,6 +5,8 @@
 
 ---
 
+> **⚠️ Status (2026-06-14):** The authoritative v1 **scope** now lives in [`docs/v1-scope.md`](docs/v1-scope.md) (full scope, one v1.0). Two big reframes since this PRD: **(1) Identity** — Cairn is a **knowledge-management tool** (NotebookLM+Cursor+Obsidian fusion), *not* a neurodivergent study companion; §1/§3/§10's ND-as-identity framing and the ND-specific mechanics (hint ladders, fixation guard, low-energy) are **superseded/out of scope** ([ADR-0005](docs/adr/0005-knowledge-management-not-nd-study-companion.md)); "Tutor" → a lean grounded **Explain** mode. **(2) Technical claims** are superseded wherever they conflict with [`cairn-feasibility-report.md`](cairn-feasibility-report.md) and the ADRs in [`docs/adr/`](docs/adr/) — e.g. sqlite-vec is brute-force KNN (not "ANN"); use Electron `safeStorage` (not keytar); hardware-gate local models (no 8B for 8 GB); PDFs are parsed by pdf.js + tiered OCR (not Docling). Read those before implementing.
+
 ## 1. Vision & Problem
 
 Students (especially neurodivergent students) juggle three disconnected tools:
