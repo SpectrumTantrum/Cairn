@@ -32,9 +32,13 @@ node src/cli.ts search "spaced repetition" --in /path/to/notes
 ollama pull qwen3-embedding:0.6b
 node src/cli.ts index /path/to/notes
 node src/cli.ts search "why did we choose X" --in /path/to/notes
+
+# Ask a grounded, cited question (also needs a chat model: ollama pull qwen3:4b)
+node src/cli.ts ask "why did we choose X over Y?" --in /path/to/notes
 ```
 
-Results come back as `file:line › heading` citations. The index lives in `<folder>/.cairn/` —
+`search` results come back as `file:line › heading` citations; `ask` answers **only** from
+your notes — every claim cites a source, and it refuses rather than guess when nothing matches. The index lives in `<folder>/.cairn/` —
 disposable and per-machine; your Markdown files are the source of truth. See
 [`packages/engine/README.md`](packages/engine/README.md) for details.
 

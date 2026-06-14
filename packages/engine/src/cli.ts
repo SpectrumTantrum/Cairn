@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { indexVault } from "./indexer.ts";
 import { search } from "./retrieve.ts";
+import { ask } from "./ask.ts";
 import { Store } from "./store.ts";
 
 const HELP = `cairn — local-first grounded retrieval over a Markdown folder
@@ -14,6 +15,7 @@ const HELP = `cairn — local-first grounded retrieval over a Markdown folder
 USAGE
   cairn index  <folder> [--lexical] [--embedder <tag>]
   cairn search <query...> [--in <folder>] [-k <n>] [--lexical]
+  cairn ask    <question...> [--in <folder>] [-k <n>] [--model <tag>] [--lexical]
 
 COMMANDS
   index   Chunk + index every .md/.markdown file under <folder> into <folder>/.cairn/.
@@ -21,11 +23,15 @@ COMMANDS
           --lexical builds a keyword-only index (no model, zero setup).
   search  Return ranked, cited chunks (file:line › heading) for a query. Auto-uses
           hybrid when the index has vectors and Ollama is up; else keyword-only.
+  ask     Answer a question grounded ONLY in your notes, with [n] citations and a source
+          list. Refuses ("Your notes don't cover this") when nothing relevant is found.
+          Needs a local chat model (e.g. \`ollama pull qwen3:4b\`).
 
 EXAMPLES
   cairn index ./notes
   cairn index ./notes --lexical
   cairn search "spaced repetition" --in ./notes -k 5
+  cairn ask "how does our cache invalidation work?" --in ./notes
 `;
 
 interface Parsed {
@@ -94,6 +100,35 @@ async function runSearch(p: Parsed): Promise<void> {
   });
 }
 
+async function runAsk(p: Parsed): Promise<void> {
+  const root = resolve(typeof p.flags.in === "string" ? p.flags.in : ".");
+  if (!existsSync(`${root}/.cairn/index.db`)) {
+    console.error(`No index at ${root}/.cairn — run \`cairn index ${root}\` first.`);
+    process.exit(1);
+  }
+  const question = p.positional.join(" ").trim();
+  if (!question) {
+    console.error("Empty question. Usage: cairn ask <question...>");
+    process.exit(1);
+  }
+  const k = typeof p.flags.k === "string" ? Math.max(1, parseInt(p.flags.k, 10) || 6) : 6;
+  const model = typeof p.flags.model === "string" ? p.flags.model : undefined;
+  const store = new Store(root);
+  process.stderr.write("Thinking…\n");
+  const res = await ask(store, question, { k, mode: p.flags.lexical ? "lexical" : "auto", model });
+  store.close();
+
+  console.log(`\n${res.answer}`);
+  if (res.sources.length > 0) {
+    console.log("\nSources:");
+    res.sources.forEach((h, i) => {
+      const loc = h.heading ? `${h.file}:${h.line} › ${h.heading}` : `${h.file}:${h.line}`;
+      console.log(`  [${i + 1}] ${loc}`);
+    });
+    console.log(`\n(${res.mode}${res.model ? ` · ${res.model}` : ""})`);
+  }
+}
+
 async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2);
   const parsed = parseArgs(rest);
@@ -104,6 +139,7 @@ async function main(): Promise<void> {
   }
   if (cmd === "index") return runIndex(parsed);
   if (cmd === "search") return runSearch(parsed);
+  if (cmd === "ask") return runAsk(parsed);
 
   console.error(`Unknown command: ${cmd}\n`);
   console.log(HELP);

@@ -31,7 +31,8 @@ export interface SearchHit {
   heading: string;
   line: number;
   score: number; // RRF score in hybrid mode; NaN in lexical mode (ranked by BM25)
-  snippet: string;
+  snippet: string; // truncated, for display
+  text: string; // full chunk text, for grounding (ask)
   arms: string; // "dense+fts" | "dense" | "fts"
 }
 
@@ -81,6 +82,7 @@ function toHit(store: Store, id: number, score: number, inDense: boolean, inFts:
     line: c?.line ?? 0,
     score,
     snippet: snippetOf(c?.text ?? ""),
+    text: c?.text ?? "",
     arms,
   };
 }
