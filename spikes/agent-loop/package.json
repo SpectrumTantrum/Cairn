@@ -1,0 +1,13 @@
+{
+  "name": "agent-loop",
+  "version": "1.0.0",
+  "description": "Spike: can a local Qwen3 model survive a 5-step Agent-mode tool-calling loop without schema corruption?",
+  "type": "module",
+  "scripts": {
+    "start": "node agent-loop.mts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {}
+}

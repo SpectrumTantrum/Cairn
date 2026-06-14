@@ -1,0 +1,15 @@
+{
+  "name": "rag-quality",
+  "version": "1.0.0",
+  "description": "Spike: does Qwen3-Embedding-0.6B clear 80% top-3 retrieval on a fixture corpus? (no runtime deps; needs Ollama)",
+  "main": "retrieval.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node retrieval.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {}
+}

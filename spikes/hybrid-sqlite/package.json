@@ -1,0 +1,16 @@
+{
+  "name": "hybrid-sqlite",
+  "version": "1.0.0",
+  "description": "Spike: HYBRID retrieval (sqlite-vec dense + FTS5 keyword + app-side RRF) on the locked Cairn stack",
+  "type": "module",
+  "scripts": {
+    "start": "node hybrid.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "sqlite-vec": "^0.1.9"
+  }
+}
