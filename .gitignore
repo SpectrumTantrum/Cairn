@@ -12,5 +12,15 @@ __pycache__/
 *.db-wal
 *.db-shm
 
+# Cairn index — disposable, per-machine, never synced (CONTEXT.md)
+.cairn/
+
+# Local agent settings & session-continuity notes — never publish
+.claude/settings.local.json
+.remember/
+
+# rag-quality-v2 benchmark datasets (third-party, ~23MB, incl. non-permissive licenses) — fetch locally
+spikes/rag-quality-v2/data/
+
 # OS
 .DS_Store

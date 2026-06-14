@@ -1,0 +1,27 @@
+{
+  "name": "@cairn/engine",
+  "version": "0.1.0",
+  "description": "Cairn / Mneme — headless local-first indexing & retrieval engine. Index a folder of Markdown and run grounded, cited hybrid (dense + FTS5 + RRF) search over it. No telemetry, no cloud; embeddings via local Ollama.",
+  "type": "module",
+  "bin": {
+    "cairn": "./src/cli.ts"
+  },
+  "engines": {
+    "node": ">=23.6"
+  },
+  "scripts": {
+    "cairn": "node src/cli.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@langchain/textsplitters": "^1.0.1",
+    "better-sqlite3": "^12.10.0",
+    "sqlite-vec": "^0.1.9"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
