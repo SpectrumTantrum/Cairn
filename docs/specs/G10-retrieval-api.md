@@ -90,7 +90,7 @@ rrf_score(chunk) = Σ_arm  weight_arm / (K_RRF + rank_arm(chunk))
 
 Two distinct `k`s: a per-arm **candidate pool** for fusion quality, and the **returned k=8**.
 
-1. **Embed** the query once → `qvec` (Qwen3-Embedding-0.6B, 1024-dim, unit space; matches the index embedder/dim in `meta`).
+1. **Embed** the query once → `qvec` (Qwen3-Embedding-0.6B, 1024-dim, unit space; matches the index embedder/dim in `meta`). **Use the asymmetric instruction prefix on the query** — `Instruct: {retrieval task}\nQuery: {text}` — and embed chunks/documents *un-prefixed*. This is **load-bearing, not cosmetic**: `spikes/rag-quality-v2/` (2026-06-14) showed that without the prefix dense retrieval can lose to the FTS/BM25 arm outright (NFCorpus 29.9 vs 32.4 nDCG@10); with it, dense wins.
 2. **Dense arm** — `SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH :qvec ORDER BY distance LIMIT :pool` (pool default 64). With `distance_metric=cosine` (see §6) `cosine = 1 - distance` for every dense hit, free.
 3. **FTS arm** — `SELECT rowid AS chunk_id, rank FROM fts_chunks WHERE fts_chunks MATCH :q ORDER BY rank LIMIT :pool`. (Sanitize the user query into an FTS5 MATCH expression; on a malformed/empty MATCH, treat the FTS arm as empty rather than throwing.)
 4. **Join + filter** — union the candidate `chunk_id`s, join to `chunks` to hydrate G5 fields + build G8 anchors, and apply `filter` (`folders` as path-prefix OR; `types` as `source_type IN (...)`). vec0 v0.1.9 has no clean pre-filtered KNN, so filtering is **post-KNN** (over-fetch then filter). `tags` is accepted but ignored in v1.
@@ -102,7 +102,7 @@ Why the gate sits at step 6 (before trim) and not on the returned 8: RRF favors 
 
 ## 4. "Not covered" coverage gate
 
-- `coverage_threshold` default **0.5**, an **absolute** cosine floor (NOT batch/min-max normalized — min-max would always put a 1.0 in any non-empty batch and the gate would never fire). It is a **tunable**: calibrate on the same 50-Q Qwen3-Embedding-0.6B self-test corpus that the v1-scope build-prereq uses (≥80% top-3). The 0.5 default is documented-but-unvalidated for this embedder until that spike runs.
+- `coverage_threshold` default **0.5**, an **absolute** cosine floor (NOT batch/min-max normalized — min-max would always put a 1.0 in any non-empty batch and the gate would never fire). It is a **tunable**. The embedder itself is now validated (`spikes/rag-quality-v2/`, 2026-06-14 — Qwen3-Embedding-0.6B beats BM25 on BEIR), but that is a *ranking-quality* result; the **absolute 0.5 cosine floor still needs calibration on a Cairn-representative corpus** (BEIR is document-level and out-of-distribution for this gate). The 0.5 default remains documented-but-unvalidated **for the gate** until a Cairn-corpus calibration runs.
 - `covered = pool_max_cosine >= coverage_threshold`, evaluated over the **filtered** pool — i.e. "do your notes *in this scope* cover this," respecting `folders`/`types`.
 - Empty index, empty/whitespace query, or both arms empty → empty pool → `pool_max_cosine` sentinel below threshold → `covered = false`, `chunks = []`. Clean, no throw.
 - The engine only computes `covered`. What to *do* about it is the Ask layer (§5).
@@ -130,7 +130,7 @@ CREATE VIRTUAL TABLE vec_chunks USING vec0(
 Verified in sqlite-vec v0.1.9: with `distance_metric=cosine`, the KNN `distance` column equals `1 - cosine_similarity`, so `cosine = 1 - distance` per dense hit at zero extra cost; ranking is unchanged from L2 on unit-normalized vectors. The scalar `vec_distance_cosine(a, b)` is also available for the FTS-only on-demand cosine (step 5). This touches the stored-vector contract only at the vec0 layer (the durable `embeddings` cache bytes are unchanged float32); it is a one-token DDL amendment, not a re-embed.
 
 ## Open risks
-- `coverage_threshold = 0.5` is unvalidated for Qwen3-Embedding-0.6B; calibrate on the 50-Q self-test before locking. Tune as one absolute float in `meta`.
+- `coverage_threshold = 0.5` is still unvalidated **as a gate floor**: the embedder's *ranking* quality is now validated (`spikes/rag-quality-v2/`, beats BM25 on BEIR), but the absolute cosine value at which "your notes don't cover this" should fire must be calibrated on a **Cairn-representative corpus** before locking. Tune as one absolute float in `meta`.
 - Selective filter underflow: pool=64 then post-filter to a tiny folder can leave `< k` survivors. Acceptable for v1 (vec0 v0.1.9 has no pre-filtered KNN); larger vaults may need a larger pool or iterative widening.
 - FTS5 MATCH-expression sanitization from free-text user queries must be robust (quotes, operators) — malformed input degrades the FTS arm to empty, never throws.
 - `tags` filtering is type-visible but a no-op in v1; ensure callers don't assume it filters.

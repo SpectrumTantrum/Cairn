@@ -5,10 +5,11 @@
 // degrades to keyword-only — so the CLI is usable with zero model setup and gets better
 // (dense recall) for free when a local embedder is present.
 
-import { embed, ollamaUp } from "./embed.ts";
-import type { Store } from "./store.ts";
+import { embed, formatQueryForEmbedding, ollamaUp } from "./embed.js";
+import type { Store } from "./store.js";
 
 const K_RRF = 60; // G10 RRF constant
+export const DEFAULT_COVERAGE_THRESHOLD = 0.5;
 
 export function sanitizeForFts(raw: string): string {
   const tokens = (raw.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(Boolean);
@@ -31,6 +32,7 @@ export interface SearchHit {
   heading: string;
   line: number;
   score: number; // RRF score in hybrid mode; NaN in lexical mode (ranked by BM25)
+  cosine: number; // raw cosine similarity when hybrid can compute it; NaN in lexical mode
   snippet: string; // truncated, for display
   text: string; // full chunk text, for grounding (ask)
   arms: string; // "dense+fts" | "dense" | "fts"
@@ -43,37 +45,66 @@ export interface SearchOpts {
   pool?: number;
   mode?: Mode;
   embedder?: string;
+  coverageThreshold?: number;
+}
+
+export interface SearchCoverage {
+  covered: boolean;
+  poolMaxCosine: number;
+  threshold: number;
 }
 
 export async function search(
   store: Store,
   query: string,
   opts: SearchOpts = {},
-): Promise<{ hits: SearchHit[]; mode: "hybrid" | "lexical" }> {
+): Promise<{ hits: SearchHit[]; mode: "hybrid" | "lexical"; coverage: SearchCoverage }> {
   const k = opts.k ?? 8;
   const pool = opts.pool ?? 64;
+  const threshold = opts.coverageThreshold ?? DEFAULT_COVERAGE_THRESHOLD;
   const wantHybrid = (opts.mode ?? "auto") !== "lexical";
   const canHybrid = wantHybrid && store.hasVectors() && (await ollamaUp());
 
   const ftsIds = store.ftsArm(sanitizeForFts(query), pool).map((h) => h.id);
 
   if (!canHybrid) {
-    const hits = ftsIds.slice(0, k).map((id) => toHit(store, id, NaN, false, true));
-    return { hits, mode: "lexical" };
+    const hits = ftsIds.slice(0, k).map((id) => toHit(store, id, NaN, NaN, false, true));
+    return {
+      hits,
+      mode: "lexical",
+      coverage: {
+        covered: hits.length > 0,
+        poolMaxCosine: Number.NaN,
+        threshold,
+      },
+    };
   }
 
   const embedder = opts.embedder ?? store.getMeta("embedder") ?? "";
-  const [qvec] = await embed(embedder, [query]);
+  const [qvec] = await embed(embedder, [formatQueryForEmbedding(embedder, query)]);
   const qbuf = Buffer.from(Float32Array.from(qvec).buffer);
-  const denseIds = store.denseArm(qbuf, pool);
+  const denseRows = store.denseArm(qbuf, pool);
+  const denseIds = denseRows.map((h) => h.id);
+  const denseCosines = new Map(denseRows.map((h) => [h.id, h.cosine]));
+  const poolMaxCosine = denseRows.length > 0 ? Math.max(...denseRows.map((h) => h.cosine)) : Number.NEGATIVE_INFINITY;
   const fused = rrfFuse([denseIds, ftsIds]).slice(0, k);
   const denseSet = new Set(denseIds);
   const ftsSet = new Set(ftsIds);
-  const hits = fused.map(({ id, score }) => toHit(store, id, score, denseSet.has(id), ftsSet.has(id)));
-  return { hits, mode: "hybrid" };
+  const hits = fused.map(({ id, score }) =>
+    toHit(store, id, score, denseCosines.get(id) ?? NaN, denseSet.has(id), ftsSet.has(id)),
+  );
+  return {
+    hits,
+    mode: "hybrid",
+    coverage: {
+      covered: poolMaxCosine >= threshold,
+      poolMaxCosine,
+      threshold,
+    },
+  };
 }
 
-function toHit(store: Store, id: number, score: number, inDense: boolean, inFts: boolean): SearchHit {
+function toHit(store: Store, id: number, score: number, cosine: number, inDense: boolean, inFts: boolean): SearchHit {
   const c = store.getChunk(id);
   const arms = inDense && inFts ? "dense+fts" : inDense ? "dense" : "fts";
   return {
@@ -81,6 +112,7 @@ function toHit(store: Store, id: number, score: number, inDense: boolean, inFts:
     heading: c?.heading ?? "",
     line: c?.line ?? 0,
     score,
+    cosine,
     snippet: snippetOf(c?.text ?? ""),
     text: c?.text ?? "",
     arms,

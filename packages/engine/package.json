@@ -3,14 +3,29 @@
   "version": "0.1.0",
   "description": "Cairn / Mneme — headless local-first indexing & retrieval engine. Index a folder of Markdown and run grounded, cited hybrid (dense + FTS5 + RRF) search over it. No telemetry, no cloud; embeddings via local Ollama.",
   "type": "module",
-  "bin": {
-    "cairn": "./src/cli.ts"
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
+  "bin": {
+    "cairn": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "engines": {
-    "node": ">=23.6"
+    "node": ">=20"
   },
   "scripts": {
-    "cairn": "node src/cli.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "cairn": "node dist/cli.js",
+    "test:smoke": "npm run build && node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "license": "MIT",

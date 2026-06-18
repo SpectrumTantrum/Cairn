@@ -5,10 +5,10 @@
 
 import { resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { indexVault } from "./indexer.ts";
-import { search } from "./retrieve.ts";
-import { ask } from "./ask.ts";
-import { Store } from "./store.ts";
+import { indexVault } from "./indexer.js";
+import { search } from "./retrieve.js";
+import { ask } from "./ask.js";
+import { Store } from "./store.js";
 
 const HELP = `cairn — local-first grounded retrieval over a Markdown folder
 
@@ -84,14 +84,18 @@ async function runSearch(p: Parsed): Promise<void> {
   }
   const k = typeof p.flags.k === "string" ? Math.max(1, parseInt(p.flags.k, 10) || 8) : 8;
   const store = new Store(root);
-  const { hits, mode } = await search(store, query, { k, mode: p.flags.lexical ? "lexical" : "auto" });
+  const { hits, mode, coverage } = await search(store, query, { k, mode: p.flags.lexical ? "lexical" : "auto" });
   store.close();
 
   if (hits.length === 0) {
     console.log(`No results for ${JSON.stringify(query)}  [${mode}]`);
     return;
   }
-  console.log(`\n${hits.length} result${hits.length > 1 ? "s" : ""} for ${JSON.stringify(query)}  [${mode}]\n`);
+  const cov =
+    mode === "hybrid"
+      ? ` · covered=${coverage.covered} maxCos=${coverage.poolMaxCosine.toFixed(3)} threshold=${coverage.threshold}`
+      : "";
+  console.log(`\n${hits.length} result${hits.length > 1 ? "s" : ""} for ${JSON.stringify(query)}  [${mode}${cov}]\n`);
   hits.forEach((h, i) => {
     const loc = h.heading ? `${h.file}:${h.line} › ${h.heading}` : `${h.file}:${h.line}`;
     const sc = Number.isFinite(h.score) && h.score > 0 ? `  (${h.score.toFixed(4)} ${h.arms})` : "";

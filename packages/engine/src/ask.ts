@@ -3,10 +3,10 @@
 // answer plus the numbered sources it was allowed to use. If retrieval finds nothing, refuse
 // rather than answer from outside knowledge (the G10 "your notes don't cover this" gate).
 
-import { search } from "./retrieve.ts";
-import type { Mode, SearchHit } from "./retrieve.ts";
-import type { Store } from "./store.ts";
-import { resolveChatModel, chat } from "./chat.ts";
+import { search } from "./retrieve.js";
+import type { Mode, SearchHit } from "./retrieve.js";
+import type { Store } from "./store.js";
+import { resolveChatModel, chat } from "./chat.js";
 
 export interface AskResult {
   answer: string;
@@ -14,6 +14,8 @@ export interface AskResult {
   mode: "hybrid" | "lexical";
   grounded: boolean;
   model?: string;
+  covered: boolean;
+  reason?: string;
 }
 
 const SYSTEM = [
@@ -28,17 +30,23 @@ const SYSTEM = [
 export async function ask(
   store: Store,
   question: string,
-  opts: { k?: number; mode?: Mode; model?: string } = {},
+  opts: { k?: number; mode?: Mode; model?: string; coverageThreshold?: number } = {},
 ): Promise<AskResult> {
   const k = opts.k ?? 6;
-  const { hits, mode } = await search(store, question, { k, mode: opts.mode });
+  const { hits, mode, coverage } = await search(store, question, {
+    k,
+    mode: opts.mode,
+    coverageThreshold: opts.coverageThreshold,
+  });
 
-  if (hits.length === 0) {
+  if (!coverage.covered) {
     return {
-      answer: "Your notes don't cover this — no relevant passages were found.",
+      answer: "Your notes don't cover this.",
       sources: [],
       mode,
       grounded: false,
+      covered: false,
+      reason: "Retrieved context did not meet the coverage threshold.",
     };
   }
 
@@ -52,5 +60,5 @@ export async function ask(
     { role: "user", content: `SOURCES:\n${sourcesBlock}\n\nQUESTION: ${question}` },
   ]);
 
-  return { answer, sources: hits, mode, grounded: true, model };
+  return { answer, sources: hits, mode, grounded: true, model, covered: true };
 }

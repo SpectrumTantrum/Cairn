@@ -8,6 +8,7 @@
 
 const OLLAMA = process.env.OLLAMA_HOST || "http://localhost:11434";
 export const DEFAULT_EMBED = "qwen3-embedding:0.6b";
+const QWEN3_QUERY_TASK = "Given a question, retrieve relevant passages from the user's notes that best answer it.";
 
 export async function listModels(): Promise<string[]> {
   const r = await fetch(`${OLLAMA}/api/tags`);
@@ -60,4 +61,9 @@ export async function embed(model: string, input: string[]): Promise<number[][]>
   const j = (await r.json()) as { embeddings?: number[][] };
   if (!j.embeddings || j.embeddings.length === 0) throw new Error("no embeddings in response");
   return j.embeddings;
+}
+
+export function formatQueryForEmbedding(model: string, query: string): string {
+  if (!/qwen3.*embed/i.test(model)) return query;
+  return `Instruct: ${QWEN3_QUERY_TASK}\nQuery: ${query}`;
 }

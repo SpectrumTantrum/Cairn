@@ -18,6 +18,12 @@ export interface ChunkRow {
   text: string;
 }
 
+export interface DenseHit {
+  id: number;
+  distance: number;
+  cosine: number;
+}
+
 export class Store {
   readonly db: Database.Database;
   readonly dir: string;
@@ -141,11 +147,18 @@ export class Store {
       .get(id) as ChunkRow | undefined;
   }
 
-  denseArm(qvec: Buffer, pool: number): number[] {
+  denseArm(qvec: Buffer, pool: number): DenseHit[] {
     const rows = this.db
-      .prepare(`SELECT chunk_id FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ${pool | 0}`)
-      .all(qvec) as { chunk_id: number }[];
-    return rows.map((r) => r.chunk_id);
+      .prepare(`SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ${pool | 0}`)
+      .all(qvec) as { chunk_id: number | bigint; distance: number }[];
+    return rows.map((r) => {
+      const distance = Number(r.distance);
+      return {
+        id: Number(r.chunk_id),
+        distance,
+        cosine: 1 - distance,
+      };
+    });
   }
 
   ftsArm(match: string, pool: number): { id: number; rank: number }[] {

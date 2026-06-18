@@ -1,0 +1,23 @@
+{
+  "name": "cairn",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "workspaces": [
+    "packages/engine",
+    "apps/desktop"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "engine:build": "npm run build --workspace @cairn/engine",
+    "desktop:dev": "npm run dev --workspace @cairn/desktop",
+    "desktop:typecheck": "npm run typecheck --workspace @cairn/desktop",
+    "desktop:build": "npm run build --workspace @cairn/desktop",
+    "desktop:preview": "npm run preview --workspace @cairn/desktop"
+  }
+}

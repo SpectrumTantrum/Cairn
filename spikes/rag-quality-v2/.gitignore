@@ -1,0 +1,2 @@
+# Benchmark datasets + embedding caches — reproducible via `npm run fetch` + a run.
+data/

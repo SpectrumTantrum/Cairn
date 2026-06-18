@@ -52,6 +52,8 @@ The app ships **one default embedder**; the user may switch to any of these at w
 
 > **Dimension note:** a `sqlite-vec` table is fixed to one vector dimension, so switching the embedder (or its dimension) requires a **full re-index** — which is exactly why switching is modeled as a first-class, user-triggered operation rather than something to avoid.
 
+> **Retrieval-quality validation (2026-06-14, `spikes/rag-quality-v2/`):** the original 50-Q self-test was lexically leaky — a plain TF-IDF baseline tied/beat it, so it couldn't separate embedding quality from word-overlap (see `docs/spike-verdicts-correction.md`). Re-validated on human-judged **BEIR** benchmarks with an **independently-audited** harness (our BM25 reproduces the published BEIR baseline almost exactly): **Qwen3-Embedding-0.6B beats BM25** — SciFact nDCG@10 70.4 vs 67.8, NFCorpus 36.4 vs 32.4 — and the win concentrates where it must, on **low-lexical-overlap (paraphrase) queries** (SciFact low-overlap bucket +7.1); hybrid (dense+BM25 RRF) ≥ both arms. **Load-bearing requirement:** queries MUST be embedded with Qwen3-Embedding's **instruction prefix** (`Instruct: {task}\nQuery: {text}`); *without* it, dense actually **loses** to BM25 on NFCorpus (29.9 vs 32.4). **Caveat:** BEIR is plausibly in the embedder's training data, so a Cairn-specific **out-of-domain notes corpus (chunk-level)** is the confirmatory test before this is fully locked.
+
 ## Cloud escalation — BYOK, hardware-independent (3 rungs)
 
 All BYOK (Cairn stores the key locally, never proxies). Prices = input/output per 1M tokens; **verify against live vendor pages before hardcoding.** Claude names confirmed against this environment; OpenAI/Gemini point-versions are the research's June-2026 snapshot.
@@ -87,5 +89,6 @@ There is **one app-wide embedding model** (one model + dimension for every insta
 - A re-index after an embedder switch reuses **extraction + chunking** caches (keyed by `file_hash`) and only re-embeds — so the cost is embedding time, not re-parsing every PDF.
 - The index records which embedder + dimension produced it; on mismatch (user switched, or opened a vault indexed elsewhere) Cairn detects it and offers/triggers a re-index.
 - `.cairn/index.db` is git-ignored / not synced; only the vault's plain files are portable.
+- **Query embedding uses the asymmetric instruction prefix.** Qwen3-Embedding is trained for asymmetric retrieval: embed chunks/documents as-is, but embed **queries** as `Instruct: {retrieval task}\nQuery: {text}`. This is load-bearing — it flips the dense-vs-BM25 result on out-of-domain data (see the validation note above) — so the engine must prefix queries and must NOT prefix stored chunks. If the embedder is switched to a non-Qwen3 model, revisit the prefix (model-specific).
 
 (No ADR for this — it's an extension of the PRD's existing "plain files first, index is derivative" principle, and re-indexing is by definition reversible, so it fails the "hard to reverse" ADR test.)

@@ -71,6 +71,7 @@ Ollama-dependent spikes need a local server (`ollama serve` on `localhost:11434`
 - **Python: use `uv`, never `pip`.** One-off scripts: `uv run --with <pkg> python …` (ephemeral). This is why the Python spikes have no `requirements.txt` / venv.
 - Node spikes are self-contained (`package.json` per spike dir); run `npm install` in the dir first.
 - Local-first is a product invariant: no telemetry, no network calls except user-configured model endpoints (Ollama on localhost, or BYOK cloud APIs). "Zero outbound" holds at steady state but not at first-run model downloads — keep that distinction when reasoning about the privacy claims.
+- For the first desktop GUI alpha, `docs/mvp-scope.md` overrides `docs/v1-scope.md`; do not implement full v1 scope unless a later issue explicitly reopens it.
 - `.remember/` holds session-continuity notes (not product content).
 
 ## Agent skills

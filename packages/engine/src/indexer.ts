@@ -4,11 +4,11 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { Store } from "./store.ts";
-import { chunkMarkdown } from "./chunk.ts";
-import type { Chunk } from "./chunk.ts";
-import { chunkHash } from "./normalize.ts";
-import { resolveEmbedder, embed } from "./embed.ts";
+import { Store } from "./store.js";
+import { chunkMarkdown } from "./chunk.js";
+import type { Chunk } from "./chunk.js";
+import { chunkHash } from "./normalize.js";
+import { resolveEmbedder, embed } from "./embed.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
 

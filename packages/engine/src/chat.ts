@@ -3,7 +3,7 @@
 // and fast and to sidestep the empty-reasoning-turn brittleness the agent-loop spike
 // surfaced. Override with CHAT_MODEL or --model.
 
-import { listModels } from "./embed.ts";
+import { listModels } from "./embed.js";
 
 const OLLAMA = process.env.OLLAMA_HOST || "http://localhost:11434";
 

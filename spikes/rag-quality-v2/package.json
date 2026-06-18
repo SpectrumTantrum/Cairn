@@ -1,0 +1,13 @@
+{
+  "name": "rag-quality-v2",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Decisive retrieval eval on BEIR (SciFact, NFCorpus): Qwen3-Embedding-0.6B (dense, symmetric + instruction) vs TF-IDF vs BM25 vs hybrid (dense+BM25+RRF). Replaces the lexically-leaky rag-quality spike.",
+  "scripts": {
+    "fetch": "node fetch-data.mjs",
+    "start": "node run.mjs",
+    "scifact": "node run.mjs scifact",
+    "nfcorpus": "node run.mjs nfcorpus"
+  }
+}
