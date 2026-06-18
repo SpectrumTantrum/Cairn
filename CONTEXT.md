@@ -47,7 +47,7 @@ A bracket of student machine capability (roughly: RAM/unified memory + GPU/Apple
 ## Storage
 
 **Index**:
-The derived store of embeddings + keyword index (sqlite-vec + FTS5 + metadata) under `.cairn/`. It is **disposable and rebuilt from the vault on demand**, and is **per-machine — never synced**. The vault is the source of truth; the index is a cache of it.
+The derived store of embeddings + keyword index (sqlite-vec + FTS5 + metadata) under `.cairn/`. It is **disposable and rebuilt from the vault on demand**, and is **per-machine — never synced**. The vault is the source of truth; the index is a cache of it. In code, the persistence seam is the `Index` interface (`SqliteIndex` in production, `InMemoryIndex` in tests).
 _Avoid_: "the database" (the vault is the real store), "the vector DB" (it holds vector + keyword + metadata together).
 
 **Re-index**:

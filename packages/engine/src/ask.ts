@@ -5,7 +5,7 @@
 
 import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
-import type { Store } from "./store.js";
+import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat } from "./chat.js";
 
 export interface AskResult {
@@ -28,12 +28,12 @@ const SYSTEM = [
 ].join("\n");
 
 export async function ask(
-  store: Store,
+  index: Index,
   question: string,
   opts: { k?: number; mode?: Mode; model?: string; coverageThreshold?: number } = {},
 ): Promise<AskResult> {
   const k = opts.k ?? 6;
-  const { hits, mode, coverage } = await search(store, question, {
+  const { hits, mode, coverage } = await search(index, question, {
     k,
     mode: opts.mode,
     coverageThreshold: opts.coverageThreshold,

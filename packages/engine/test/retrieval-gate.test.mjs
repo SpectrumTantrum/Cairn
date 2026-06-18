@@ -57,16 +57,16 @@ test("Ask refuses when lexical retrieval finds no support", async () => {
   const vault = makeVault("# Vault\n\nCairn indexes local Markdown notes with file and line citations.");
   try {
     await engine.indexVault(vault, { lexical: true });
-    const store = new engine.Store(vault);
+    const index = engine.openIndex(vault);
     try {
-      const result = await engine.ask(store, "photosynthesis enzymes", { mode: "lexical" });
+      const result = await engine.ask(index, "photosynthesis enzymes", { mode: "lexical" });
       assert.equal(result.grounded, false);
       assert.equal(result.covered, false);
       assert.equal(result.sources.length, 0);
       assert.match(result.reason, /coverage threshold/i);
       assert.match(result.answer, /don't cover/i);
     } finally {
-      store.close();
+      index.close();
     }
   } finally {
     rmSync(vault, { recursive: true, force: true });
@@ -79,16 +79,16 @@ test("Ask returns supported answers with citations when retrieval is covered", a
   );
   try {
     await engine.indexVault(vault, { lexical: true });
-    const store = new engine.Store(vault);
+    const index = engine.openIndex(vault);
     try {
-      const result = await engine.ask(store, "What does Cairn keep local?", { mode: "lexical" });
+      const result = await engine.ask(index, "What does Cairn keep local?", { mode: "lexical" });
       assert.equal(result.grounded, true);
       assert.equal(result.covered, true);
       assert.ok(result.sources.length > 0);
       assert.match(result.answer, /\[1\]/);
       assert.equal(result.model, "qwen3:4b");
     } finally {
-      store.close();
+      index.close();
     }
   } finally {
     rmSync(vault, { recursive: true, force: true });

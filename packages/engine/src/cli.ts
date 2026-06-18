@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { indexVault } from "./indexer.js";
 import { search } from "./retrieve.js";
 import { ask } from "./ask.js";
-import { Store } from "./store.js";
+import { openIndex } from "./vault-index.js";
 
 const HELP = `cairn — local-first grounded retrieval over a Markdown folder
 
@@ -83,9 +83,9 @@ async function runSearch(p: Parsed): Promise<void> {
     process.exit(1);
   }
   const k = typeof p.flags.k === "string" ? Math.max(1, parseInt(p.flags.k, 10) || 8) : 8;
-  const store = new Store(root);
-  const { hits, mode, coverage } = await search(store, query, { k, mode: p.flags.lexical ? "lexical" : "auto" });
-  store.close();
+  const index = openIndex(root);
+  const { hits, mode, coverage } = await search(index, query, { k, mode: p.flags.lexical ? "lexical" : "auto" });
+  index.close();
 
   if (hits.length === 0) {
     console.log(`No results for ${JSON.stringify(query)}  [${mode}]`);
@@ -117,10 +117,10 @@ async function runAsk(p: Parsed): Promise<void> {
   }
   const k = typeof p.flags.k === "string" ? Math.max(1, parseInt(p.flags.k, 10) || 6) : 6;
   const model = typeof p.flags.model === "string" ? p.flags.model : undefined;
-  const store = new Store(root);
+  const index = openIndex(root);
   process.stderr.write("Thinking…\n");
-  const res = await ask(store, question, { k, mode: p.flags.lexical ? "lexical" : "auto", model });
-  store.close();
+  const res = await ask(index, question, { k, mode: p.flags.lexical ? "lexical" : "auto", model });
+  index.close();
 
   console.log(`\n${res.answer}`);
   if (res.sources.length > 0) {

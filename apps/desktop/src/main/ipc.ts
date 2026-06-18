@@ -1,7 +1,7 @@
 import { dialog, ipcMain, shell } from "electron";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { ask, indexVault as runIndexVault, search, Store } from "@cairn/engine";
+import { ask, indexVault as runIndexVault, openIndex, search, type Index } from "@cairn/engine";
 
 const OLLAMA = process.env.OLLAMA_HOST || "http://localhost:11434";
 let selectedVaultPath: string | null = null;
@@ -46,10 +46,10 @@ function resolveInsideVault(vaultPath: string, file: unknown): string {
   return target;
 }
 
-function withStore<T>(vaultPath: string, fn: (store: Store) => Promise<T>): Promise<T> {
-  const store = new Store(vaultPath);
-  return fn(store).finally(() => {
-    store.close();
+function withIndex<T>(vaultPath: string, fn: (index: Index) => Promise<T>): Promise<T> {
+  const index = openIndex(vaultPath);
+  return fn(index).finally(() => {
+    index.close();
   });
 }
 
@@ -116,8 +116,8 @@ export function registerIpcHandlers(): void {
       assertIndexed(vaultPath);
       if (typeof query !== "string" || query.trim() === "") return [];
 
-      return withStore(vaultPath, async (store) => {
-        const result = await search(store, query.trim(), { mode: "auto" });
+      return withIndex(vaultPath, async (index) => {
+        const result = await search(index, query.trim(), { mode: "auto" });
         return result.hits;
       });
     });
@@ -131,7 +131,7 @@ export function registerIpcHandlers(): void {
         throw new Error("Ask needs a question.");
       }
 
-      return withStore(vaultPath, (store) => ask(store, question.trim(), { mode: "auto" }));
+      return withIndex(vaultPath, (index) => ask(index, question.trim(), { mode: "auto" }));
     });
   });
 

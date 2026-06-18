@@ -6,7 +6,7 @@
 // (dense recall) for free when a local embedder is present.
 
 import { embed, formatQueryForEmbedding, ollamaUp } from "./embed.js";
-import type { Store } from "./store.js";
+import type { Index } from "./vault-index.js";
 
 const K_RRF = 60; // G10 RRF constant
 export const DEFAULT_COVERAGE_THRESHOLD = 0.5;
@@ -55,7 +55,7 @@ export interface SearchCoverage {
 }
 
 export async function search(
-  store: Store,
+  index: Index,
   query: string,
   opts: SearchOpts = {},
 ): Promise<{ hits: SearchHit[]; mode: "hybrid" | "lexical"; coverage: SearchCoverage }> {
@@ -63,12 +63,12 @@ export async function search(
   const pool = opts.pool ?? 64;
   const threshold = opts.coverageThreshold ?? DEFAULT_COVERAGE_THRESHOLD;
   const wantHybrid = (opts.mode ?? "auto") !== "lexical";
-  const canHybrid = wantHybrid && store.hasVectors() && (await ollamaUp());
+  const canHybrid = wantHybrid && index.hasVectors() && (await ollamaUp());
 
-  const ftsIds = store.ftsArm(sanitizeForFts(query), pool).map((h) => h.id);
+  const ftsIds = index.ftsArm(sanitizeForFts(query), pool).map((h) => h.id);
 
   if (!canHybrid) {
-    const hits = ftsIds.slice(0, k).map((id) => toHit(store, id, NaN, NaN, false, true));
+    const hits = ftsIds.slice(0, k).map((id) => toHit(index, id, NaN, NaN, false, true));
     return {
       hits,
       mode: "lexical",
@@ -80,10 +80,10 @@ export async function search(
     };
   }
 
-  const embedder = opts.embedder ?? store.getMeta("embedder") ?? "";
+  const embedder = opts.embedder ?? index.getMeta("embedder") ?? "";
   const [qvec] = await embed(embedder, [formatQueryForEmbedding(embedder, query)]);
   const qbuf = Buffer.from(Float32Array.from(qvec).buffer);
-  const denseRows = store.denseArm(qbuf, pool);
+  const denseRows = index.denseArm(qbuf, pool);
   const denseIds = denseRows.map((h) => h.id);
   const denseCosines = new Map(denseRows.map((h) => [h.id, h.cosine]));
   const poolMaxCosine = denseRows.length > 0 ? Math.max(...denseRows.map((h) => h.cosine)) : Number.NEGATIVE_INFINITY;
@@ -91,7 +91,7 @@ export async function search(
   const denseSet = new Set(denseIds);
   const ftsSet = new Set(ftsIds);
   const hits = fused.map(({ id, score }) =>
-    toHit(store, id, score, denseCosines.get(id) ?? NaN, denseSet.has(id), ftsSet.has(id)),
+    toHit(index, id, score, denseCosines.get(id) ?? NaN, denseSet.has(id), ftsSet.has(id)),
   );
   return {
     hits,
@@ -104,8 +104,8 @@ export async function search(
   };
 }
 
-function toHit(store: Store, id: number, score: number, cosine: number, inDense: boolean, inFts: boolean): SearchHit {
-  const c = store.getChunk(id);
+function toHit(index: Index, id: number, score: number, cosine: number, inDense: boolean, inFts: boolean): SearchHit {
+  const c = index.getChunk(id);
   const arms = inDense && inFts ? "dense+fts" : inDense ? "dense" : "fts";
   return {
     file: c?.file ?? "?",

@@ -4,7 +4,7 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { Store } from "./store.js";
+import { openIndex } from "./vault-index.js";
 import { chunkMarkdown } from "./chunk.js";
 import type { Chunk } from "./chunk.js";
 import { chunkHash } from "./normalize.js";
@@ -48,7 +48,7 @@ export async function indexVault(
   opts: { lexical?: boolean; embedder?: string } = {},
 ): Promise<IndexStats> {
   const files = walkMarkdown(root);
-  const store = new Store(root);
+  const index = openIndex(root);
 
   // 1) Chunk every file (with provenance).
   const pending: Pending[] = [];
@@ -73,7 +73,7 @@ export async function indexVault(
 
     const missIdx: number[] = [];
     pending.forEach((p, i) => {
-      const hit = store.getCachedVec(p.hash, embedder as string, dim as number);
+      const hit = index.getCachedVec(p.hash, embedder as string, dim as number);
       if (hit) {
         vectors[i] = hit;
         cached++;
@@ -89,30 +89,30 @@ export async function indexVault(
       slice.forEach((i, j) => {
         const buf = Buffer.from(Float32Array.from(vecs[j]).buffer);
         vectors[i] = buf;
-        store.putCachedVec(pending[i].hash, embedder as string, dim as number, buf);
+        index.putCachedVec(pending[i].hash, embedder as string, dim as number, buf);
         embedded++;
       });
     }
   }
 
-  // 3) Rebuild the index in one transaction.
-  store.transaction(() => {
-    store.clearChunks();
-    if (!lexical && dim) store.resetVectors(dim);
-    pending.forEach((p, i) => {
-      const id = i + 1;
-      store.insertChunk(id, p.file, p.chunk.ordinal, p.chunk.line, p.chunk.heading, p.chunk.text, p.hash);
-      const v = vectors[i];
-      if (!lexical && v) store.insertVec(id, v);
-    });
-    store.setMeta("mode", lexical ? "lexical" : "hybrid");
-    if (embedder) store.setMeta("embedder", embedder);
-    if (dim) store.setMeta("dim", String(dim));
-    store.setMeta("files", String(files.length));
-    store.setMeta("chunks", String(pending.length));
+  index.rebuildIndex({
+    mode: lexical ? "lexical" : "hybrid",
+    embedder,
+    dim,
+    files: files.length,
+    chunks: pending.map((p, i) => ({
+      id: i + 1,
+      file: p.file,
+      ordinal: p.chunk.ordinal,
+      line: p.chunk.line,
+      heading: p.chunk.heading,
+      text: p.chunk.text,
+      hash: p.hash,
+      vector: lexical ? undefined : vectors[i],
+    })),
   });
 
-  store.close();
+  index.close();
   return {
     mode: lexical ? "lexical" : "hybrid",
     files: files.length,

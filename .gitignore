@@ -1,6 +1,9 @@
 # Dependencies (spikes are self-contained; deps are reinstallable via npm/uv)
 node_modules/
 
+# TypeScript package build output
+packages/engine/dist/
+
 # Python
 __pycache__/
 *.pyc
