@@ -112,3 +112,15 @@ Default vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root (created lazily by `/grill-with-docs`). See `docs/agents/domain.md`.
+
+## Cursor Cloud specific instructions
+
+The startup update script already runs `npm install`, patches the Linux native binaries the macOS-generated `package-lock.json` omits (`@rollup/rollup-linux-x64-gnu`, `sqlite-vec-linux-x64`), and runs Electron's `install.js` (the installed `electron` package has no `postinstall`, so its binary is not downloaded by `npm install`). You should not need to redo those. Standard build/run/test commands live under **Build / run / test (verified)** above.
+
+- **`better-sqlite3` ABI is the big gotcha.** One native `better-sqlite3` copy lives at `packages/engine/node_modules` and is shared by both runtimes (the desktop resolves it through `@cairn/engine`). By default it is built for **Node's ABI (127)**, which is what the engine `test:smoke` gate suite, the `cairn` CLI, and the desktop `npm test` all need — leave it this way for normal work.
+  - To actually **run the desktop GUI** (`npm run desktop:dev` / `desktop:build`), rebuild it for Electron's ABI (146): `npx @electron/rebuild -v 42.4.0 -f -w better-sqlite3 -m packages/engine`. Match `-v` to the installed `electron` version.
+  - This **flips the shared ABI**: after the Electron rebuild the Node-run engine tests/CLI fail with `NODE_MODULE_VERSION` mismatch until you rebuild back with `npm rebuild better-sqlite3`. You cannot have both green at once.
+  - In the desktop UI this mismatch surfaces as the masked error **"The local index could not be read. Try re-indexing this vault."** on Index — it means the ABI is wrong, not that the vault/index is corrupt.
+- **Electron runs headless** on `DISPLAY=:1`. The repeated `dbus/bus.cc ... Failed to connect to the bus` lines in the dev log are harmless. `Error: Electron uninstall` means the Electron binary wasn't downloaded (re-run `node apps/desktop/node_modules/electron/install.js`).
+- **Ollama is not installed.** Indexing/search work in **lexical-only** mode with zero external deps (the desktop's "Lexical only" checkbox auto-checks when Ollama is offline; the CLI takes `--lexical`). Hybrid embeddings and `ask` need a local Ollama server with the models pulled.
+- **Vault selection uses a native OS folder dialog** (`dialog.showOpenDialog`); for automation, type the path via the GTK chooser's Ctrl+L location bar. The index persists to `<vault>/.cairn/index.db`.
