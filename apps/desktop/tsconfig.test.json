@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "verbatimModuleSyntax": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "out-test",
+    "rootDir": "src/main",
+    "types": ["node"]
+  },
+  "include": ["src/main/vault-session.ts"]
+}

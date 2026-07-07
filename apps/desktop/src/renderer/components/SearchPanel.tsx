@@ -1,7 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
-
-type SearchHit = Awaited<ReturnType<typeof window.cairn.searchVault>>[number];
+import type { SearchHit } from "../../shared/types.js";
 
 interface SearchPanelProps {
   busy: boolean;

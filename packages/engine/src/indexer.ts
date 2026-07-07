@@ -1,10 +1,9 @@
-// Index a folder of Markdown: walk -> chunk (with provenance) -> embed (cache-aware)
-// -> store. A full rebuild each run, but the content-addressed embedding cache means an
-// edit only re-embeds the chunks that actually changed (the chunk-cache-ts result).
+// Re-index pipeline: discover → chunk → embed (cache-aware) → persist.
+// indexVault composes these steps; each is testable in isolation.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { openIndex } from "./vault-index.js";
+import { openIndex, type Index } from "./vault-index.js";
 import { chunkMarkdown } from "./chunk.js";
 import type { Chunk } from "./chunk.js";
 import { chunkHash } from "./normalize.js";
@@ -12,7 +11,31 @@ import { resolveEmbedder, embed } from "./embed.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
 
-function walkMarkdown(root: string): string[] {
+export interface IndexStats {
+  mode: "hybrid" | "lexical";
+  files: number;
+  chunks: number;
+  embedded: number;
+  cached: number;
+  embedder?: string;
+  dim?: number;
+}
+
+export interface PendingChunk {
+  file: string;
+  chunk: Chunk;
+  hash: string;
+}
+
+export interface EmbedChunksResult {
+  vectors: (Buffer | null)[];
+  embedder?: string;
+  dim?: number;
+  embedded: number;
+  cached: number;
+}
+
+export function discoverMarkdownFiles(root: string): string[] {
   const out: string[] = [];
   const rec = (dir: string): void => {
     for (const name of readdirSync(dir)) {
@@ -27,38 +50,22 @@ function walkMarkdown(root: string): string[] {
   return out;
 }
 
-export interface IndexStats {
-  mode: "hybrid" | "lexical";
-  files: number;
-  chunks: number;
-  embedded: number; // freshly embedded (cache misses)
-  cached: number; // reused from the embedding cache (hits)
-  embedder?: string;
-  dim?: number;
-}
-
-interface Pending {
-  file: string;
-  chunk: Chunk;
-  hash: string;
-}
-
-export async function indexVault(
-  root: string,
-  opts: { lexical?: boolean; embedder?: string } = {},
-): Promise<IndexStats> {
-  const files = walkMarkdown(root);
-  const index = openIndex(root);
-
-  // 1) Chunk every file (with provenance).
-  const pending: Pending[] = [];
+export async function chunkVaultFiles(root: string, files: string[]): Promise<PendingChunk[]> {
+  const pending: PendingChunk[] = [];
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join("/");
     const text = readFileSync(abs, "utf8");
     const chunks = await chunkMarkdown(text);
     for (const ch of chunks) pending.push({ file: rel, chunk: ch, hash: chunkHash(ch.text) });
   }
+  return pending;
+}
 
+export async function embedPendingChunks(
+  index: Index,
+  pending: PendingChunk[],
+  opts: { lexical?: boolean; embedder?: string } = {},
+): Promise<EmbedChunksResult> {
   const lexical = !!opts.lexical;
   const vectors: (Buffer | null)[] = pending.map(() => null);
   let embedder: string | undefined;
@@ -66,7 +73,6 @@ export async function indexVault(
   let embedded = 0;
   let cached = 0;
 
-  // 2) Embed (hybrid only), reusing cached vectors where the chunk hash is unchanged.
   if (!lexical && pending.length > 0) {
     embedder = await resolveEmbedder(opts.embedder);
     dim = (await embed(embedder, ["cairn dimension probe"]))[0].length;
@@ -95,11 +101,26 @@ export async function indexVault(
     }
   }
 
+  return { vectors, embedder, dim, embedded, cached };
+}
+
+export function persistVaultIndex(
+  index: Index,
+  pending: PendingChunk[],
+  vectors: (Buffer | null)[],
+  opts: {
+    lexical: boolean;
+    embedder?: string;
+    dim?: number;
+    files: number;
+  },
+): void {
+  const lexical = opts.lexical;
   index.rebuildIndex({
     mode: lexical ? "lexical" : "hybrid",
-    embedder,
-    dim,
-    files: files.length,
+    embedder: opts.embedder,
+    dim: opts.dim,
+    files: opts.files,
     chunks: pending.map((p, i) => ({
       id: i + 1,
       file: p.file,
@@ -111,15 +132,31 @@ export async function indexVault(
       vector: lexical ? undefined : vectors[i],
     })),
   });
+}
 
+export async function indexVault(
+  root: string,
+  opts: { lexical?: boolean; embedder?: string } = {},
+): Promise<IndexStats> {
+  const files = discoverMarkdownFiles(root);
+  const index = openIndex(root);
+  const pending = await chunkVaultFiles(root, files);
+  const embedResult = await embedPendingChunks(index, pending, opts);
+  persistVaultIndex(index, pending, embedResult.vectors, {
+    lexical: !!opts.lexical,
+    embedder: embedResult.embedder,
+    dim: embedResult.dim,
+    files: files.length,
+  });
   index.close();
+
   return {
-    mode: lexical ? "lexical" : "hybrid",
+    mode: opts.lexical ? "lexical" : "hybrid",
     files: files.length,
     chunks: pending.length,
-    embedded,
-    cached,
-    embedder,
-    dim,
+    embedded: embedResult.embedded,
+    cached: embedResult.cached,
+    embedder: embedResult.embedder,
+    dim: embedResult.dim,
   };
 }

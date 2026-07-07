@@ -4,18 +4,43 @@ This file provides guidance to Codex (Codex.ai/code) and Claude Code (claude.ai/
 
 ## What this repository is
 
-A **spec-first feasibility workspace**, not an application codebase. There is **no app source code yet** — do not look for `src/`, a build, or an app to run. It contains the planning and validation artifacts for two unbuilt, local-first products:
+A **real, in-progress codebase plus its planning/feasibility artifacts** — one local-first, privacy-first product: **Cairn**, an agentic knowledge-management tool (NotebookLM + Cursor + Obsidian fusion; see `CONTEXT.md`). The desktop alpha has landed; there is app source code — do look for it.
 
-- **Cairn** (`PRD-cairn.md`) — a local-first AI study companion: Obsidian-style markdown vault + agentic editing + grounded NotebookLM-style "Studio" outputs + first-class PDF annotation. Target stack: **Electron + React + TypeScript**.
-- **Mneme** (`PRD-Mneme-Local-Document-Indexing.md`) — a fully-local, **Python**, retrieval-only document indexer that ports Cursor's incremental-indexing machinery (Merkle change detection + chunk-content-hash embedding cache) to heterogeneous documents (PDF/DOCX/HTML/MD/…).
+- **`packages/engine`** (`@cairn/engine`) — the headless, in-process TypeScript indexing & retrieval engine (aka **Mneme**, now an internal module of Cairn, not a separate product). Grounded, cited **hybrid search** (dense **sqlite-vec** brute-force KNN + **FTS5** keyword, fused with **RRF**) over a Markdown vault, plus a `cairn` CLI (`index` / `search` / `ask`). Embeddings via a local **Ollama** `ModelProvider` seam. `src/` is real; `Index` (persistence) and `ModelProvider` (transport) are the seams.
+- **`apps/desktop`** (`@cairn/desktop`) — the **Electron + React + TypeScript** desktop alpha wrapping the engine: index / search / ask panels + a source viewer. `VaultSession` (main process) owns vault path policy, the indexed guard, and engine orchestration.
+- **Planning/feasibility artifacts** — `PRD-cairn.md`, `PRD-Mneme-Local-Document-Indexing.md`, the two `*-feasibility-report.md`, `docs/` (scope, ADRs, specs), `CONTEXT.md`, and `spikes/`.
 
-The two relate: **Mneme is effectively the local RAG/indexing layer that Cairn's §6 pipeline needs.** They share the same north star — local-first, no cloud/telemetry, Ollama (local) + BYOK as swappable model providers, citations that jump to the exact source, and a **permissive-license-only** policy. The PRDs do not formally couple them; treat shared findings (embeddings, hybrid retrieval, LanceDB/sqlite-vec, citation anchoring) as transferable.
+Note: the standalone **Python Mneme** product described in `PRD-Mneme-Local-Document-Indexing.md` was **superseded** — per `CONTEXT.md` it is now Cairn's internal engine/indexing layer (implemented in-process in `@cairn/engine`; a Python ingestion *sidecar* is planned for multi-format parsing, see ADR-0009). The Mneme feasibility corrections below still bind that layer.
 
-Git repo: **github.com/SpectrumTantrum/Cairn** (public, `main`). The PRDs and feasibility reports are the source of truth — there is no app code to consult yet.
+Git repo: **github.com/SpectrumTantrum/Cairn** (public, `main`).
+
+### Doc authority (read before implementing)
+
+`docs/v1-scope.md` + `docs/adr/` (ADRs **0001–0010**, including 0009 multi-format ingestion and 0010 the three-pane UI shell) **supersede the PRDs** for scope and technical decisions. `CONTEXT.md` + `docs/adr/` are the decision log / glossary. Precedence: **`docs/mvp-scope.md` overrides `docs/v1-scope.md` for the desktop alpha**; where any doc disagrees with the PRDs on *scope*, the scope doc wins; on *technical claims*, the feasibility reports + ADRs win.
+
+### Build / run / test (verified)
+
+Node ≥ 20, npm workspaces from repo root.
+
+```bash
+# Engine (@cairn/engine) — build + gate suite (compiles, then runs all node --test .mjs gates)
+cd packages/engine && npm run test:smoke   # build + retrieval-gate/index-search/model-provider/retrieve/ask-coverage/reindex-pipeline
+npm run build --workspace @cairn/engine     # tsc → dist/ (also `npm run engine:build` from root)
+node packages/engine/dist/cli.js ask "…" --in ./notes   # CLI after build (index | search | ask)
+
+# Desktop (@cairn/desktop) — build engine, typecheck test config, run VaultSession tests
+cd apps/desktop && npm test                 # prepare:engine + tsc -p tsconfig.test.json + node --test test/vault-session.test.mjs
+npm run desktop:dev                          # from root: electron-vite dev (builds engine first)
+
+# From root: typecheck / build across all workspaces
+npm run typecheck && npm run build
+```
+
+The engine gate suite is fully self-contained (fake `ModelProvider` + `InMemoryIndex`) — **no Ollama needed** to run it. Ollama is only required to actually embed against a real model at runtime.
 
 ## The reports override the PRDs (read this before implementing anything)
 
-Each PRD was put through a skeptical feasibility review with spikes. **`cairn-feasibility-report.md`** and **`mneme-feasibility-report.md`** are authoritative: they contain corrections that contradict specific claims in the PRDs. If you implement from the raw PRD you will rebuild disproven assumptions. Read the report's *Verdict*, *Assumptions table*, *Spike findings*, and *Revised recommendation* first.
+Each PRD was put through a skeptical feasibility review with spikes. **`cairn-feasibility-report.md`** and **`mneme-feasibility-report.md`** are authoritative: they contain corrections that contradict specific claims in the PRDs. If you implement from the raw PRD you will rebuild disproven assumptions. Read the report's *Verdict*, *Assumptions table*, *Spike findings*, and *Revised recommendation* first. (The Mneme corrections still bind Cairn's internal engine/indexing layer even though the standalone Python product was folded in.)
 
 Binding corrections that are easy to get wrong:
 
@@ -32,7 +57,7 @@ Binding corrections that are easy to get wrong:
 
 ## Permissive-license-only policy (hard constraint, load-bearing)
 
-Both products allow **only MIT / Apache-2.0 / BSD / MPL** dependencies. **AGPL/GPL is a blocker.** This is not theoretical — these specific traps recur and each has a vetted permissive escape:
+Cairn (engine + desktop) allows **only MIT / Apache-2.0 / BSD / MPL** dependencies. **AGPL/GPL is a blocker.** This is not theoretical — these specific traps recur and each has a vetted permissive escape:
 
 | Capability | AGPL/GPL trap | Permissive replacement |
 |---|---|---|
@@ -42,9 +67,9 @@ Both products allow **only MIT / Apache-2.0 / BSD / MPL** dependencies. **AGPL/G
 
 When adding any dependency, confirm its license before use; flag AGPL/GPL and propose the permissive substitute.
 
-## Spikes — the only runnable code here
+## Spikes
 
-`spikes/` holds throwaway proofs-of-concept that validated (or broke) the riskiest assumptions. Their conclusions are folded into the reports and the `*-findings.md` / `SPIKE-FINDINGS.md` notes; the code is kept for reproducibility. To re-run:
+`spikes/` holds throwaway proofs-of-concept (separate from the shipped engine/desktop code) that validated (or broke) the riskiest assumptions. Their conclusions are folded into the reports and the `*-findings.md` / `SPIKE-FINDINGS.md` notes; the code is kept for reproducibility. To re-run:
 
 ```bash
 # sqlite-vec brute-force-vs-ANN + scaling (Node)
@@ -71,7 +96,7 @@ Ollama-dependent spikes need a local server (`ollama serve` on `localhost:11434`
 - **Python: use `uv`, never `pip`.** One-off scripts: `uv run --with <pkg> python …` (ephemeral). This is why the Python spikes have no `requirements.txt` / venv.
 - Node spikes are self-contained (`package.json` per spike dir); run `npm install` in the dir first.
 - Local-first is a product invariant: no telemetry, no network calls except user-configured model endpoints (Ollama on localhost, or BYOK cloud APIs). "Zero outbound" holds at steady state but not at first-run model downloads — keep that distinction when reasoning about the privacy claims.
-- For the first desktop GUI alpha, `docs/mvp-scope.md` overrides `docs/v1-scope.md`; do not implement full v1 scope unless a later issue explicitly reopens it.
+- Scope precedence lives under **Doc authority** above: `docs/mvp-scope.md` overrides `docs/v1-scope.md` for the desktop alpha — do not implement full v1 scope unless a later issue explicitly reopens it.
 - `.remember/` holds session-continuity notes (not product content).
 
 ## Agent skills

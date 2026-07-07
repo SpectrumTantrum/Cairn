@@ -5,7 +5,8 @@
 // degrades to keyword-only — so the CLI is usable with zero model setup and gets better
 // (dense recall) for free when a local embedder is present.
 
-import { embed, formatQueryForEmbedding, ollamaUp } from "./embed.js";
+import { embed, formatQueryForEmbedding } from "./embed.js";
+import { getModelProvider } from "./model-provider.js";
 import type { Index } from "./vault-index.js";
 
 const K_RRF = 60; // G10 RRF constant
@@ -63,7 +64,7 @@ export async function search(
   const pool = opts.pool ?? 64;
   const threshold = opts.coverageThreshold ?? DEFAULT_COVERAGE_THRESHOLD;
   const wantHybrid = (opts.mode ?? "auto") !== "lexical";
-  const canHybrid = wantHybrid && index.hasVectors() && (await ollamaUp());
+  const canHybrid = wantHybrid && index.hasVectors() && (await getModelProvider().isReachable());
 
   const ftsIds = index.ftsArm(sanitizeForFts(query), pool).map((h) => h.id);
 

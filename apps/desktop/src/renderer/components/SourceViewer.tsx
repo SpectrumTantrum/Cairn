@@ -1,4 +1,4 @@
-type SearchHit = Awaited<ReturnType<typeof window.cairn.searchVault>>[number];
+import type { SearchHit } from "../../shared/types.js";
 
 interface SourceViewerProps {
   source: SearchHit | null;
@@ -16,7 +16,7 @@ export function SourceViewer({
       <div className="panel-heading">
         <div>
           <p className="label">Source</p>
-          <h2>Jump target</h2>
+          <h2>Cited chunk</h2>
         </div>
         {source ? (
           <button
@@ -25,7 +25,7 @@ export function SourceViewer({
             disabled={disabled}
             onClick={() => onOpenSource(source)}
           >
-            Open
+            Open file
           </button>
         ) : null}
       </div>
@@ -37,6 +37,7 @@ export function SourceViewer({
             <span>line {source.line}</span>
             {source.heading ? <span>{source.heading}</span> : null}
           </div>
+          <p className="muted source-hint">Opens the note in your default app. In-app anchor jump is not available yet.</p>
           <pre>{source.text}</pre>
         </>
       ) : (

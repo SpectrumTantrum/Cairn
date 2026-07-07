@@ -1,57 +1,8 @@
 import { dialog, ipcMain, shell } from "electron";
-import { existsSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
-import { ask, indexVault as runIndexVault, openIndex, search, type Index } from "@cairn/engine";
+import { getModelProvider } from "@cairn/engine";
+import { createVaultSession } from "./vault-session.js";
 
-const OLLAMA = process.env.OLLAMA_HOST || "http://localhost:11434";
-let selectedVaultPath: string | null = null;
-
-function normalizeVaultPath(input: unknown): string {
-  if (typeof input !== "string" || input.trim() === "") {
-    throw new Error("Choose a vault folder first.");
-  }
-  const vaultPath = resolve(input);
-  if (!existsSync(vaultPath) || !statSync(vaultPath).isDirectory()) {
-    throw new Error("The selected vault folder no longer exists.");
-  }
-  return realpathSync.native(vaultPath);
-}
-
-function assertSelectedVaultPath(input: unknown): string {
-  const vaultPath = normalizeVaultPath(input);
-  if (!selectedVaultPath) {
-    throw new Error("Choose a vault folder first.");
-  }
-  if (vaultPath !== selectedVaultPath) {
-    throw new Error("The requested vault is not the selected vault.");
-  }
-  return vaultPath;
-}
-
-function assertIndexed(vaultPath: string): void {
-  if (!existsSync(join(vaultPath, ".cairn", "index.db"))) {
-    throw new Error("Index this vault before searching or asking.");
-  }
-}
-
-function resolveInsideVault(vaultPath: string, file: unknown): string {
-  if (typeof file !== "string" || file.trim() === "") {
-    throw new Error("No source file was provided.");
-  }
-  const target = resolve(vaultPath, file);
-  const rel = relative(vaultPath, target);
-  if (rel.startsWith("..") || rel === "" || isAbsolute(rel)) {
-    throw new Error("Refusing to open a path outside the selected vault.");
-  }
-  return target;
-}
-
-function withIndex<T>(vaultPath: string, fn: (index: Index) => Promise<T>): Promise<T> {
-  const index = openIndex(vaultPath);
-  return fn(index).finally(() => {
-    index.close();
-  });
-}
+const session = createVaultSession();
 
 const USER_ERROR_PREFIXES = [
   "Choose",
@@ -94,51 +45,42 @@ export function registerIpcHandlers(): void {
       });
 
       if (result.canceled || !result.filePaths[0]) return null;
-      selectedVaultPath = normalizeVaultPath(result.filePaths[0]);
-      return selectedVaultPath;
+      return session.setVault(result.filePaths[0]);
     });
   });
 
-  ipcMain.handle("vault:index", async (_event, path: unknown, opts: unknown) => {
+  ipcMain.handle("vault:index", async (_event, opts: unknown) => {
     return handleUserErrors(() => {
-      const vaultPath = assertSelectedVaultPath(path);
       const lexical = typeof opts === "object" && opts !== null && "lexical" in opts
         ? Boolean((opts as { lexical?: unknown }).lexical)
         : false;
 
-      return runIndexVault(vaultPath, { lexical });
+      return session.index({ lexical });
     });
   });
 
-  ipcMain.handle("vault:search", async (_event, path: unknown, query: unknown) => {
+  ipcMain.handle("vault:search", async (_event, query: unknown) => {
     return handleUserErrors(() => {
-      const vaultPath = assertSelectedVaultPath(path);
-      assertIndexed(vaultPath);
-      if (typeof query !== "string" || query.trim() === "") return [];
-
-      return withIndex(vaultPath, async (index) => {
-        const result = await search(index, query.trim(), { mode: "auto" });
-        return result.hits;
-      });
+      if (typeof query !== "string") return [];
+      return session.search(query);
     });
   });
 
-  ipcMain.handle("vault:ask", async (_event, path: unknown, question: unknown) => {
+  ipcMain.handle("vault:ask", async (_event, question: unknown) => {
     return handleUserErrors(() => {
-      const vaultPath = assertSelectedVaultPath(path);
-      assertIndexed(vaultPath);
-      if (typeof question !== "string" || question.trim() === "") {
+      if (typeof question !== "string") {
         throw new Error("Ask needs a question.");
       }
-
-      return withIndex(vaultPath, (index) => ask(index, question.trim(), { mode: "auto" }));
+      return session.ask(question);
     });
   });
 
-  ipcMain.handle("source:open", async (_event, path: unknown, file: unknown) => {
+  ipcMain.handle("source:open", async (_event, file: unknown) => {
     return handleUserErrors(async () => {
-      const vaultPath = assertSelectedVaultPath(path);
-      const sourcePath = resolveInsideVault(vaultPath, file);
+      if (typeof file !== "string") {
+        throw new Error("No source file was provided.");
+      }
+      const sourcePath = session.resolveSourcePath(file);
       const message = await shell.openPath(sourcePath);
       if (message) throw new Error(message);
     });
@@ -146,10 +88,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("ollama:check", async () => {
     try {
-      const response = await fetch(`${OLLAMA}/api/tags`);
-      if (!response.ok) return { up: false, models: [] };
-      const body = (await response.json()) as { models?: { name: string }[] };
-      return { up: true, models: (body.models ?? []).map((model) => model.name) };
+      const provider = getModelProvider();
+      const up = await provider.isReachable();
+      if (!up) return { up: false, models: [] };
+      return { up: true, models: await provider.listModels() };
     } catch {
       return { up: false, models: [] };
     }

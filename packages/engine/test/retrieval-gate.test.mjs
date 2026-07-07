@@ -5,13 +5,9 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 
 let engine;
-let originalFetch;
-
-function jsonResponse(body) {
-  return new Response(JSON.stringify(body), {
-    headers: { "content-type": "application/json" },
-  });
-}
+let setModelProvider;
+let resetModelProvider;
+let FakeModelProvider;
 
 function makeVault(markdown) {
   const dir = mkdtempSync(join(tmpdir(), "cairn-engine-smoke-"));
@@ -20,26 +16,17 @@ function makeVault(markdown) {
 }
 
 before(async () => {
-  originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    const pathname = new URL(String(url)).pathname;
-    if (pathname === "/api/tags") {
-      return jsonResponse({ models: [{ name: "qwen3:4b" }] });
-    }
-    if (pathname === "/api/chat") {
-      return jsonResponse({
-        message: {
-          content: "Cairn keeps Markdown vaults local and cites source lines [1].",
-        },
-      });
-    }
-    return new Response("not found", { status: 404 });
-  };
   engine = await import("../dist/index.js");
+  const testing = await import("../dist/testing.js");
+  setModelProvider = engine.setModelProvider;
+  resetModelProvider = engine.resetModelProvider;
+  FakeModelProvider = testing.FakeModelProvider;
+
+  setModelProvider(new FakeModelProvider({ models: ["qwen3:4b"] }));
 });
 
 after(() => {
-  globalThis.fetch = originalFetch;
+  resetModelProvider();
 });
 
 test("Qwen3 query embeddings use the asymmetric instruction prefix", async () => {

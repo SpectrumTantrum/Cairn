@@ -3,42 +3,33 @@ import { after, before, test } from "node:test";
 
 let search;
 let InMemoryIndex;
-let originalFetch;
+let setModelProvider;
+let resetModelProvider;
+let FakeModelProvider;
 
 function vecBuf(values) {
   return Buffer.from(Float32Array.from(values).buffer);
 }
 
-function jsonResponse(body) {
-  return new Response(JSON.stringify(body), {
-    headers: { "content-type": "application/json" },
-  });
-}
-
 before(async () => {
-  originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    const pathname = new URL(String(url)).pathname;
-    if (pathname === "/api/tags") {
-      return jsonResponse({ models: [{ name: "test-embedder" }] });
-    }
-    if (pathname === "/api/embed") {
-      const body = JSON.parse(String(init?.body ?? "{}"));
-      const dim = 4;
-      const vector = [1, 0, 0, 0];
-      const embeddings = (body.input ?? []).map(() => vector);
-      return jsonResponse({ embeddings });
-    }
-    return new Response("not found", { status: 404 });
-  };
-
   const engine = await import("../dist/index.js");
+  const testing = await import("../dist/testing.js");
   search = engine.search;
-  ({ InMemoryIndex } = await import("../dist/testing.js"));
+  setModelProvider = engine.setModelProvider;
+  resetModelProvider = engine.resetModelProvider;
+  InMemoryIndex = testing.InMemoryIndex;
+  FakeModelProvider = testing.FakeModelProvider;
+
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["test-embedder"],
+      embed: (_model, input) => Promise.resolve(input.map(() => [1, 0, 0, 0])),
+    }),
+  );
 });
 
 after(() => {
-  globalThis.fetch = originalFetch;
+  resetModelProvider();
 });
 
 test("hybrid search fuses dense and lexical arms through the Index interface", async () => {

@@ -67,6 +67,11 @@ The first desktop alpha is not a full editor. A read-only Markdown source pane
 is enough for MVP, as long as search and Ask citations can jump to the cited
 file and line.
 
+The three-pane shell redesign (Obsidian-style vault rail + CodeMirror 6 editor +
+Cursor-style agent sidebar) is **v1 direction, not the alpha** — see `docs/adr/0010`.
+Do not rebuild this panel-based alpha UI into that shell; the alpha stays panel-based
+(Search / Ask / Index).
+
 ## Must Not Ship
 
 - PDF.
@@ -77,6 +82,7 @@ file and line.
 - Cloud/BYOK.
 - Windows/Linux packaging.
 - TTS/audio.
+- Multi-format / AV ingestion (DOCX, PPTX, HTML, EPUB, audio, video) — v1, not the alpha (ADR-0009).
 - Full onboarding polish.
 
 ## Agent Guidance
@@ -84,4 +90,5 @@ file and line.
 Agents must prefer this MVP scope over `docs/v1-scope.md` for first desktop
 GUI alpha work. Do not use the full 12-24 month product vision to justify
 adding PDF support, graph work, editor/write modes, Agent, Studio, cloud/BYOK,
-TTS/audio, or non-macOS packaging to the alpha.
+TTS/audio, multi-format/AV ingestion (ADR-0009), or non-macOS packaging to the
+alpha.

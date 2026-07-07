@@ -10,6 +10,7 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 
 **Vault & editing**
 - Obsidian-compatible plain-Markdown vault; CodeMirror editor; `[[wikilinks]]` + backlinks; tags
+- **Three-pane desktop shell (ADR-0010):** left rail = Obsidian-style vault navigation (file tree + backlinks/outline); center = CodeMirror 6 Markdown editor (MIT), polymorphic by node type (PDF → viewer, AV → player); right rail = Cursor-style agent sidebar. Agent edits render as **inline per-hunk accept/reject diffs in the editor** (ADR-0008), not in chat; citation click-through opens the anchor target in the center pane (ADR-0009). *v1 direction — the desktop alpha stays panel-based per `docs/mvp-scope.md`.*
 - Heterogeneous **graph** over typed nodes — `note`, `pdf`, `flashcard` — all plain files, edges = wikilinks (ADR-0003)
 - git auto-snapshots (isomorphic-git)
 
@@ -18,6 +19,14 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 - **Hybrid search ON by default** (dense + FTS5 keyword + RRF) — *pending validation spike*
 - Citations: markdown → heading/line; PDF → page + region flash
 - Default embedder Qwen3-Embedding-0.6B (1024-dim), app-wide, switchable → re-index
+
+**Sources & multi-format ingestion (ADR-0009)**
+- **Index & cite everything; edit only Markdown** (+ PDF annotations). Non-Markdown files are read-only sources — parsed, chunked, indexed, citable, never edit targets
+- Document sources — **PDF, DOCX, PPTX, HTML, EPUB** — parsed to typed blocks via **Docling (MIT)**, chunked *from blocks* (not lossy Markdown export), through the existing chunk→embed→index path
+- **Audio & video** transcribed locally via **whisper.cpp (MIT)**; the transcript is the indexable text; citations are **timestamps that seek a player** (**video is in v1** — supersedes the deferral below)
+- Images / scanned PDFs → OCR tier (ADR-0004)
+- Ingestion runs in a **bundled Python sidecar** (Docling + whisper) spawned by Electron main, parsing only; heavy models fetched on first run, not bundled
+- **Ship-gate:** a format ships only when citation click-through jumps to the exact source (char offset / page + bbox / timestamp)
 
 **PDF**
 - pdf.js viewer; **text highlights** (5 colors) + margin notes + **area/rectangle annotations** (diagrams); sidecar JSON keyed by PDF content hash; `[[pdf:]]` links; extract-annotations-to-note; selection → Explain
@@ -28,6 +37,7 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 - First-run hardware detection + model recommendation; runtime-updatable model manifest
 
 **Modes** (one agent loop, six configs; write-modes share: diff-preview + per-step approval + git snapshot + revert)
+- **UI surfacing (ADR-0010):** the agent-sidebar mode picker exposes two top-level modes by *trust level* — **Ask** (read-only, grounded, cited) and **Agent** (write, tool loop). The specialized verbs below (Synthesize, Recall, Plan, Explain) are presets/slash-commands *within* those two modes, not sibling top-level modes. This verbs-as-presets mapping is the soft part of ADR-0010 (amendable without re-litigating the shell).
 - Read: **Ask** (grounded Q&A, cites every claim), **Explain** (grounded, cited walk-through of a concept from your sources — replaces the PRD's Socratic "Tutor"; no hint-ladder/fixation scaffolding)
 - Write: **Synthesize** (prompt-driven sources + confirm), **Recall** (flashcards), **Plan** (writes plan → optional "Run this plan" hands steps to Agent), **Agent** (full autonomous loop)
 - **User-editable** mode JSON in `.cairn/modes/`, **behind a validation layer** — a custom mode cannot silently widen tool access or file-scope; the per-step approval gate stays the backstop
@@ -39,8 +49,8 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 **Platform:** macOS-first (code stays portable; Windows/Linux is a later packaging + QA effort, not a rewrite)
 
 ## Deferred (genuinely post-v1)
-- Tier-2 audio (Audio Overview / TTS)
-- Video nodes (need a transcription pipeline)
+- Tier-2 audio **output** (Audio Overview / TTS generation) — note: audio *ingestion / transcription* is **in v1** (ADR-0009)
+- ~~Video nodes (need a transcription pipeline)~~ — **superseded by ADR-0009 (2026-07-07):** AV ingestion (audio + video) with timestamp citations is now in v1 (see *Sources & multi-format ingestion* above)
 - Windows/Linux packaging
 - Burned-in annotated-PDF export
 

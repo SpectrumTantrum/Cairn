@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-
-type IndexStats = Awaited<ReturnType<typeof window.cairn.indexVault>>;
-type OllamaStatus = Awaited<ReturnType<typeof window.cairn.checkOllama>>;
+import type { IndexStats, OllamaStatus } from "../../shared/types.js";
 
 interface IndexPanelProps {
   busy: boolean;

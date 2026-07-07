@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import type { AskResult, IndexStats, OllamaStatus, SearchHit } from "../shared/types.js";
 import { AskPanel } from "./components/AskPanel";
 import { IndexPanel } from "./components/IndexPanel";
 import { SearchPanel } from "./components/SearchPanel";
 import { SourceViewer } from "./components/SourceViewer";
 import { VaultPicker } from "./components/VaultPicker";
-
-type IndexStats = Awaited<ReturnType<typeof window.cairn.indexVault>>;
-type SearchHit = Awaited<ReturnType<typeof window.cairn.searchVault>>[number];
-type AskResult = Awaited<ReturnType<typeof window.cairn.askVault>>;
-type OllamaStatus = Awaited<ReturnType<typeof window.cairn.checkOllama>>;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -52,7 +48,7 @@ export function App() {
     setBusy("index");
     setError(null);
     try {
-      const stats = await window.cairn.indexVault(vaultPath, { lexical });
+      const stats = await window.cairn.indexVault({ lexical });
       setIndexStats(stats);
       setHits([]);
       setSearchSubmitted(false);
@@ -71,7 +67,7 @@ export function App() {
     setError(null);
     setSearchSubmitted(true);
     try {
-      const results = await window.cairn.searchVault(vaultPath, query);
+      const results = await window.cairn.searchVault(query);
       setHits(results);
       setSelectedSource(results[0] ?? null);
     } catch (err) {
@@ -86,7 +82,7 @@ export function App() {
     setBusy("ask");
     setError(null);
     try {
-      const result = await window.cairn.askVault(vaultPath, question);
+      const result = await window.cairn.askVault(question);
       setAskResult(result);
       setSelectedSource((current) => result.sources[0] ?? current);
     } catch (err) {
@@ -100,7 +96,7 @@ export function App() {
     if (!vaultPath) return;
     setError(null);
     try {
-      await window.cairn.openSource(vaultPath, hit.file, hit.line);
+      await window.cairn.openSource(hit.file);
     } catch (err) {
       setError(errorMessage(err));
     }
