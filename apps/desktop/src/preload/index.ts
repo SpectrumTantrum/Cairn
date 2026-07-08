@@ -1,8 +1,26 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { AskResult, ChatSendResult, IndexStats, SearchHit } from "@cairn/engine";
-import type { ChatSendPayload, ChatTokenEvent, OllamaStatus, TreeNode } from "../shared/types.js";
+import type {
+  AgentApplyResult,
+  AgentStartResult,
+  ChatSendPayload,
+  ChatTokenEvent,
+  OllamaStatus,
+  TreeNode,
+} from "../shared/types.js";
 
-export type { AskResult, ChatSendPayload, ChatSendResult, ChatTokenEvent, IndexStats, OllamaStatus, SearchHit, TreeNode };
+export type {
+  AgentApplyResult,
+  AgentStartResult,
+  AskResult,
+  ChatSendPayload,
+  ChatSendResult,
+  ChatTokenEvent,
+  IndexStats,
+  OllamaStatus,
+  SearchHit,
+  TreeNode,
+};
 
 export interface CairnApi {
   selectVault(): Promise<string | null>;
@@ -20,6 +38,14 @@ export interface CairnApi {
   readSource(file: string): Promise<string>;
   writeSource(file: string, content: string): Promise<void>;
   checkOllama(): Promise<OllamaStatus>;
+  /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
+  agentStart(payload: { goal: string; model?: string; scope?: string[] }): Promise<AgentStartResult>;
+  /** Approve one proposed edit — the per-hunk gate; the only path to disk. */
+  agentApply(runId: string, proposalId: string): Promise<AgentApplyResult>;
+  /** Reject one proposed edit — records the decision; no disk change. */
+  agentReject(runId: string, proposalId: string): Promise<AgentApplyResult>;
+  /** Revert the whole run to its checkpoint, byte-identical. */
+  agentRevert(runId: string): Promise<{ reverted: boolean }>;
 }
 
 // Allow-list of the only channels the renderer may subscribe to. Keeps the
@@ -48,6 +74,10 @@ const api: CairnApi = {
   readSource: (file) => ipcRenderer.invoke("source:read", file),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
+  agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
+  agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
+  agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),
+  agentRevert: (runId) => ipcRenderer.invoke("agent:revert", { runId }),
 };
 
 contextBridge.exposeInMainWorld("cairn", api);

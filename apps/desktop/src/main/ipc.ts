@@ -14,6 +14,11 @@ const USER_ERROR_PREFIXES = [
   "The selected vault",
   "The source file",
   "Ask needs",
+  "Agent needs",
+  "Agent mode needs",
+  "This agent run",
+  "That proposed edit",
+  "Revert is unsafe",
 ];
 
 function toUserError(error: unknown): Error {
@@ -160,6 +165,56 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("vault:listTree", async () => {
     return handleUserErrors(() => session.listTree());
+  });
+
+  // ---- Agent write-loop (ADR-0008) ------------------------------------------
+  // start collects proposals (no writes); apply is the per-hunk approval gate (the
+  // only path to disk); revert undoes the whole run byte-identically.
+  ipcMain.handle("agent:start", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const goal = typeof p.goal === "string" ? p.goal : "";
+      if (!goal.trim()) {
+        throw new Error("Agent needs a task to work on.");
+      }
+      const model = typeof p.model === "string" ? p.model : undefined;
+      return session.agentStart(goal, { model, scope: asScope(p.scope) });
+    });
+  });
+
+  ipcMain.handle("agent:apply", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const runId = typeof p.runId === "string" ? p.runId : "";
+      const proposalId = typeof p.proposalId === "string" ? p.proposalId : "";
+      if (!runId || !proposalId) {
+        throw new Error("Refusing to apply an edit without a run and proposal id.");
+      }
+      return session.agentApplyHunk(runId, proposalId);
+    });
+  });
+
+  ipcMain.handle("agent:reject", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const runId = typeof p.runId === "string" ? p.runId : "";
+      const proposalId = typeof p.proposalId === "string" ? p.proposalId : "";
+      if (!runId || !proposalId) {
+        throw new Error("Refusing to resolve an edit without a run and proposal id.");
+      }
+      return session.agentRejectHunk(runId, proposalId);
+    });
+  });
+
+  ipcMain.handle("agent:revert", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const runId = typeof p.runId === "string" ? p.runId : "";
+      if (!runId) {
+        throw new Error("Refusing to revert without a run id.");
+      }
+      return session.agentRevertRun(runId);
+    });
   });
 
   ipcMain.handle("ollama:check", async () => {

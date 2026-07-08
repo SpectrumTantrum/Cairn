@@ -1,5 +1,5 @@
-export type { AskResult, ChatSendResult, IndexStats, SearchHit } from "@cairn/engine";
-export type { TreeNode } from "../main/vault-session.js";
+export type { AskResult, ChatSendResult, EditProposal, DiffLine, DiffPreview, IndexStats, SearchHit } from "@cairn/engine";
+export type { TreeNode, AgentStartResult, AgentApplyResult } from "../main/vault-session.js";
 
 export interface OllamaStatus {
   up: boolean;
