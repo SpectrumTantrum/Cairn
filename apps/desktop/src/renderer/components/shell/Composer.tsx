@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { ArrowUp, Check, ChevronDown, Cloud, Filter, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Cloud, Filter, HardDrive, Settings, X } from "lucide-react";
+import type { EscalateTarget, ProviderMeta } from "../../../shared/types.js";
 
 /** Top-level trust mode (ADR-0008). Ask is read-only; Agent runs the write tool loop. */
 export type AgentMode = "ask" | "agent";
@@ -17,9 +18,15 @@ interface ComposerProps {
   mode: AgentMode;
   /** Number of sources the next question is scoped to (0 = whole index). */
   scopeCount: number;
+  /** Configured BYOK cloud providers (metadata only). */
+  providers: ProviderMeta[];
+  /** Armed escalation target, or null when the next turn stays local. */
+  escalateTarget: EscalateTarget | null;
   onChange(value: string): void;
   onSelectMode(mode: AgentMode): void;
   onSelectModel(model: string): void;
+  onSelectEscalation(target: EscalateTarget | null): void;
+  onOpenSettings(): void;
   onSubmit(): void;
   onClearScope(): void;
 }
@@ -34,9 +41,13 @@ export function Composer({
   busy,
   mode,
   scopeCount,
+  providers,
+  escalateTarget,
   onChange,
   onSelectMode,
   onSelectModel,
+  onSelectEscalation,
+  onOpenSettings,
   onSubmit,
   onClearScope,
 }: ComposerProps) {
@@ -80,14 +91,12 @@ export function Composer({
             ollamaUp={ollamaUp}
             onSelectModel={onSelectModel}
           />
-          <button
-            type="button"
-            className="chip dashed"
-            aria-disabled="true"
-            title="Coming in v1 — cloud escalation must surface cost before any outbound call (ADR-0002)"
-          >
-            <Cloud size={13} /> escalate
-          </button>
+          <EscalateChip
+            providers={providers}
+            escalateTarget={escalateTarget}
+            onSelectEscalation={onSelectEscalation}
+            onOpenSettings={onOpenSettings}
+          />
           <span className="spacer" />
           <button
             type="button"
@@ -143,6 +152,99 @@ function ModeChip({ mode, onSelectMode }: { mode: AgentMode; onSelectMode(mode: 
           >
             {mode === "agent" ? <Check size={13} /> : <span style={{ width: 13 }} />} Agent
             <span className="menu-sub">write · approve each diff</span>
+          </button>
+        </div>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * Cloud escalation picker (ADR-0002). Disabled with a BYOK tooltip until ≥1 provider
+ * is configured (click routes to Settings). When armed, the chip shows ☁ + provider,
+ * so local-vs-cloud for the NEXT turn is always visible before you press send. The
+ * first-use confirm + cost surfacing happen in App/thread, not here.
+ */
+function EscalateChip({
+  providers,
+  escalateTarget,
+  onSelectEscalation,
+  onOpenSettings,
+}: {
+  providers: ProviderMeta[];
+  escalateTarget: EscalateTarget | null;
+  onSelectEscalation(target: EscalateTarget | null): void;
+  onOpenSettings(): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useCloseOnOutside(() => setOpen(false));
+
+  if (providers.length === 0) {
+    return (
+      <button
+        type="button"
+        className="chip dashed"
+        title="Add a cloud provider in Settings to escalate (BYOK) — cost is surfaced before any outbound call (ADR-0002)"
+        onClick={onOpenSettings}
+      >
+        <Cloud size={13} /> escalate
+      </button>
+    );
+  }
+
+  const active = escalateTarget
+    ? providers.find((p) => p.id === escalateTarget.providerId) ?? null
+    : null;
+
+  return (
+    <span className="menu-wrap" ref={ref}>
+      <button
+        type="button"
+        className={`chip${active ? " cloud-armed" : ""}`}
+        title={active ? `Next turn escalates to ${active.label}` : "Escalate the next turn to a cloud model"}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Cloud size={13} /> {active ? truncate(active.label) : "escalate"} <ChevronDown size={13} />
+      </button>
+      {open ? (
+        <div className="menu">
+          <button
+            type="button"
+            className={`menu-item${escalateTarget === null ? " selected" : ""}`}
+            onClick={() => {
+              onSelectEscalation(null);
+              setOpen(false);
+            }}
+          >
+            {escalateTarget === null ? <Check size={13} /> : <span style={{ width: 13 }} />}
+            <HardDrive size={13} /> Local (Ollama)
+          </button>
+          {providers.map((p) => (
+            <button
+              type="button"
+              key={p.id}
+              className={`menu-item${escalateTarget?.providerId === p.id ? " selected" : ""}`}
+              disabled={!p.hasKey || !p.model}
+              title={!p.hasKey ? "No key stored" : !p.model ? "No model set" : `${p.label} · ${p.model}`}
+              onClick={() => {
+                onSelectEscalation({ providerId: p.id, model: p.model });
+                setOpen(false);
+              }}
+            >
+              {escalateTarget?.providerId === p.id ? <Check size={13} /> : <span style={{ width: 13 }} />}
+              <Cloud size={13} /> {p.label}
+              <span className="menu-sub">{p.model || "no model"}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => {
+              onOpenSettings();
+              setOpen(false);
+            }}
+          >
+            <Settings size={13} /> Manage providers…
           </button>
         </div>
       ) : null}

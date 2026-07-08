@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { X } from "lucide-react";
-import type { IndexStats, OllamaStatus, SearchHit, TreeNode } from "../shared/types.js";
+import { Cloud, X } from "lucide-react";
+import type {
+  EscalateTarget,
+  IndexStats,
+  OllamaStatus,
+  ProviderMeta,
+  ProviderPreset,
+  SearchHit,
+  TreeNode,
+} from "../shared/types.js";
 import { VaultRail } from "./components/shell/VaultRail";
 import { EditorPane } from "./components/shell/EditorPane";
 import type { IndexState } from "./components/shell/EditorPane";
@@ -9,6 +17,7 @@ import type { RightTab } from "./components/shell/RightRail";
 import type { ChatTurn } from "./components/shell/ChatTab";
 import type { AgentMode } from "./components/shell/Composer";
 import type { UiProposal } from "./components/shell/AgentTurn";
+import { SettingsPanel } from "./components/shell/SettingsPanel";
 import { useResizable } from "./components/shell/useResizable";
 
 function errorMessage(error: unknown): string {
@@ -78,6 +87,19 @@ export function App() {
   const [indexState, setIndexState] = useState<IndexState>("none");
   const [ollama, setOllama] = useState<OllamaStatus>({ up: false, models: [] });
 
+  // BYOK cloud escalation (ADR-0002)
+  const [providers, setProviders] = useState<ProviderMeta[]>([]);
+  const [presets, setPresets] = useState<ProviderPreset[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Armed escalation for the NEXT turn (null = stays local on Ollama).
+  const [escalateTarget, setEscalateTarget] = useState<EscalateTarget | null>(null);
+  // First-use confirm gate: once a provider is confirmed (or the session-wide skip is
+  // set), escalation proceeds without re-prompting. Nothing is ever sent without this.
+  const confirmedProviders = useRef<Set<string>>(new Set());
+  const [sessionSkipConfirm, setSessionSkipConfirm] = useState(false);
+  // Pending escalation awaiting the confirm dialog.
+  const [pendingEscalation, setPendingEscalation] = useState<{ question: string; target: EscalateTarget } | null>(null);
+
   // Right rail
   const [rightTab, setRightTab] = useState<RightTab>(
     () => (window.localStorage.getItem(RIGHT_TAB_KEY) as RightTab | null) ?? "chat",
@@ -115,6 +137,8 @@ export function App() {
 
   useEffect(() => {
     void refreshOllama();
+    void window.cairn.providerPresets().then(setPresets).catch(() => setPresets([]));
+    void refreshProviders();
   }, []);
 
   useEffect(() => {
@@ -158,6 +182,17 @@ export function App() {
     setOllama(status);
     setSelectedModel((current) => current ?? status.models[0] ?? null);
   }
+
+  const refreshProviders = useCallback(async (): Promise<void> => {
+    try {
+      const list = await window.cairn.listProviders();
+      setProviders(list);
+      // Disarm escalation if its provider was deleted out from under it.
+      setEscalateTarget((cur) => (cur && list.some((p) => p.id === cur.providerId) ? cur : null));
+    } catch {
+      setProviders([]);
+    }
+  }, []);
 
   async function chooseVault(): Promise<void> {
     setError(null);
@@ -286,10 +321,32 @@ export function App() {
     [docKey, openMarkdown, rightRailOpen],
   );
 
-  async function submitChat(): Promise<void> {
+  function submitChat(): void {
     const question = chatInput.trim();
     if (!question || asking) return;
 
+    // Escalation gate (ADR-0002): the FIRST time a provider is used this session,
+    // confirm before any outbound call. Local turns never hit this branch.
+    if (escalateTarget) {
+      const needsConfirm = !sessionSkipConfirm && !confirmedProviders.current.has(escalateTarget.providerId);
+      if (needsConfirm) {
+        setPendingEscalation({ question, target: escalateTarget });
+        return; // wait for the confirm dialog; input is preserved until we actually send
+      }
+    }
+    void runChat(question, escalateTarget ?? undefined);
+  }
+
+  function confirmEscalation(dontAskAgain: boolean): void {
+    const pending = pendingEscalation;
+    setPendingEscalation(null);
+    if (!pending) return;
+    if (dontAskAgain) setSessionSkipConfirm(true);
+    else confirmedProviders.current.add(pending.target.providerId);
+    void runChat(pending.question, pending.target);
+  }
+
+  async function runChat(question: string, escalate?: EscalateTarget): Promise<void> {
     const requestId = ++requestIdRef.current;
     activeRequestId.current = requestId;
     setThread((prev) => [
@@ -307,6 +364,7 @@ export function App() {
         requestId,
         model: selectedModel ?? undefined,
         scope: scopeActive ? includedFiles : undefined,
+        escalate,
       });
       if (activeRequestId.current !== requestId) return; // superseded (reset / new send)
       setThread((prev) => settleStreaming(prev, { role: "assistant", streaming: false, result }));
@@ -518,6 +576,7 @@ export function App() {
           onOpenNode={openNode}
           onCollapseAll={collapseAll}
           onSwitchVault={chooseVault}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       </div>
 
@@ -576,9 +635,13 @@ export function App() {
               models={ollama.models}
               selectedModel={selectedModel}
               scopeCount={scopeCount}
+              providers={providers}
+              escalateTarget={escalateTarget}
               onInputChange={setChatInput}
               onSelectMode={setMode}
               onSelectModel={setSelectedModel}
+              onSelectEscalation={setEscalateTarget}
+              onOpenSettings={() => setSettingsOpen(true)}
               onSubmit={onSubmit}
               onClearScope={clearScope}
               onCite={openCitation}
@@ -593,6 +656,27 @@ export function App() {
         </>
       ) : null}
 
+      {settingsOpen ? (
+        <SettingsPanel
+          presets={presets}
+          providers={providers}
+          onClose={() => setSettingsOpen(false)}
+          onChanged={() => void refreshProviders()}
+        />
+      ) : null}
+
+      {pendingEscalation ? (
+        <EscalationConfirm
+          providerLabel={
+            providers.find((p) => p.id === pendingEscalation.target.providerId)?.label ??
+            pendingEscalation.target.providerId
+          }
+          model={pendingEscalation.target.model}
+          onCancel={() => setPendingEscalation(null)}
+          onConfirm={confirmEscalation}
+        />
+      ) : null}
+
       {error ? (
         <div className="error-toast" role="alert">
           <span>{error}</span>
@@ -601,6 +685,52 @@ export function App() {
           </button>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * First-use escalation confirm (ADR-0002): names the provider + model and exactly what
+ * leaves the machine, before a single token is sent. "Don't ask again this session"
+ * suppresses re-prompts for the rest of the session only.
+ */
+function EscalationConfirm({
+  providerLabel,
+  model,
+  onCancel,
+  onConfirm,
+}: {
+  providerLabel: string;
+  model: string;
+  onCancel(): void;
+  onConfirm(dontAskAgain: boolean): void;
+}) {
+  const [dontAsk, setDontAsk] = useState(false);
+  return (
+    <div className="settings-backdrop" role="dialog" aria-modal="true" aria-label="Confirm cloud escalation">
+      <div className="confirm-dialog">
+        <h3>
+          <Cloud size={15} /> Send to {providerLabel}?
+        </h3>
+        <p>
+          This sends your question, the retrieved note excerpts used to ground the answer, the grounding
+          system prompt, and this thread&apos;s prior turns to <strong>{providerLabel}</strong> (model{" "}
+          <code>{model}</code>). You pay per token. Nothing else leaves your machine, and retrieval stays local.
+        </p>
+        <label className="confirm-check">
+          <input type="checkbox" checked={dontAsk} onChange={(e) => setDontAsk(e.target.checked)} />
+          Don&apos;t ask again this session
+        </label>
+        <div className="form-actions">
+          <span className="spacer" />
+          <button type="button" className="ghost-btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="primary-btn" onClick={() => onConfirm(dontAsk)}>
+            <Cloud size={13} /> Send
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

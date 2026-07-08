@@ -1,5 +1,11 @@
-import { AlertTriangle, Sparkles } from "lucide-react";
-import type { ChatSendResult, SearchHit } from "../../../shared/types.js";
+import { useState } from "react";
+import { AlertTriangle, ChevronDown, Cloud, Sparkles } from "lucide-react";
+import type {
+  ChatSendResult,
+  EscalateTarget,
+  ProviderMeta,
+  SearchHit,
+} from "../../../shared/types.js";
 import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
@@ -23,9 +29,13 @@ interface ChatTabProps {
   models: string[];
   selectedModel: string | null;
   scopeCount: number;
+  providers: ProviderMeta[];
+  escalateTarget: EscalateTarget | null;
   onInputChange(value: string): void;
   onSelectMode(mode: AgentMode): void;
   onSelectModel(model: string): void;
+  onSelectEscalation(target: EscalateTarget | null): void;
+  onOpenSettings(): void;
   onSubmit(): void;
   onClearScope(): void;
   onCite(source: SearchHit): void;
@@ -92,9 +102,13 @@ export function ChatTab(props: ChatTabProps) {
         busy={busy}
         mode={props.mode}
         scopeCount={props.scopeCount}
+        providers={props.providers}
+        escalateTarget={props.escalateTarget}
         onChange={props.onInputChange}
         onSelectMode={props.onSelectMode}
         onSelectModel={props.onSelectModel}
+        onSelectEscalation={props.onSelectEscalation}
+        onOpenSettings={props.onOpenSettings}
         onSubmit={props.onSubmit}
         onClearScope={props.onClearScope}
       />
@@ -138,10 +152,11 @@ function ErrorTurn({ text }: { text: string }) {
 function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: SearchHit): void }) {
   return (
     <div className="chat-assistant">
-      <span className="chat-avatar">
-        <Sparkles size={14} />
+      <span className={`chat-avatar${result.escalated ? " cloud" : ""}`}>
+        {result.escalated ? <Cloud size={14} /> : <Sparkles size={14} />}
       </span>
       <div className="chat-assistant-body">
+        {result.escalated ? <EscalatedMeta result={result} /> : null}
         <div className={`assistant-text${result.covered ? "" : " unsupported"}`}>
           {result.answer}
         </div>
@@ -168,6 +183,63 @@ function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: S
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Cloud-escalation header on an answer (ADR-0002): a ☁ badge + model, the real token
+ * usage / cost the API returned (never fabricated), and a "what was sent" disclosure so
+ * the exact system prompt + retrieved excerpts + question are always inspectable.
+ */
+function EscalatedMeta({ result }: { result: ChatSendResult }) {
+  const [openSent, setOpenSent] = useState(false);
+  const u = result.usage;
+  const usageBits: string[] = [];
+  if (u?.promptTokens !== undefined) usageBits.push(`${u.promptTokens} in`);
+  if (u?.completionTokens !== undefined) usageBits.push(`${u.completionTokens} out`);
+  if (u?.totalTokens !== undefined && usageBits.length === 0) usageBits.push(`${u.totalTokens} tokens`);
+  const cost = u?.costUsd !== undefined ? `$${u.costUsd.toFixed(u.costUsd < 0.01 ? 5 : 4)}` : null;
+
+  return (
+    <div className="escalated-meta">
+      <div className="escalated-line">
+        <span className="cloud-badge" title="Answered by a cloud model (BYOK escalation)">
+          <Cloud size={11} /> {result.model ?? "cloud"}
+        </span>
+        {usageBits.length > 0 ? <span className="usage-line">{usageBits.join(" · ")}</span> : null}
+        {cost ? <span className="cost-line">{cost}</span> : null}
+        {usageBits.length === 0 && !cost ? (
+          <span className="usage-line muted">usage not reported</span>
+        ) : null}
+      </div>
+      {result.sent ? (
+        <>
+          <button type="button" className="sent-toggle" onClick={() => setOpenSent((v) => !v)}>
+            <ChevronDown size={11} className={openSent ? "rot" : ""} /> what was sent
+          </button>
+          {openSent ? (
+            <div className="sent-disclosure">
+              <div className="sent-section">
+                <span className="sent-label">System prompt</span>
+                <pre>{result.sent.system}</pre>
+              </div>
+              <div className="sent-section">
+                <span className="sent-label">Retrieved excerpts</span>
+                <pre>{result.sent.sourcesBlock}</pre>
+              </div>
+              <div className="sent-section">
+                <span className="sent-label">Question</span>
+                <pre>{result.sent.question}</pre>
+              </div>
+              <p className="sent-foot">
+                Plus {result.sent.historyTurns} prior conversation turn
+                {result.sent.historyTurns === 1 ? "" : "s"} from this thread.
+              </p>
+            </div>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }

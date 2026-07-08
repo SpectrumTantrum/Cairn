@@ -1,5 +1,5 @@
 import { MoreHorizontal, Plus } from "lucide-react";
-import type { SearchHit } from "../../../shared/types.js";
+import type { EscalateTarget, ProviderMeta, SearchHit } from "../../../shared/types.js";
 import { ChatTab } from "./ChatTab";
 import type { ChatTurn } from "./ChatTab";
 import type { AgentMode } from "./Composer";
@@ -23,9 +23,13 @@ interface RightRailProps {
   models: string[];
   selectedModel: string | null;
   scopeCount: number;
+  providers: ProviderMeta[];
+  escalateTarget: EscalateTarget | null;
   onInputChange(value: string): void;
   onSelectMode(mode: AgentMode): void;
   onSelectModel(model: string): void;
+  onSelectEscalation(target: EscalateTarget | null): void;
+  onOpenSettings(): void;
   onSubmit(): void;
   onClearScope(): void;
   onCite(source: SearchHit): void;
@@ -92,9 +96,13 @@ export function RightRail(props: RightRailProps) {
             models={props.models}
             selectedModel={props.selectedModel}
             scopeCount={props.scopeCount}
+            providers={props.providers}
+            escalateTarget={props.escalateTarget}
             onInputChange={props.onInputChange}
             onSelectMode={props.onSelectMode}
             onSelectModel={props.onSelectModel}
+            onSelectEscalation={props.onSelectEscalation}
+            onOpenSettings={props.onOpenSettings}
             onSubmit={props.onSubmit}
             onClearScope={props.onClearScope}
             onCite={props.onCite}

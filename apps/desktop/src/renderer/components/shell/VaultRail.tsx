@@ -35,6 +35,7 @@ interface VaultRailProps {
   onOpenNode(node: TreeNode): void;
   onCollapseAll(): void;
   onSwitchVault(): void;
+  onOpenSettings(): void;
 }
 
 export function VaultRail({
@@ -55,6 +56,7 @@ export function VaultRail({
   onOpenNode,
   onCollapseAll,
   onSwitchVault,
+  onOpenSettings,
 }: VaultRailProps) {
   return (
     <>
@@ -136,7 +138,7 @@ export function VaultRail({
           <button type="button" className="icon-btn" disabled title="Coming in v1 — needs help/docs surface">
             <HelpCircle size={16} />
           </button>
-          <button type="button" className="icon-btn" disabled title="Coming in v1 — needs a settings surface">
+          <button type="button" className="icon-btn" title="Settings — cloud models (BYOK)" onClick={onOpenSettings}>
             <Settings size={16} />
           </button>
         </div>
