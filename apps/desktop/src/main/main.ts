@@ -32,7 +32,7 @@ function createWindow(): void {
     minWidth: 960,
     minHeight: 640,
     title: "Cairn",
-    backgroundColor: "#f6f5ef",
+    backgroundColor: "#1a1b1e",
     show: false,
     webPreferences: {
       preload: join(currentDir, "../preload/index.mjs"),

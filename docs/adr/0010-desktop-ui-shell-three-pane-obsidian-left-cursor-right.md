@@ -1,5 +1,17 @@
 # Desktop UI shell: three panes — Obsidian-style vault rail (left), CodeMirror 6 editor (center), Cursor-style agent sidebar (right)
 
+> **Status (2026-07-08): being implemented as the desktop app.** Torres approved
+> building this three-pane shell now ("use the wireframe to make the real Cairn"),
+> so the shell has **replaced** the panel-based alpha UI rather than remaining a future
+> v1 target. The first pass wires only existing engine paths — vault select, index,
+> grounded cited **Ask** (single-turn, non-streaming), CodeMirror 6 Markdown editing
+> with `source:read`/`source:write`, and citation click-through into the center pane —
+> and honestly disables everything that needs later ADRs: **Agent** mode (ADR-0008
+> write-safety), inline diff hunks (ADR-0008), Escalate/cloud (ADR-0002 cost-surfacing),
+> Studio generators, per-source scoping, PDF/AV viewers (ADR-0009), and vault mutation
+> from the rail. The consequences below remain the firm decision; the softest part
+> (verbs-as-presets) is still open.
+
 Cairn's v1 desktop shell is a **three-pane layout**, ratified by Torres as "the right side agent sidebar should be like Cursor but the left side should look like Obsidian." The **left rail is Obsidian-style vault navigation** — file tree, plus backlinks/outline affordances over the vault's `[[wikilinks]]` (ADR-0003). The **center pane is a CodeMirror 6 Markdown editor** — CM6 is MIT and is the editor Obsidian itself builds on, so it is the natural permissive choice and gives us Obsidian-compatible editing behaviour for free. The **right rail is a Cursor-style agent sidebar** that narrates the agent and hosts the mode picker. Two cross-pane behaviours make the shell cohere: **agent edits render as inline accept/reject diffs in the center editor** (not in the chat panel — the sidebar only narrates), and **citation click-through opens the anchor target in the center pane** (editor for Markdown, viewer for PDF, player-seek for audio/video), tying directly into ADR-0009's per-format citation-anchor invariant. This ADR records the **v1 direction for the shell**; it is *not* the desktop MVP alpha, which stays panel-based (Search / Ask / Index) per `docs/mvp-scope.md`.
 
 ## Considered options

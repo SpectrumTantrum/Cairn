@@ -69,8 +69,16 @@ file and line.
 
 The three-pane shell redesign (Obsidian-style vault rail + CodeMirror 6 editor +
 Cursor-style agent sidebar) is **v1 direction, not the alpha** — see `docs/adr/0010`.
-Do not rebuild this panel-based alpha UI into that shell; the alpha stays panel-based
-(Search / Ask / Index).
+
+> **Status update (superseded):** Torres approved building the three-pane v1 shell
+> directly ("use the wireframe to make the real Cairn"), so the panel-based alpha UI
+> (Search / Ask / Index panels: `App.tsx` grid + `VaultPicker`/`IndexPanel`/`SearchPanel`/
+> `AskPanel`/`SourceViewer`) has been **replaced** by the three-pane shell in
+> `apps/desktop/src/renderer`. This section documents the original alpha shape for
+> history; it no longer describes the shipping UI. The engine contract, local-only
+> invariants, and Must-Not-Ship list below still bind — the shell wires only the existing
+> engine paths (index / search-via-`ask` / cited answers) and honestly disables everything
+> in Must Not Ship (Agent, Studio, PDF, cloud/BYOK, write modes).
 
 ## Must Not Ship
 
