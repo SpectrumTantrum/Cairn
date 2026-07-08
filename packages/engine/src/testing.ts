@@ -1,4 +1,11 @@
-import type { ChatMessage, ChatStreamCallbacks, ModelProvider } from "./model-provider.js";
+import type {
+  AgentMessage,
+  ChatMessage,
+  ChatStreamCallbacks,
+  ModelProvider,
+  ToolSchema,
+  ToolTurn,
+} from "./model-provider.js";
 
 export { InMemoryIndex } from "./vault-index.js";
 
@@ -16,6 +23,19 @@ export interface FakeModelProviderOpts {
     messages: ChatMessage[],
     callbacks?: ChatStreamCallbacks,
   ) => Promise<string>;
+  /**
+   * Optional tool-calling override for the agent write-loop (ADR-0008). When
+   * absent, the provider reports NO tool support (chatWithTools is undefined), so
+   * gates can assert the loop degrades cleanly; supply a scripted turn-by-turn fn
+   * to exercise the loop. It receives the 1-based turn index so a script can drive
+   * a multi-step run and then stop.
+   */
+  chatWithTools?: (
+    model: string,
+    messages: AgentMessage[],
+    tools: ToolSchema[],
+    turn: number,
+  ) => Promise<ToolTurn>;
 }
 
 /** Test adapter for ModelProvider — no HTTP. */
@@ -25,6 +45,11 @@ export class FakeModelProvider implements ModelProvider {
   private readonly embedFn?: FakeModelProviderOpts["embed"];
   private readonly chatFn?: FakeModelProviderOpts["chat"];
   private readonly chatStreamFn?: FakeModelProviderOpts["chatStream"];
+  private readonly chatWithToolsFn?: FakeModelProviderOpts["chatWithTools"];
+  private toolTurn = 0;
+  // Present only when a tool script was supplied — mirrors how a non-tool-capable
+  // provider omits the method entirely, so the agent loop's feature-detection is real.
+  readonly chatWithTools?: ModelProvider["chatWithTools"];
 
   constructor(opts: FakeModelProviderOpts = {}) {
     this.models = opts.models ?? ["qwen3:4b", "test-embedder"];
@@ -32,6 +57,11 @@ export class FakeModelProvider implements ModelProvider {
     this.embedFn = opts.embed;
     this.chatFn = opts.chat;
     this.chatStreamFn = opts.chatStream;
+    this.chatWithToolsFn = opts.chatWithTools;
+    if (this.chatWithToolsFn) {
+      this.chatWithTools = (model, messages, tools) =>
+        this.chatWithToolsFn!(model, messages, tools, ++this.toolTurn);
+    }
   }
 
   async listModels(): Promise<string[]> {

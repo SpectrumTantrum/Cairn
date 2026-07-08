@@ -13,6 +13,10 @@ export type { AskResult } from "./ask.js";
 export { ChatThread } from "./chat-thread.js";
 export type { ThreadTurn, ChatThreadOptions, ChatSendOptions, ChatSendResult } from "./chat-thread.js";
 export { chat, chatStream, resolveChatModel } from "./chat.js";
+export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
+export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
+export { diffLines } from "./diff.js";
+export type { DiffLine, DiffPreview } from "./diff.js";
 export {
   parseWikilinks,
   resolveWikilink,
@@ -23,5 +27,13 @@ export type { WikiLink, WikiResolveResult, VaultDoc, Backlink } from "./wikilink
 export { openIndex, SqliteIndex } from "./vault-index.js";
 export type { Index, ChunkRow, DenseHit, RebuildChunkInput, RebuildIndexInput } from "./vault-index.js";
 export { getModelProvider, setModelProvider, resetModelProvider, OllamaClient } from "./model-provider.js";
-export type { ModelProvider, ChatMessage, ChatStreamCallbacks } from "./model-provider.js";
+export type {
+  ModelProvider,
+  ChatMessage,
+  ChatStreamCallbacks,
+  AgentMessage,
+  ToolSchema,
+  ToolCall,
+  ToolTurn,
+} from "./model-provider.js";
 export { ollamaUp, listModels } from "./embed.js";

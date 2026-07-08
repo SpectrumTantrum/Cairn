@@ -6,6 +6,43 @@ export interface ChatMessage {
   content: string;
 }
 
+// ---- Agent tool-calling seam (ADR-0008 write-safety core) --------------------
+// The always-on model proposes mutations by calling tools; the engine's bounded
+// loop (agent-run.ts) drives it and NEVER writes. Tool-calling is optional on the
+// provider so existing adapters keep compiling; callers must feature-detect it.
+
+/** A tool the agent may call, described with a JSON-Schema parameter object. */
+export interface ToolSchema {
+  name: string;
+  description: string;
+  /** JSON Schema for the arguments object (passed through to Ollama verbatim). */
+  parameters: Record<string, unknown>;
+}
+
+/** One tool call the model emitted. `arguments` is RAW model output — validate before use. */
+export interface ToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+/**
+ * One message in a tool-loop conversation. Superset of ChatMessage with the two
+ * roles the loop needs: an `assistant` turn may carry `toolCalls`, and a `tool`
+ * turn carries a result tagged with the `toolName` it answers.
+ */
+export interface AgentMessage {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  toolCalls?: ToolCall[];
+  toolName?: string;
+}
+
+/** Result of one tool-enabled model turn: prose plus any tool calls it wants run. */
+export interface ToolTurn {
+  content: string;
+  toolCalls: ToolCall[];
+}
+
 /**
  * Streaming hooks for token-by-token chat output. `onToken` fires once per delta
  * as the model produces it; the returned Promise still resolves to the full text.
@@ -33,6 +70,17 @@ export interface ModelProvider {
     callbacks?: ChatStreamCallbacks,
     think?: boolean,
   ): Promise<string>;
+  /**
+   * Optional tool-calling turn for the agent write-loop (ADR-0008). Runs
+   * NON-STREAMING deliberately: Ollama's stream+tools path is buggy (#15497), and
+   * the loop only needs the final tool-call batch, not token deltas. Providers that
+   * cannot call tools omit this; the agent loop feature-detects and refuses cleanly.
+   */
+  chatWithTools?(
+    model: string,
+    messages: AgentMessage[],
+    tools: ToolSchema[],
+  ): Promise<ToolTurn>;
 }
 
 export class OllamaClient implements ModelProvider {
@@ -157,6 +205,74 @@ export class OllamaClient implements ModelProvider {
     }
     emit(buf, acc);
     return acc.full;
+  }
+
+  async chatWithTools(
+    model: string,
+    messages: AgentMessage[],
+    tools: ToolSchema[],
+  ): Promise<ToolTurn> {
+    // Non-streaming on purpose (ADR-0008 §5: Ollama #15497 stream+tools bug).
+    const body = {
+      model,
+      stream: false,
+      think: false,
+      tools: tools.map((t) => ({
+        type: "function",
+        function: { name: t.name, description: t.description, parameters: t.parameters },
+      })),
+      messages: messages.map((m) => {
+        if (m.role === "assistant" && m.toolCalls?.length) {
+          return {
+            role: "assistant",
+            content: m.content,
+            tool_calls: m.toolCalls.map((c) => ({
+              function: { name: c.name, arguments: c.arguments },
+            })),
+          };
+        }
+        if (m.role === "tool") {
+          return { role: "tool", content: m.content, tool_name: m.toolName };
+        }
+        return { role: m.role, content: m.content };
+      }),
+    };
+
+    const r = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      throw new Error(`HTTP ${r.status} from /api/chat (tools): ${t.slice(0, 200)}`);
+    }
+    const j = (await r.json()) as {
+      message?: {
+        content?: string;
+        tool_calls?: { function?: { name?: string; arguments?: unknown } }[];
+      };
+    };
+    const rawCalls = j.message?.tool_calls ?? [];
+    const toolCalls: ToolCall[] = [];
+    for (const rc of rawCalls) {
+      const name = rc.function?.name;
+      if (typeof name !== "string" || name === "") continue;
+      // Ollama returns arguments as an object; tolerate a JSON string too.
+      let args = rc.function?.arguments;
+      if (typeof args === "string") {
+        try {
+          args = JSON.parse(args);
+        } catch {
+          args = {};
+        }
+      }
+      toolCalls.push({
+        name,
+        arguments: args && typeof args === "object" ? (args as Record<string, unknown>) : {},
+      });
+    }
+    return { content: j.message?.content ?? "", toolCalls };
   }
 }
 
