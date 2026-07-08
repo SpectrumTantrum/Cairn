@@ -122,6 +122,63 @@ use only until signing + notarization land.
 
 The disposable index is stored under `<vault>/.cairn/index.db`.
 
+## Verifying a Fresh Clone (Smoke Test)
+
+This checklist proves the committed repo state is reproducible from scratch —
+no reliance on stray local `node_modules`, `dist/`, or `out/` output left over
+from prior work. Run it from a fresh `git clone` (or an equivalent clean
+working tree) at the repo root.
+
+### Automated commands
+
+```bash
+npm ci                                        # install from the committed lockfiles
+npm run typecheck                             # engine + desktop, across workspaces
+npm run build                                 # engine tsc build + desktop electron-vite build
+cd packages/engine && npm run test:smoke      # self-contained: fake ModelProvider + InMemoryIndex, no Ollama needed
+cd ../../apps/desktop && npm test             # VaultSession unit tests
+```
+
+All five commands should complete with no errors. `test:smoke` runs the full
+engine gate suite (retrieval-gate, index-search, model-provider, retrieve,
+ask-coverage, reindex-pipeline, scope, chat-thread, wikilinks — 29 tests as of
+this writing); `apps/desktop`'s `npm test` runs the `VaultSession` suite (23
+tests as of this writing). Both are fully self-contained and require no
+running Ollama server.
+
+### Manual UI pass
+
+Automated tests do not drive the Electron UI itself, so finish with a manual
+pass. Start dev mode from the repo root:
+
+```bash
+npm run desktop:dev
+```
+
+Then, against a small scratch Markdown vault:
+
+1. **Choose vault** — pick the scratch vault folder; confirm the file tree
+   renders its folders/files.
+2. **Tree → open file** — click a Markdown file in the tree; confirm it opens
+   in the source/editor pane.
+3. **Edit + Cmd-S** — make a small edit and save; confirm the save succeeds
+   (no error toast) and the change persists on disk.
+4. **Index** — run the index action; confirm the status line reports N files
+   / N chunks indexed.
+5. **Search** — search for a term known to appear in the vault; confirm
+   cited results are returned.
+6. **Ask** — click through a search citation, or select a citation from an
+   Ask answer, and confirm it jumps to the correct file/line in the source
+   pane.
+7. **Ollama-stopped Ask state** — with Ollama not running (or no chat model
+   pulled), open the Ask panel and confirm it surfaces an explicit
+   "Ollama unavailable" / model-unavailable state rather than hanging or
+   crashing. Optionally, with Ollama running and a model pulled, verify a
+   real grounded/cited Ask answer.
+
+File a follow-up GitHub issue for anything this checklist surfaces rather
+than expanding it indefinitely — see `docs/agents/issue-tracker.md`.
+
 ## Security Notes
 
 - Renderer has `nodeIntegration: false`.
