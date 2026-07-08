@@ -27,7 +27,7 @@ These implement the locked architecture: TS in-process engine (ADR-0001), tiered
 Load order at open: `sqliteVec.load(db)`, then `PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`.
 
 ```sql
--- 1) FILES — flat change-detection snapshot (ADR/Mneme: flat {path:(hash,mtime,size)}, not a Merkle tree)
+-- 1) FILES — flat change-detection snapshot (ADR-0001 / engine feasibility report: flat {path:(hash,mtime,size)}, not a Merkle tree)
 CREATE TABLE files (
   path  TEXT PRIMARY KEY,          -- vault-relative POSIX path
   hash  TEXT NOT NULL,            -- SHA-256 of file bytes (extraction/chunking cache key)
@@ -576,12 +576,12 @@ function loadManifest(opts: {
 
 ## G13 — First-run hardware-detection contract + escalation thresholds
 
-**Decision.** Detect hardware app-side (not in the headless Mneme engine) via a thin impure `probeHardware()` that returns a `HardwareProfile`, then feed it plus the manifest into two pure functions — `mapToTier()` and `computeFit()` — that decide the tier, apply the 8B downgrade rule, and badge which models fit (~80% mem target, KV headroom). All constants and thresholds come from the manifest; the GPU/Metal probe degrades to a conservative fallback when Ollama or the system probe is absent. Power users may override the recommendation with a warning.
+**Decision.** Detect hardware app-side (not in the headless engine) via a thin impure `probeHardware()` that returns a `HardwareProfile`, then feed it plus the manifest into two pure functions — `mapToTier()` and `computeFit()` — that decide the tier, apply the 8B downgrade rule, and badge which models fit (~80% mem target, KV headroom). All constants and thresholds come from the manifest; the GPU/Metal probe degrades to a conservative fallback when Ollama or the system probe is absent. Power users may override the recommendation with a warning.
 
 ## G13 — first-run hardware-detection contract + tier mapping + escalation thresholds
 
 ### Where this lives
-Hardware detection is **app-layer** (ModelGateway / first-run flow), **not** the headless Mneme engine — ADR-0001 keeps Mneme free of platform/OS deps. The detection split below isolates the one impure piece so the decision logic stays pure and unit-testable, satisfying ADR-0001's testability spirit.
+Hardware detection is **app-layer** (ModelGateway / first-run flow), **not** the headless engine — ADR-0001 keeps the engine free of platform/OS deps. The detection split below isolates the one impure piece so the decision logic stays pure and unit-testable, satisfying ADR-0001's testability spirit.
 
 ### Contract: split impure probe from pure decision
 ```ts
@@ -790,7 +790,7 @@ applyWrite(proposal, appliedPaths):
   appliedPaths.set(path, {op: proposal.op, baseHash: proposal.baseHash})
 ```
 
-On `ConcurrencyAbort`: **do not clobber.** Abort *that step only*, surface it ("<path> changed on disk since the agent read it — skipped"), feed the failure back to the model, and continue the loop. mtime is the cheap pre-gate; the content hash is authoritative (mirrors Mneme's git-index-style mtime gating).
+On `ConcurrencyAbort`: **do not clobber.** Abort *that step only*, surface it ("<path> changed on disk since the agent read it — skipped"), feed the failure back to the model, and continue the loop. mtime is the cheap pre-gate; the content hash is authoritative (mirrors the engine's git-index-style mtime gating).
 
 ## 4. "Revert this run" — hand-rolled procedure (THE load-bearing part)
 

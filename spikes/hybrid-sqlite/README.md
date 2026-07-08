@@ -4,7 +4,7 @@
 
 ## What this proves
 
-The Mneme engine is locked to **HYBRID ON by default** (DECIDED PARAMS G10):
+The engine is locked to **HYBRID ON by default** (DECIDED PARAMS G10):
 dense KNN over `sqlite-vec` + keyword search over an `FTS5` external-content table
 **fused app-side with Reciprocal Rank Fusion (RRF, K=60)**. The LanceDB hybrid spike
 (`spikes/mneme/lancedb_hybrid.py`) proved hybrid works *in LanceDB/Python* — but that

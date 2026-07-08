@@ -1,10 +1,10 @@
 # Engine in TypeScript, in-process in Electron's main (not Python/Docling)
 
-Cairn is one product whose shell must be Electron + TypeScript, so we build Mneme (the indexing/retrieval engine) in TS/Node running in Electron's main process, rather than as the Python service its own PRD described. The feasibility work removed Python's main advantages here — embeddings run over Ollama's HTTP API (language-agnostic), `sqlite-vec` is adequate at student-vault scale, and the learned-sparse path that needed FlagEmbedding was already dropped (Spikes B/C) — leaving one language and one runtime, which is decisive for a solo build and Electron packaging.
+Cairn is one product whose shell must be Electron + TypeScript, so we build the indexing/retrieval engine in TS/Node running in Electron's main process, rather than as the Python service its own PRD described. The feasibility work removed Python's main advantages here — embeddings run over Ollama's HTTP API (language-agnostic), `sqlite-vec` is adequate at student-vault scale, and the learned-sparse path that needed FlagEmbedding was already dropped (Spikes B/C) — leaving one language and one runtime, which is decisive for a solo build and Electron packaging.
 
 ## Considered options
 
-- **Python engine as a sidecar** (keep Docling + LanceDB; Electron spawns it over local HTTP/stdio): best parsing/retrieval quality and matches Mneme's PRD, but bundling a Python runtime + torch/Docling models (hundreds of MB–GBs) inside a notarized Electron app is a heavy, fragile packaging burden for a solo dev.
+- **Python engine as a sidecar** (keep Docling + LanceDB; Electron spawns it over local HTTP/stdio): best parsing/retrieval quality and matches the engine's original PRD [`PRD-Mneme-Local-Document-Indexing.md`, the engine's retired standalone-product name], but bundling a Python runtime + torch/Docling models (hundreds of MB–GBs) inside a notarized Electron app is a heavy, fragile packaging burden for a solo dev.
 - **Hybrid** (TS core in-process + an on-demand Python Docling sidecar for PDF extraction only): keeps Docling where it matters but still ships Python.
 
 ## Consequences

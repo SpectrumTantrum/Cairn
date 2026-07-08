@@ -5,14 +5,14 @@ Q&A + generated outputs, Cursor's agentic editing with modes, and Obsidian's Mar
 graph, fused into one app. Everything runs on your machine: no telemetry, no cloud required —
 local models via [Ollama](https://ollama.com), with bring-your-own-key cloud models optional.
 
-It's built on **Mneme**, an internal local indexing & retrieval engine that watches your vault,
-chunks and embeds your documents, and serves **cited** hybrid search — answers that jump to the
-exact source.
+It's built on an internal local indexing & retrieval engine (`@cairn/engine`) that watches your
+vault, chunks and embeds your documents, and serves **cited** hybrid search — answers that jump
+to the exact source.
 
 > **Status — early.** The full desktop product (PDF annotation, generated "Studio" outputs, six
 > agent modes, the heterogeneous graph) is a 12–24-month build and **not here yet**. What *is*
 > here today: this repo's planning corpus (PRDs, a skeptical spike-backed feasibility review,
-> architecture decisions) **and a runnable MVP** — a headless CLI tracer of the Mneme engine that
+> architecture decisions) **and a runnable MVP** — a headless CLI tracer of the engine that
 > indexes a Markdown folder and runs grounded, cited search over it.
 
 ## Try the MVP (CLI)
@@ -46,7 +46,7 @@ disposable and per-machine; your Markdown files are the source of truth. See
 
 | Path | What |
 |---|---|
-| [`packages/engine/`](packages/engine/) | The MVP — headless Mneme CLI (index + cited hybrid search) |
+| [`packages/engine/`](packages/engine/) | The MVP — headless engine CLI (index + cited hybrid search) |
 | [`PRD-cairn.md`](PRD-cairn.md), [`PRD-Mneme-Local-Document-Indexing.md`](PRD-Mneme-Local-Document-Indexing.md) | Product requirements for Cairn and its engine |
 | [`cairn-feasibility-report.md`](cairn-feasibility-report.md), [`mneme-feasibility-report.md`](mneme-feasibility-report.md) | Skeptical, spike-backed feasibility reviews — these **override** the PRDs where they disagree |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records (0001–0008) |

@@ -6,11 +6,11 @@ This file provides guidance to Codex (Codex.ai/code) and Claude Code (claude.ai/
 
 A **real, in-progress codebase plus its planning/feasibility artifacts** — one local-first, privacy-first product: **Cairn**, an agentic knowledge-management tool (NotebookLM + Cursor + Obsidian fusion; see `CONTEXT.md`). The desktop alpha has landed; there is app source code — do look for it.
 
-- **`packages/engine`** (`@cairn/engine`) — the headless, in-process TypeScript indexing & retrieval engine (aka **Mneme**, now an internal module of Cairn, not a separate product). Grounded, cited **hybrid search** (dense **sqlite-vec** brute-force KNN + **FTS5** keyword, fused with **RRF**) over a Markdown vault, plus a `cairn` CLI (`index` / `search` / `ask`). Embeddings via a local **Ollama** `ModelProvider` seam. `src/` is real; `Index` (persistence) and `ModelProvider` (transport) are the seams.
+- **`packages/engine`** (`@cairn/engine`) — the headless, in-process TypeScript indexing & retrieval engine. Grounded, cited **hybrid search** (dense **sqlite-vec** brute-force KNN + **FTS5** keyword, fused with **RRF**) over a Markdown vault, plus a `cairn` CLI (`index` / `search` / `ask`). Embeddings via a local **Ollama** `ModelProvider` seam. `src/` is real; `Index` (persistence) and `ModelProvider` (transport) are the seams.
 - **`apps/desktop`** (`@cairn/desktop`) — the **Electron + React + TypeScript** desktop alpha wrapping the engine: index / search / ask panels + a source viewer. `VaultSession` (main process) owns vault path policy, the indexed guard, and engine orchestration.
 - **Planning/feasibility artifacts** — `PRD-cairn.md`, `PRD-Mneme-Local-Document-Indexing.md`, the two `*-feasibility-report.md`, `docs/` (scope, ADRs, specs), `CONTEXT.md`, and `spikes/`.
 
-Note: the standalone **Python Mneme** product described in `PRD-Mneme-Local-Document-Indexing.md` was **superseded** — per `CONTEXT.md` it is now Cairn's internal engine/indexing layer (implemented in-process in `@cairn/engine`; a Python ingestion *sidecar* is planned for multi-format parsing, see ADR-0009). The Mneme feasibility corrections below still bind that layer.
+Note: `PRD-Mneme-Local-Document-Indexing.md` describes a standalone product design that was **superseded** and folded into Cairn's engine — implemented in-process as `@cairn/engine` (a Python ingestion *sidecar* is planned for multi-format parsing, see ADR-0009). The feasibility corrections below still bind the engine's design.
 
 Git repo: **github.com/SpectrumTantrum/Cairn** (public, `main`).
 
@@ -40,7 +40,7 @@ The engine gate suite is fully self-contained (fake `ModelProvider` + `InMemoryI
 
 ## The reports override the PRDs (read this before implementing anything)
 
-Each PRD was put through a skeptical feasibility review with spikes. **`cairn-feasibility-report.md`** and **`mneme-feasibility-report.md`** are authoritative: they contain corrections that contradict specific claims in the PRDs. If you implement from the raw PRD you will rebuild disproven assumptions. Read the report's *Verdict*, *Assumptions table*, *Spike findings*, and *Revised recommendation* first. (The Mneme corrections still bind Cairn's internal engine/indexing layer even though the standalone Python product was folded in.)
+Each PRD was put through a skeptical feasibility review with spikes. **`cairn-feasibility-report.md`** and **`mneme-feasibility-report.md`** are authoritative: they contain corrections that contradict specific claims in the PRDs. If you implement from the raw PRD you will rebuild disproven assumptions. Read the report's *Verdict*, *Assumptions table*, *Spike findings*, and *Revised recommendation* first. (Those corrections still bind the engine's parsing/indexing design even though the standalone product they were written for was folded in.)
 
 Binding corrections that are easy to get wrong:
 
@@ -50,7 +50,7 @@ Binding corrections that are easy to get wrong:
 - pdf.js coordinate mapping for annotations is sound (spike-proven); the residual risk is UI plumbing. Defer **area annotations** before text highlights.
 - The 16-week solo timeline is ~3–6× optimistic → descope v1; hardware-gate the local-model pull (default weak machines to a 3–4B model; prefer **Qwen3 (Apache-2.0)** over Llama weights).
 
-**Mneme** (verdict: GO-WITH-CHANGES; corrections are simplifications)
+**Engine parsing/indexing** (verdict: GO-WITH-CHANGES; corrections are simplifications)
 - Chunk from Docling's **typed-block `DoclingDocument` model, not a normalized Markdown string** — markdown export is lossy and drops citation provenance.
 - **Drop the `sparse` column and "bge-m3 → hybrid for free via Ollama."** Spikes proved Ollama `/api/embed` returns dense only, and LanceDB's keyword half is its own BM25 FTS over `text` (no sparse-vector support). Store `text`, FTS-index it, fuse with RRF.
 - Simplify the Merkle **tree** to a flat `{path:(hash,mtime,size)}` snapshot + Git-index-style mtime gating.
@@ -62,7 +62,7 @@ Cairn (engine + desktop) allows **only MIT / Apache-2.0 / BSD / MPL** dependenci
 | Capability | AGPL/GPL trap | Permissive replacement |
 |---|---|---|
 | PDF text/annotation editing | MuPDF / `mupdf.js`, **PyMuPDF (`fitz`)** | pdf.js (Apache) / **EmbedPDF** (MIT) / **pypdfium2** (BSD) |
-| Document parsing (Mneme) | PyMuPDF; `ebooklib`; `unstructured` *extras* (ultralytics AGPL, chardet LGPL) | **Docling** (MIT, uses pypdfium2 + docling-parse) — handles PDF/DOCX/HTML/EPUB and needs none of them |
+| Document parsing (engine ingestion) | PyMuPDF; `ebooklib`; `unstructured` *extras* (ultralytics AGPL, chardet LGPL) | **Docling** (MIT, uses pypdfium2 + docling-parse) — handles PDF/DOCX/HTML/EPUB and needs none of them |
 | Local TTS (Cairn Tier-2) | Piper-GPL fork / `espeak-ng` (GPL, bundled by `kokoro-js`) | **piper-plus** (MIT, espeak-free) |
 
 When adding any dependency, confirm its license before use; flag AGPL/GPL and propose the permissive substitute.
@@ -78,11 +78,11 @@ cd spikes/sqlite-vec && npm install && node perf.js
 # pdf.js annotation coordinate mapping across zoom/rotation (Node, ESM)
 cd spikes/pdfjs && npm install && node coords.mjs
 
-# Mneme: chunk-hash cache hit-rate under edits (Python; v2 is authoritative)
+# Engine: chunk-hash cache hit-rate under edits (Python; v2 is authoritative)
 python3 spikes/mneme/chunk_cache.py
 uv run --with langchain-text-splitters python spikes/mneme/chunk_cache_v2.py
 
-# Mneme: LanceDB embedded hybrid (dense + BM25-FTS + RRF) — needs Ollama + bge-m3
+# Engine: LanceDB embedded hybrid (dense + BM25-FTS + RRF) — needs Ollama + bge-m3
 uv run --with lancedb python spikes/mneme/lancedb_hybrid.py
 
 # Ollama embed + local tool-calling capability (Node) — needs Ollama + models

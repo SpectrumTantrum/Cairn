@@ -4,7 +4,7 @@ You are implementing the main application shell for **Cairn**, a local-first, pr
 agentic knowledge-management desktop app (a fusion of Obsidian's Markdown vault, Cursor's
 agentic editing, and NotebookLM's grounded Q&A + generated "Studio" outputs). Everything runs
 locally: a local **always-on** chat model and a local **embedding** model via Ollama, with an
-optional bring-your-own-key cloud model for escalation. The retrieval engine is called **Mneme**.
+optional bring-your-own-key cloud model for escalation.
 
 Build the **three-pane desktop shell** described below. `1a-reference.html` is a **low-fidelity
 wireframe** of the target layout — use it to understand structure, panes, and behavior, NOT the
@@ -105,7 +105,7 @@ bars; render real Markdown. Two Cairn-specific inline treatments that must be mo
    green-tinted background (`+ …`), monospace. Accept/Reject act on that hunk only.
 
 **Status bar** — muted small text: cursor position (`Ln 42, Col 8`), syntax (`Markdown`), an
-`indexed ✓` state, and right-aligned engine status (`Mneme · 1,284 chunks`).
+`indexed ✓` state, and right-aligned engine status (`Engine · 1,284 chunks`).
 
 ## Pane 3 — Right rail (Cursor agent + NotebookLM), TABBED
 
@@ -172,7 +172,7 @@ card set — do not use Audio/Video Overview etc.; audio *output* is deferred in
 - `chatThread[]` (turns; assistant turns carry citations + optional rich blocks), `isStreaming`
 - `agentMode` = `ask | agent`, `activePreset`, `selectedModel`, `escalateEnabled`
 - `sources[]` (nodeId, type, selectedForGrounding)
-- `engineStatus` (indexed?, chunk count) from Mneme
+- `engineStatus` (indexed?, chunk count) from the engine
 
 ## Design tokens — WIREFRAME VALUES (reference only; replace with the app's dark theme)
 
@@ -196,4 +196,4 @@ and should be dropped. Use the codebase's icon library for all glyphs.
 ## Grounding references (from the Cairn repo, if available)
 `docs/adr/0010` (three-pane shell), `0008` (agent write-safety / inline diffs / revert),
 `0009` (sources & citation anchors), `0002` (models & escalation); `docs/v1-scope.md` (Studio
-templates, modes-as-presets); `CONTEXT.md` (canonical terms: Vault, Node, Source, Mneme, Index).
+templates, modes-as-presets); `CONTEXT.md` (canonical terms: Vault, Node, Source, Index).

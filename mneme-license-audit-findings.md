@@ -1,5 +1,7 @@
 # Mneme PRD — Parsing/Library Stack License Audit
 
+> **Historical document.** "Mneme" was the working name of a standalone indexing product that was folded into Cairn as its internal engine (`@cairn/engine`). The name is retired; the technical corrections in this document still bind the engine design.
+
 Assumption tested: "The parsing/library stack is license-clean (PRD names Docling / PyMuPDF for PDFs)."
 Verdict: Feasible-with-caveats. PyMuPDF and ebooklib are AGPL flags; unstructured pulls AGPL/LGPL extras. Permissive substitutes exist for all three.
 

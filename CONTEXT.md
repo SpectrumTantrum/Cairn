@@ -1,6 +1,6 @@
 # Cairn
 
-Cairn is one product: a local-first, privacy-first **agentic knowledge-management tool** — a fusion of NotebookLM (grounded Q&A + generated outputs), Cursor (agentic editing with modes), and Obsidian (Markdown vault + graph). It is built on an internal local indexing/retrieval engine (Mneme) and adds knowledge-management surfaces (notes, chat, PDF, generated outputs) on top. It is *not* a neurodivergent study companion — see `docs/adr/0005`.
+Cairn is one product: a local-first, privacy-first **agentic knowledge-management tool** — a fusion of NotebookLM (grounded Q&A + generated outputs), Cursor (agentic editing with modes), and Obsidian (Markdown vault + graph). It is built on an internal local indexing/retrieval engine (`@cairn/engine`) and adds knowledge-management surfaces (notes, chat, PDF, generated outputs) on top. It is *not* a neurodivergent study companion — see `docs/adr/0005`.
 
 ## Language
 
@@ -8,13 +8,16 @@ Cairn is one product: a local-first, privacy-first **agentic knowledge-managemen
 The product as a whole — the local-first agentic knowledge-management tool the user installs and uses.
 _Avoid_: "the Electron app" (that names only the shell, not the product), "the tool".
 
-**Mneme**:
-Cairn's local indexing & retrieval engine — the subsystem that watches the vault, extracts and chunks documents (multi-format parsing/transcription via a Python ingestion sidecar — see `docs/adr/0009`), embeds them, and serves cited hybrid search. An internal module of Cairn, not a separately shipped product. Also acceptable: "the engine".
+**The engine** (`@cairn/engine`):
+Cairn's local indexing & retrieval engine — the subsystem that watches the vault, extracts and chunks documents (multi-format parsing/transcription via a Python ingestion sidecar — see `docs/adr/0009`), embeds them, and serves cited hybrid search. An internal module of Cairn, not a separately shipped product.
 _Avoid_: "the RAG", "the database", "the index" (each names only one part of it).
 
+**Mneme**:
+Retired codename for what is now simply Cairn's engine layer (`@cairn/engine`); appears only in historical PRD/feasibility documents.
+
 **Vault**:
-The user's folder of plain Markdown notes, imported PDFs, and other typed nodes — the source of truth and, together with its sidecar data, the app's store. Every node is plain text on disk; readable and Obsidian-compatible. In the desktop shell, the active vault is held by `VaultSession` (main process): path policy, indexed guard, and Mneme orchestration for search/ask/re-index. The v1 desktop shell is a **three-pane layout** — Obsidian-style vault rail (left), CodeMirror 6 editor (center), Cursor-style agent sidebar (right); see `docs/adr/0010`. (The current desktop *alpha* is panel-based per `docs/mvp-scope.md`; the three-pane shell is v1, not the alpha.)
-_Avoid_: "workspace", "library", "corpus" (corpus is fine for Mneme's view of it, but the user-facing concept is the vault).
+The user's folder of plain Markdown notes, imported PDFs, and other typed nodes — the source of truth and, together with its sidecar data, the app's store. Every node is plain text on disk; readable and Obsidian-compatible. In the desktop shell, the active vault is held by `VaultSession` (main process): path policy, indexed guard, and engine orchestration for search/ask/re-index. The v1 desktop shell is a **three-pane layout** — Obsidian-style vault rail (left), CodeMirror 6 editor (center), Cursor-style agent sidebar (right); see `docs/adr/0010`. (The current desktop *alpha* is panel-based per `docs/mvp-scope.md`; the three-pane shell is v1, not the alpha.)
+_Avoid_: "workspace", "library", "corpus" (corpus is fine for the engine's view of it, but the user-facing concept is the vault).
 
 **Node**:
 Any addressable entity in the vault that can appear in the graph — a note, a PDF, a flashcard, or an audio/video node (ADR-0009 brings AV into v1). Every node has a plain-text face on disk (a Markdown file, or a Markdown stub beside an asset), so the vault stays portable and Obsidian-readable. See `docs/adr/0003` and `docs/adr/0009`.

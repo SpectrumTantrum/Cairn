@@ -2,7 +2,7 @@
 
 How the engineering skills should consume this repo's domain documentation when exploring the codebase.
 
-This repo is **single-context**: one `CONTEXT.md` + `docs/adr/` at the root. (It houses two products — Cairn and Mneme — but they share one set of local-first / permissive-license principles; if they ever split into separate codebases, migrate to multi-context with a `CONTEXT-MAP.md`.)
+This repo is **single-context**: one `CONTEXT.md` + `docs/adr/` at the root, covering Cairn as a single product (including its internal engine layer, `@cairn/engine`). If the engine were ever split out into a separate codebase, migrate to multi-context with a `CONTEXT-MAP.md`.
 
 ## Before exploring, read these
 

@@ -14,7 +14,7 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 - Heterogeneous **graph** over typed nodes — `note`, `pdf`, `flashcard` — all plain files, edges = wikilinks (ADR-0003)
 - git auto-snapshots (isomorphic-git)
 
-**Retrieval (Mneme — in-process TS, ADR-0001)**
+**Retrieval (in-process TS engine, ADR-0001)**
 - Index = sqlite-vec + FTS5 + metadata under `.cairn/` (disposable, per-machine, never synced)
 - **Hybrid search ON by default** (dense + FTS5 keyword + RRF) — *pending validation spike*
 - Citations: markdown → heading/line; PDF → page + region flash

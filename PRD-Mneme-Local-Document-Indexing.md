@@ -1,5 +1,7 @@
 # PRD — Mneme: Local Multi-Format Document Indexing
 
+> **Historical document.** "Mneme" was the working name of a standalone indexing product that was folded into Cairn as its internal engine (`@cairn/engine`). The name is retired; the technical corrections in this document still bind the engine design.
+
 > Working codename: **Mneme** (Greek muse of memory). Rename freely.
 > Status: Draft v0.1 · Owner: Torres · Type: spec-first PRD (→ CLAUDE.md → implementation)
 

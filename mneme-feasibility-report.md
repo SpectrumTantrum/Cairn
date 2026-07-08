@@ -1,5 +1,7 @@
 # Mneme — Feasibility Report
 
+> **Historical document.** "Mneme" was the working name of a standalone indexing product that was folded into Cairn as its internal engine (`@cairn/engine`). The name is retired; the technical corrections in this document still bind the engine design.
+
 > Skeptical principal-engineer review of `PRD-Mneme-Local-Document-Indexing.md` (Draft v0.1).
 > Mneme ports Cursor's *incremental indexing machinery* (Merkle change detection + chunk-hash embedding cache) to heterogeneous documents, fully local, as a **retrieval layer** (no chat/answer UI).
 > Method: 17 assumptions researched against current sources (25 agents); risky verdicts adversarially verified; 3 highest-risk assumptions spiked with throwaway code in `spikes/mneme/`. Machine: macOS, 18-core / 128 GB.

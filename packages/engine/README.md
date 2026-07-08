@@ -1,6 +1,6 @@
 # @cairn/engine — local-first grounded retrieval
 
-The headless indexing & retrieval engine behind [Cairn](../../CONTEXT.md) (a.k.a. **Mneme**).
+The headless indexing & retrieval engine behind [Cairn](../../CONTEXT.md).
 Point it at a folder of Markdown; it chunks, indexes, and answers **grounded, cited** queries
 over your own notes — fully local, no telemetry, no cloud. This is the spine the desktop app
 sits on (ADR-0001: the engine is headless and CLI-testable by design).
