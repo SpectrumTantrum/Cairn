@@ -8,6 +8,7 @@ const USER_ERROR_PREFIXES = [
   "Choose",
   "Index",
   "No source",
+  "No content",
   "Refusing",
   "The requested vault",
   "The selected vault",
@@ -35,6 +36,17 @@ async function handleUserErrors<T>(fn: () => T | Promise<T>): Promise<T> {
   } catch (error) {
     throw toUserError(error);
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+/** Coerce an unknown IPC value into a validated `string[]` scope include-list, or undefined. */
+function asScope(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const files = value.filter((x): x is string => typeof x === "string");
+  return files.length > 0 ? files : undefined;
 }
 
 export function registerIpcHandlers(): void {
@@ -67,12 +79,44 @@ export function registerIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle("vault:ask", async (_event, question: unknown) => {
+  ipcMain.handle("vault:ask", async (_event, payload: unknown) => {
     return handleUserErrors(() => {
-      if (typeof question !== "string") {
+      const p = asRecord(payload);
+      const question = typeof p.question === "string" ? p.question : undefined;
+      if (question === undefined) {
         throw new Error("Ask needs a question.");
       }
-      return session.ask(question);
+      const model = typeof p.model === "string" ? p.model : undefined;
+      return session.ask(question, { model, scope: asScope(p.scope) });
+    });
+  });
+
+  // Multi-turn streaming chat. Tokens are forwarded to the requesting renderer via
+  // `chat:token` events tagged with the caller's requestId (so the renderer can drop
+  // stale tokens from a superseded request); the invoke resolves with the full result.
+  ipcMain.handle("chat:send", async (event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const text = typeof p.text === "string" ? p.text : "";
+      if (!text.trim()) {
+        throw new Error("Ask needs a question.");
+      }
+      const requestId = typeof p.requestId === "number" ? p.requestId : 0;
+      const model = typeof p.model === "string" ? p.model : undefined;
+      const sender = event.sender;
+      return session.chatSend(text, {
+        model,
+        scope: asScope(p.scope),
+        onToken: (token) => {
+          if (!sender.isDestroyed()) sender.send("chat:token", { requestId, token });
+        },
+      });
+    });
+  });
+
+  ipcMain.handle("chat:reset", async () => {
+    return handleUserErrors(() => {
+      session.resetChat();
     });
   });
 
@@ -94,6 +138,28 @@ export function registerIpcHandlers(): void {
       }
       return session.readSource(file);
     });
+  });
+
+  ipcMain.handle("source:write", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const file = typeof payload === "object" && payload !== null && "file" in payload
+        ? (payload as { file?: unknown }).file
+        : undefined;
+      const content = typeof payload === "object" && payload !== null && "content" in payload
+        ? (payload as { content?: unknown }).content
+        : undefined;
+      if (typeof file !== "string") {
+        throw new Error("No source file was provided.");
+      }
+      if (typeof content !== "string") {
+        throw new Error("No content was provided to save.");
+      }
+      session.writeSource(file, content);
+    });
+  });
+
+  ipcMain.handle("vault:listTree", async () => {
+    return handleUserErrors(() => session.listTree());
   });
 
   ipcMain.handle("ollama:check", async () => {
