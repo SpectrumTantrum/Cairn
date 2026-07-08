@@ -52,6 +52,26 @@ export interface ToolTurn {
  */
 export interface ChatStreamCallbacks {
   onToken?: (token: string) => void;
+  /**
+   * Fires at most once when a provider reports usage/cost for the turn (cloud
+   * adapters do; the local Ollama adapter does not). The ADR-0002 cost-surfacing
+   * invariant is satisfied by forwarding this to the UI after an escalated turn.
+   */
+  onUsage?: (usage: ChatUsage) => void;
+}
+
+/**
+ * Token accounting for one chat turn. All fields optional because providers vary:
+ * OpenAI-compatible endpoints return prompt/completion tokens; OpenRouter also
+ * returns `costUsd`; Ollama returns none. NEVER fabricate — omit what the API
+ * did not return (ADR-0002: surface real cost, never an invented estimate).
+ */
+export interface ChatUsage {
+  promptTokens?: number;
+  completionTokens?: number;
+  totalTokens?: number;
+  /** Real charge in USD, only when the API returns it (e.g. OpenRouter). */
+  costUsd?: number;
 }
 
 export interface ModelProvider {

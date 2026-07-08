@@ -11,7 +11,14 @@ export type { Mode, SearchCoverage, SearchHit, SearchOpts } from "./retrieve.js"
 export { ask, GROUNDING_SYSTEM } from "./ask.js";
 export type { AskResult } from "./ask.js";
 export { ChatThread } from "./chat-thread.js";
-export type { ThreadTurn, ChatThreadOptions, ChatSendOptions, ChatSendResult } from "./chat-thread.js";
+export type { ThreadTurn, ChatThreadOptions, ChatSendOptions, ChatSendResult, SentPayload } from "./chat-thread.js";
+export { CloudProvider, PROVIDER_PRESETS } from "./cloud-provider.js";
+export type {
+  ProviderKind,
+  ProviderPreset,
+  CloudProviderConfig,
+  CloudCredentials,
+} from "./cloud-provider.js";
 export { chat, chatStream, resolveChatModel } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
@@ -31,6 +38,7 @@ export type {
   ModelProvider,
   ChatMessage,
   ChatStreamCallbacks,
+  ChatUsage,
   AgentMessage,
   ToolSchema,
   ToolCall,

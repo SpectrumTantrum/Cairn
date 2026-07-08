@@ -13,7 +13,7 @@ import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat, chatStream } from "./chat.js";
-import type { ChatMessage } from "./model-provider.js";
+import type { ChatMessage, ChatUsage, ModelProvider } from "./model-provider.js";
 import { GROUNDING_SYSTEM } from "./ask.js";
 
 /** One recorded turn in a thread. Assistant turns carry the sources they were grounded in. */
@@ -43,6 +43,22 @@ export interface ChatSendOptions {
   coverageThreshold?: number;
   /** Opt into token-by-token streaming; receives each delta as the model produces it. */
   onToken?: (token: string) => void;
+  /**
+   * Cloud-escalation transport (ADR-0002). When set, THIS turn's chat call routes to
+   * the supplied provider instead of the global local one; `model` is used verbatim
+   * (no local pulled-model validation). Retrieval still runs on the local provider, so
+   * grounding stays local. The turn is flagged `escalated` and reports `usage`/`sent`.
+   */
+  provider?: ModelProvider;
+}
+
+/** What an escalated turn actually transmitted — surfaced for the "what was sent" disclosure. */
+export interface SentPayload {
+  system: string;
+  sourcesBlock: string;
+  question: string;
+  /** Number of prior thread turns included as conversation history. */
+  historyTurns: number;
 }
 
 /** Result of one `send()` — mirrors AskResult's grounding fields for a single turn. */
@@ -54,6 +70,12 @@ export interface ChatSendResult {
   covered: boolean;
   model?: string;
   reason?: string;
+  /** True when the turn was routed to a BYOK cloud provider (ADR-0002). */
+  escalated?: boolean;
+  /** Token/cost accounting, only when a cloud provider reported it. */
+  usage?: ChatUsage;
+  /** Exactly what was transmitted on an escalated turn (inspectable in the UI). */
+  sent?: SentPayload;
 }
 
 export class ChatThread {
@@ -99,7 +121,12 @@ export class ChatThread {
       };
     }
 
-    const model = await resolveChatModel(send.model ?? this.opts.model);
+    // Escalation uses the model id verbatim (it names a cloud model, not a pulled
+    // Ollama tag); the local path validates the model is actually installed.
+    const provider = send.provider;
+    const model = provider
+      ? (send.model ?? this.opts.model ?? "")
+      : await resolveChatModel(send.model ?? this.opts.model);
     const sourcesBlock = hits
       .map((h, i) => `[${i + 1}] ${h.file}:${h.line}${h.heading ? ` > ${h.heading}` : ""}\n${h.text}`)
       .join("\n\n");
@@ -110,11 +137,44 @@ export class ChatThread {
       { role: "user", content: `SOURCES:\n${sourcesBlock}\n\nQUESTION: ${userText}` },
     ];
 
-    const answer = send.onToken
-      ? await chatStream(model, messages, { onToken: send.onToken })
-      : await chat(model, messages);
+    // Escalated turns always stream (cloud adapters report usage on the SSE tail);
+    // local turns stream only when the caller wants token-by-token output.
+    let usage: ChatUsage | undefined;
+    const answer =
+      provider || send.onToken
+        ? await chatStream(
+            model,
+            messages,
+            {
+              onToken: send.onToken,
+              onUsage: (u) => {
+                usage = u;
+              },
+            },
+            false,
+            provider,
+          )
+        : await chat(model, messages);
 
     this.turns.push({ role: "assistant", content: answer, sources: hits, grounded: true, covered: true });
-    return { answer, sources: hits, mode: usedMode, grounded: true, covered: true, model };
+    const result: ChatSendResult = {
+      answer,
+      sources: hits,
+      mode: usedMode,
+      grounded: true,
+      covered: true,
+      model,
+    };
+    if (provider) {
+      result.escalated = true;
+      if (usage) result.usage = usage;
+      result.sent = {
+        system: GROUNDING_SYSTEM,
+        sourcesBlock,
+        question: userText,
+        historyTurns: history.length,
+      };
+    }
+    return result;
   }
 }

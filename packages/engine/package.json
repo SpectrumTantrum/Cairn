@@ -30,12 +30,13 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "cairn": "node dist/cli.js",
-    "test:smoke": "npm run build && node --test test/retrieval-gate.test.mjs test/index-search.test.mjs test/model-provider.test.mjs test/retrieve.test.mjs test/ask-coverage.test.mjs test/reindex-pipeline.test.mjs test/scope.test.mjs test/chat-thread.test.mjs test/wikilinks.test.mjs test/agent-run.test.mjs",
+    "test:smoke": "npm run build && node --test test/retrieval-gate.test.mjs test/index-search.test.mjs test/model-provider.test.mjs test/retrieve.test.mjs test/ask-coverage.test.mjs test/reindex-pipeline.test.mjs test/scope.test.mjs test/chat-thread.test.mjs test/wikilinks.test.mjs test/agent-run.test.mjs test/cloud-provider.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "license": "MIT",
   "dependencies": {
     "@langchain/textsplitters": "^1.0.1",
+    "aws4fetch": "^1.0.20",
     "better-sqlite3": "^12.10.0",
     "sqlite-vec": "^0.1.9"
   },

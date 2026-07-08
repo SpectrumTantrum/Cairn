@@ -148,6 +148,83 @@ test("per-call model override is threaded through ChatThread.send and ask()", as
   }
 });
 
+test("escalation routes the turn to the passed provider, surfaces usage + sent, and skips local model validation", async () => {
+  const localChatCalls = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"], // NOTE: the cloud model below is deliberately NOT in this list
+      chat: (m) => {
+        localChatCalls.push(m);
+        return Promise.resolve("LOCAL");
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const cloudCalls = [];
+    const cloud = {
+      async listModels() {
+        return [];
+      },
+      async isReachable() {
+        return true;
+      },
+      async embed() {
+        throw new Error("Cloud providers are not used for embeddings — retrieval stays local.");
+      },
+      async chat() {
+        cloudCalls.push("chat");
+        return "CLOUD";
+      },
+      async chatStream(_model, _messages, callbacks) {
+        cloudCalls.push("stream");
+        callbacks?.onToken?.("CLO");
+        callbacks?.onToken?.("UD");
+        callbacks?.onUsage?.({ promptTokens: 5, completionTokens: 2, totalTokens: 7, costUsd: 0.0001 });
+        return "CLOUD";
+      },
+    };
+
+    const thread = new ChatThread(index, { mode: "lexical" });
+    const tokens = [];
+    const r = await thread.send("What is cache invalidation?", {
+      provider: cloud,
+      model: "gpt-4o-mini", // a cloud model id, never validated against the local pull list
+      onToken: (t) => tokens.push(t),
+    });
+
+    assert.equal(r.escalated, true);
+    assert.equal(r.model, "gpt-4o-mini");
+    assert.equal(r.answer, "CLOUD");
+    assert.equal(tokens.join(""), "CLOUD");
+    assert.equal(r.usage.totalTokens, 7);
+    assert.equal(r.usage.costUsd, 0.0001);
+    assert.ok(r.sent.system.length > 0);
+    assert.ok(r.sent.sourcesBlock.toLowerCase().includes("cache"));
+    assert.equal(cloudCalls.length, 1);
+    assert.equal(cloudCalls[0], "stream");
+    assert.equal(localChatCalls.length, 0); // the local model was never asked to generate
+  } finally {
+    index.close();
+  }
+});
+
+test("a local (non-escalated) turn never touches a cloud provider and reports no usage/sent", async () => {
+  setModelProvider(new FakeModelProvider({ models: ["qwen3:4b"], chat: () => Promise.resolve("LOCAL [1].") }));
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const thread = new ChatThread(index, { mode: "lexical" });
+    const r = await thread.send("What is a vault?");
+    assert.notEqual(r.escalated, true);
+    assert.equal(r.usage, undefined);
+    assert.equal(r.sent, undefined);
+  } finally {
+    index.close();
+  }
+});
+
 test("thread-level model default applies, and unavailable model rejects", async () => {
   setModelProvider(new FakeModelProvider({ models: ["qwen3:4b", "llama3.2:3b"] }));
   const index = new InMemoryIndex();

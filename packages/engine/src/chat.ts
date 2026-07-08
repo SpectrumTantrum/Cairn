@@ -2,7 +2,7 @@
 // Defaults to a Qwen3 chat model; thinking is disabled (think:false) to keep answers clean
 // and fast. Override with CHAT_MODEL or --model.
 
-import { getModelProvider, type ChatMessage, type ChatStreamCallbacks } from "./model-provider.js";
+import { getModelProvider, type ChatMessage, type ChatStreamCallbacks, type ModelProvider } from "./model-provider.js";
 import { listModels } from "./embed.js";
 
 export type { ChatMessage, ChatStreamCallbacks };
@@ -33,8 +33,13 @@ export async function resolveChatModel(requested?: string): Promise<string> {
   throw new Error("no local chat model — `ollama pull qwen3:4b`");
 }
 
-export async function chat(model: string, messages: ChatMessage[], think = false): Promise<string> {
-  const raw = await getModelProvider().chat(model, messages, think);
+export async function chat(
+  model: string,
+  messages: ChatMessage[],
+  think = false,
+  provider?: ModelProvider,
+): Promise<string> {
+  const raw = await (provider ?? getModelProvider()).chat(model, messages, think);
   return stripThinking(raw);
 }
 
@@ -42,21 +47,26 @@ export async function chat(model: string, messages: ChatMessage[], think = false
  * Streaming counterpart to `chat()`. Forwards each token to `callbacks.onToken`
  * and resolves to the full (thinking-stripped) answer. Falls back to a single
  * `chat()` call — emitting the whole answer as one token — when the active
- * ModelProvider does not implement `chatStream` (e.g. a future cloud adapter),
- * so callers can always rely on `onToken` firing at least once.
+ * ModelProvider does not implement `chatStream`, so callers can always rely on
+ * `onToken` firing at least once.
+ *
+ * `provider` overrides the global (Ollama) transport for THIS call only — the
+ * cloud-escalation seam (ADR-0002). Retrieval/embeddings are unaffected: they run
+ * on the global local provider, so grounding stays local even on an escalated turn.
  */
 export async function chatStream(
   model: string,
   messages: ChatMessage[],
   callbacks?: ChatStreamCallbacks,
   think = false,
+  provider?: ModelProvider,
 ): Promise<string> {
-  const provider = getModelProvider();
-  if (provider.chatStream) {
-    const raw = await provider.chatStream(model, messages, callbacks, think);
+  const active = provider ?? getModelProvider();
+  if (active.chatStream) {
+    const raw = await active.chatStream(model, messages, callbacks, think);
     return stripThinking(raw);
   }
-  const answer = await chat(model, messages, think);
+  const answer = await chat(model, messages, think, provider);
   callbacks?.onToken?.(answer);
   return answer;
 }
