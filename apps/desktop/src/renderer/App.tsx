@@ -7,6 +7,8 @@ import type { IndexState } from "./components/shell/EditorPane";
 import { RightRail } from "./components/shell/RightRail";
 import type { RightTab } from "./components/shell/RightRail";
 import type { ChatTurn } from "./components/shell/ChatTab";
+import type { AgentMode } from "./components/shell/Composer";
+import type { UiProposal } from "./components/shell/AgentTurn";
 import { useResizable } from "./components/shell/useResizable";
 
 function errorMessage(error: unknown): string {
@@ -84,6 +86,7 @@ export function App() {
   const [thread, setThread] = useState<ChatTurn[]>([]);
   const [asking, setAsking] = useState(false);
   const [chatInput, setChatInput] = useState("");
+  const [mode, setMode] = useState<AgentMode>("ask");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [lastSources, setLastSources] = useState<SearchHit[]>([]);
   // Vault-relative file paths unchecked in the Sources tab — excluded from the NEXT
@@ -322,6 +325,113 @@ export function App() {
     }
   }
 
+  function onSubmit(): void {
+    if (mode === "agent") void submitAgent();
+    else void submitChat();
+  }
+
+  // Agent mode (ADR-0008): start a write run — the loop proposes edits; nothing is
+  // written. Each proposal becomes a diff card the user approves or rejects.
+  async function submitAgent(): Promise<void> {
+    const goal = chatInput.trim();
+    if (!goal || asking) return;
+    setThread((prev) => [...prev, { role: "user", text: goal }]);
+    setChatInput("");
+    setAsking(true);
+    setError(null);
+    try {
+      const res = await window.cairn.agentStart({
+        goal,
+        model: selectedModel ?? undefined,
+        scope: scopeActive ? includedFiles : undefined,
+      });
+      const proposals: UiProposal[] = res.proposals.map((p) => ({ ...p, status: "pending" }));
+      setThread((prev) => [
+        ...prev,
+        {
+          role: "agent",
+          runId: res.runId,
+          answer: res.answer,
+          proposals,
+          sources: res.sources,
+          stopReason: res.stopReason,
+          steps: res.steps,
+        },
+      ]);
+      if (res.sources.length > 0) setLastSources(res.sources);
+      setExcludedSources(new Set());
+    } catch (err) {
+      setThread((prev) => [...prev, { role: "error", text: errorMessage(err) }]);
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  const patchProposal = useCallback((runId: string, proposalId: string, patch: Partial<UiProposal>) => {
+    setThread((prev) =>
+      prev.map((t) =>
+        t.role === "agent" && t.runId === runId
+          ? { ...t, proposals: t.proposals.map((p) => (p.id === proposalId ? { ...p, ...patch } : p)) }
+          : t,
+      ),
+    );
+  }, []);
+
+  const onAgentApply = useCallback(
+    async (runId: string, proposalId: string) => {
+      setError(null);
+      try {
+        const res = await window.cairn.agentApply(runId, proposalId);
+        patchProposal(runId, proposalId, { status: res.status });
+        // Refresh the open editor if the agent just wrote the file it has open.
+        if (res.status === "applied" && res.content !== undefined && docKey === res.path) {
+          setSavedContent(res.content);
+          setBuffer(res.content);
+        }
+        if (res.status === "skipped" && res.reason) setError(res.reason);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [docKey, patchProposal],
+  );
+
+  const onAgentReject = useCallback(
+    async (runId: string, proposalId: string) => {
+      setError(null);
+      try {
+        const res = await window.cairn.agentReject(runId, proposalId);
+        patchProposal(runId, proposalId, { status: res.status });
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [patchProposal],
+  );
+
+  const onAgentRevert = useCallback(
+    async (runId: string) => {
+      setError(null);
+      try {
+        await window.cairn.agentRevert(runId);
+        setThread((prev) => prev.map((t) => (t.role === "agent" && t.runId === runId ? { ...t, reverted: true } : t)));
+        // The vault was restored on disk; rebind the open editor to the reverted content.
+        if (activeNode?.type === "markdown" && docKey) {
+          try {
+            const content = await window.cairn.readSource(docKey);
+            setSavedContent(content);
+            setBuffer(content);
+          } catch {
+            // File may have been the target of a reverted create — leave the buffer as-is.
+          }
+        }
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [activeNode, docKey],
+  );
+
   function newThread(): void {
     // Invalidate any in-flight request and drop the server-side thread.
     activeRequestId.current = -1;
@@ -459,6 +569,7 @@ export function App() {
               thread={thread}
               busy={asking}
               input={chatInput}
+              mode={mode}
               composerDisabled={composerDisabled}
               composerReason={composerReason}
               ollamaUp={ollama.up}
@@ -466,10 +577,14 @@ export function App() {
               selectedModel={selectedModel}
               scopeCount={scopeCount}
               onInputChange={setChatInput}
+              onSelectMode={setMode}
               onSelectModel={setSelectedModel}
-              onSubmit={submitChat}
+              onSubmit={onSubmit}
               onClearScope={clearScope}
               onCite={openCitation}
+              onAgentApply={onAgentApply}
+              onAgentReject={onAgentReject}
+              onAgentRevert={onAgentRevert}
               sources={lastSources}
               excludedSources={excludedSources}
               onToggleSource={toggleSource}

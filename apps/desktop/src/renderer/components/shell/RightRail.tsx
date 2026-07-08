@@ -2,6 +2,7 @@ import { MoreHorizontal, Plus } from "lucide-react";
 import type { SearchHit } from "../../../shared/types.js";
 import { ChatTab } from "./ChatTab";
 import type { ChatTurn } from "./ChatTab";
+import type { AgentMode } from "./Composer";
 import { SourcesTab } from "./SourcesTab";
 import { StudioTab } from "./StudioTab";
 
@@ -15,6 +16,7 @@ interface RightRailProps {
   thread: ChatTurn[];
   busy: boolean;
   input: string;
+  mode: AgentMode;
   composerDisabled: boolean;
   composerReason: string | null;
   ollamaUp: boolean;
@@ -22,10 +24,14 @@ interface RightRailProps {
   selectedModel: string | null;
   scopeCount: number;
   onInputChange(value: string): void;
+  onSelectMode(mode: AgentMode): void;
   onSelectModel(model: string): void;
   onSubmit(): void;
   onClearScope(): void;
   onCite(source: SearchHit): void;
+  onAgentApply(runId: string, proposalId: string): void;
+  onAgentReject(runId: string, proposalId: string): void;
+  onAgentRevert(runId: string): void;
   // sources
   sources: SearchHit[];
   excludedSources: Set<string>;
@@ -79,6 +85,7 @@ export function RightRail(props: RightRailProps) {
             thread={props.thread}
             busy={props.busy}
             input={props.input}
+            mode={props.mode}
             composerDisabled={props.composerDisabled}
             composerReason={props.composerReason}
             ollamaUp={props.ollamaUp}
@@ -86,10 +93,14 @@ export function RightRail(props: RightRailProps) {
             selectedModel={props.selectedModel}
             scopeCount={props.scopeCount}
             onInputChange={props.onInputChange}
+            onSelectMode={props.onSelectMode}
             onSelectModel={props.onSelectModel}
             onSubmit={props.onSubmit}
             onClearScope={props.onClearScope}
             onCite={props.onCite}
+            onAgentApply={props.onAgentApply}
+            onAgentReject={props.onAgentReject}
+            onAgentRevert={props.onAgentRevert}
           />
         ) : activeTab === "sources" ? (
           <SourcesTab

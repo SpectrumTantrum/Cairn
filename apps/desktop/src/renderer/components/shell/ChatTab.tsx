@@ -1,17 +1,22 @@
 import { AlertTriangle, Sparkles } from "lucide-react";
 import type { ChatSendResult, SearchHit } from "../../../shared/types.js";
 import { Composer } from "./Composer";
+import type { AgentMode } from "./Composer";
+import { AgentTurn } from "./AgentTurn";
+import type { AgentThreadTurn } from "./AgentTurn";
 
 export type ChatTurn =
   | { role: "user"; text: string }
   | { role: "assistant"; streaming: true; text: string }
   | { role: "assistant"; streaming: false; result: ChatSendResult }
+  | AgentThreadTurn
   | { role: "error"; text: string };
 
 interface ChatTabProps {
   thread: ChatTurn[];
   busy: boolean;
   input: string;
+  mode: AgentMode;
   composerDisabled: boolean;
   composerReason: string | null;
   ollamaUp: boolean;
@@ -19,21 +24,30 @@ interface ChatTabProps {
   selectedModel: string | null;
   scopeCount: number;
   onInputChange(value: string): void;
+  onSelectMode(mode: AgentMode): void;
   onSelectModel(model: string): void;
   onSubmit(): void;
   onClearScope(): void;
   onCite(source: SearchHit): void;
+  onAgentApply(runId: string, proposalId: string): void;
+  onAgentReject(runId: string, proposalId: string): void;
+  onAgentRevert(runId: string): void;
 }
 
 export function ChatTab(props: ChatTabProps) {
-  const { thread, busy, onCite } = props;
+  const { thread, busy, mode, onCite } = props;
+  const lastRole = thread.length ? thread[thread.length - 1].role : null;
+  // For the agent (non-streaming) path there is no streaming placeholder — show a
+  // working pulse while a run is in flight (the last turn is still the user's goal).
+  const showWorking = busy && lastRole === "user";
   return (
     <>
       <div className="chat-thread">
         {thread.length === 0 && !busy ? (
           <p className="chat-empty">
-            Ask a question grounded in this vault. Every answer cites the notes it used — click a
-            citation to open the source.
+            {mode === "agent"
+              ? "Give the agent a task. It proposes edits as diffs you approve one at a time — nothing is written until you accept it."
+              : "Ask a question grounded in this vault. Every answer cites the notes it used — click a citation to open the source."}
           </p>
         ) : null}
         {thread.map((turn, i) => {
@@ -47,11 +61,26 @@ export function ChatTab(props: ChatTabProps) {
           if (turn.role === "error") {
             return <ErrorTurn key={i} text={turn.text} />;
           }
+          if (turn.role === "agent") {
+            return (
+              <AgentTurn
+                key={i}
+                turn={turn}
+                onApply={props.onAgentApply}
+                onReject={props.onAgentReject}
+                onRevert={props.onAgentRevert}
+                onCite={onCite}
+              />
+            );
+          }
           if (turn.streaming) {
             return <StreamingTurn key={i} text={turn.text} />;
           }
           return <AssistantTurn key={i} result={turn.result} onCite={onCite} />;
         })}
+        {showWorking ? (
+          <StreamingTurn text="" label={mode === "agent" ? "Proposing edits…" : "Grounding in your notes…"} />
+        ) : null}
       </div>
       <Composer
         value={props.input}
@@ -61,8 +90,10 @@ export function ChatTab(props: ChatTabProps) {
         models={props.models}
         selectedModel={props.selectedModel}
         busy={busy}
+        mode={props.mode}
         scopeCount={props.scopeCount}
         onChange={props.onInputChange}
+        onSelectMode={props.onSelectMode}
         onSelectModel={props.onSelectModel}
         onSubmit={props.onSubmit}
         onClearScope={props.onClearScope}
@@ -72,7 +103,7 @@ export function ChatTab(props: ChatTabProps) {
 }
 
 /** The in-flight assistant turn: shows the thinking pulse until the first token lands. */
-function StreamingTurn({ text }: { text: string }) {
+function StreamingTurn({ text, label }: { text: string; label?: string }) {
   return (
     <div className="chat-assistant">
       <span className="chat-avatar">
@@ -81,7 +112,7 @@ function StreamingTurn({ text }: { text: string }) {
       <div className="chat-assistant-body">
         {text.length === 0 ? (
           <span className="chat-thinking">
-            <span className="dot-pulse" /> Grounding in your notes…
+            <span className="dot-pulse" /> {label ?? "Grounding in your notes…"}
           </span>
         ) : (
           <div className="assistant-text streaming">{text}</div>

@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { ArrowUp, Check, ChevronDown, Cloud, Filter, X } from "lucide-react";
 
+/** Top-level trust mode (ADR-0008). Ask is read-only; Agent runs the write tool loop. */
+export type AgentMode = "ask" | "agent";
+
 interface ComposerProps {
   value: string;
   disabled: boolean;
@@ -11,9 +14,11 @@ interface ComposerProps {
   models: string[];
   selectedModel: string | null;
   busy: boolean;
+  mode: AgentMode;
   /** Number of sources the next question is scoped to (0 = whole index). */
   scopeCount: number;
   onChange(value: string): void;
+  onSelectMode(mode: AgentMode): void;
   onSelectModel(model: string): void;
   onSubmit(): void;
   onClearScope(): void;
@@ -27,8 +32,10 @@ export function Composer({
   models,
   selectedModel,
   busy,
+  mode,
   scopeCount,
   onChange,
+  onSelectMode,
   onSelectModel,
   onSubmit,
   onClearScope,
@@ -60,13 +67,13 @@ export function Composer({
           className="composer-input"
           rows={2}
           value={value}
-          placeholder="Ask, or / for a preset, @ for a node…"
+          placeholder={mode === "agent" ? "Describe an edit — the agent proposes diffs you approve…" : "Ask, or / for a preset, @ for a node…"}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
         <div className="composer-controls">
-          <ModeChip />
+          <ModeChip mode={mode} onSelectMode={onSelectMode} />
           <ModelChip
             models={models}
             selectedModel={selectedModel}
@@ -100,29 +107,42 @@ export function Composer({
   );
 }
 
-/** Trust-mode picker. Ask is the only live mode; Agent is a stub (needs write-safety core). */
-function ModeChip() {
+/**
+ * Trust-mode picker (ADR-0008). Ask = read-only grounded Q&A; Agent = the write
+ * tool-loop, where every proposed edit is a diff you approve before it touches disk.
+ */
+function ModeChip({ mode, onSelectMode }: { mode: AgentMode; onSelectMode(mode: AgentMode): void }) {
   const [open, setOpen] = useState(false);
   const ref = useCloseOnOutside(() => setOpen(false));
   return (
     <span className="menu-wrap" ref={ref}>
       <button type="button" className="chip accent" onClick={() => setOpen((v) => !v)}>
-        Ask <ChevronDown size={13} />
+        {mode === "agent" ? "Agent" : "Ask"} <ChevronDown size={13} />
       </button>
       {open ? (
         <div className="menu">
-          <button type="button" className="menu-item selected">
-            <Check size={13} /> Ask
+          <button
+            type="button"
+            className={`menu-item${mode === "ask" ? " selected" : ""}`}
+            onClick={() => {
+              onSelectMode("ask");
+              setOpen(false);
+            }}
+          >
+            {mode === "ask" ? <Check size={13} /> : <span style={{ width: 13 }} />} Ask
             <span className="menu-sub">read-only · grounded</span>
           </button>
           <button
             type="button"
-            className="menu-item"
-            disabled
-            title="Coming in v1 — needs the agent write-safety core (ADR-0008)"
+            className={`menu-item${mode === "agent" ? " selected" : ""}`}
+            title="Every edit is shown as a diff and applied only when you approve it (ADR-0008)"
+            onClick={() => {
+              onSelectMode("agent");
+              setOpen(false);
+            }}
           >
-            Agent
-            <span className="menu-sub">write · tool loop</span>
+            {mode === "agent" ? <Check size={13} /> : <span style={{ width: 13 }} />} Agent
+            <span className="menu-sub">write · approve each diff</span>
           </button>
         </div>
       ) : null}

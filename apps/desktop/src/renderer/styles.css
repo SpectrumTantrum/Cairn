@@ -1032,3 +1032,135 @@ button {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ---- Agent-edit diff cards (ADR-0008): bordered card, header, Accept/Reject,
+   red/green diff body. Chat-side for this slice; in-editor inline hunks come later. */
+.diff-card {
+  margin-top: 10px;
+  border: 1px solid var(--divider-strong);
+  border-radius: var(--r-card);
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.diff-card.status-rejected,
+.diff-card.status-skipped {
+  opacity: 0.62;
+}
+.diff-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--divider);
+}
+.diff-card-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-meta);
+  color: var(--text-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-card-title svg {
+  color: var(--accent);
+  flex: none;
+}
+.diff-card-stats {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  white-space: nowrap;
+}
+.diff-added {
+  color: var(--add-text);
+}
+.diff-removed {
+  color: var(--rm-text);
+}
+.diff-body {
+  margin: 0;
+  padding: 6px 0;
+  max-height: 260px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  line-height: 1.5;
+  white-space: pre;
+  tab-size: 2;
+}
+.diff-line {
+  display: block;
+  padding: 0 10px;
+}
+.diff-line.add {
+  background: var(--add-bg);
+  color: var(--add-text);
+}
+.diff-line.remove {
+  background: var(--rm-bg);
+  color: var(--rm-text);
+}
+.diff-line.context {
+  color: var(--text-muted);
+}
+.diff-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--divider);
+}
+.diff-accept,
+.diff-reject {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--divider-strong);
+  background: transparent;
+  font-size: var(--fs-meta);
+  cursor: pointer;
+}
+.diff-accept {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--divider-strong));
+}
+.diff-accept:hover {
+  background: var(--add-bg);
+}
+.diff-reject {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--divider-strong));
+}
+.diff-reject:hover {
+  background: var(--rm-bg);
+}
+.diff-status-label {
+  font-size: var(--fs-meta);
+  color: var(--text-muted);
+}
+.diff-status-label.applied {
+  color: var(--ok);
+}
+.diff-status-label.rejected,
+.diff-status-label.skipped {
+  color: var(--danger);
+}
+.agent-run-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.agent-run-summary {
+  font-size: var(--fs-meta);
+  color: var(--text-muted);
+}
+.agent-run-reverted {
+  font-size: var(--fs-meta);
+  color: var(--danger);
+}
