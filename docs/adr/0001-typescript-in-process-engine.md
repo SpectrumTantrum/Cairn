@@ -4,7 +4,7 @@ Cairn is one product whose shell must be Electron + TypeScript, so we build the 
 
 ## Considered options
 
-- **Python engine as a sidecar** (keep Docling + LanceDB; Electron spawns it over local HTTP/stdio): best parsing/retrieval quality and matches the engine's original PRD [`PRD-Mneme-Local-Document-Indexing.md`, the engine's retired standalone-product name], but bundling a Python runtime + torch/Docling models (hundreds of MB–GBs) inside a notarized Electron app is a heavy, fragile packaging burden for a solo dev.
+- **Python engine as a sidecar** (keep Docling + LanceDB; Electron spawns it over local HTTP/stdio): best parsing/retrieval quality and matches the engine's original PRD [`PRD-engine-local-document-indexing.md`, the engine's retired standalone-product name], but bundling a Python runtime + torch/Docling models (hundreds of MB–GBs) inside a notarized Electron app is a heavy, fragile packaging burden for a solo dev.
 - **Hybrid** (TS core in-process + an on-demand Python Docling sidecar for PDF extraction only): keeps Docling where it matters but still ships Python.
 
 ## Consequences

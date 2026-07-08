@@ -47,8 +47,8 @@ disposable and per-machine; your Markdown files are the source of truth. See
 | Path | What |
 |---|---|
 | [`packages/engine/`](packages/engine/) | The MVP — headless engine CLI (index + cited hybrid search) |
-| [`PRD-cairn.md`](PRD-cairn.md), [`PRD-Mneme-Local-Document-Indexing.md`](PRD-Mneme-Local-Document-Indexing.md) | Product requirements for Cairn and its engine |
-| [`cairn-feasibility-report.md`](cairn-feasibility-report.md), [`mneme-feasibility-report.md`](mneme-feasibility-report.md) | Skeptical, spike-backed feasibility reviews — these **override** the PRDs where they disagree |
+| [`PRD-cairn.md`](PRD-cairn.md), [`PRD-engine-local-document-indexing.md`](PRD-engine-local-document-indexing.md) | Product requirements for Cairn and its engine |
+| [`cairn-feasibility-report.md`](cairn-feasibility-report.md), [`engine-feasibility-report.md`](engine-feasibility-report.md) | Skeptical, spike-backed feasibility reviews — these **override** the PRDs where they disagree |
 | [`docs/adr/`](docs/adr/) | Architecture Decision Records (0001–0008) |
 | [`docs/v1-scope.md`](docs/v1-scope.md) · [`engineering-decisions.md`](docs/engineering-decisions.md) · [`model-strategy.md`](docs/model-strategy.md) | Scope lock, build specs, model tiers |
 | [`CONTEXT.md`](CONTEXT.md) | Project glossary (the canonical terms) |

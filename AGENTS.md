@@ -8,9 +8,9 @@ A **real, in-progress codebase plus its planning/feasibility artifacts** — one
 
 - **`packages/engine`** (`@cairn/engine`) — the headless, in-process TypeScript indexing & retrieval engine. Grounded, cited **hybrid search** (dense **sqlite-vec** brute-force KNN + **FTS5** keyword, fused with **RRF**) over a Markdown vault, plus a `cairn` CLI (`index` / `search` / `ask`). Embeddings via a local **Ollama** `ModelProvider` seam. `src/` is real; `Index` (persistence) and `ModelProvider` (transport) are the seams.
 - **`apps/desktop`** (`@cairn/desktop`) — the **Electron + React + TypeScript** desktop alpha wrapping the engine: index / search / ask panels + a source viewer. `VaultSession` (main process) owns vault path policy, the indexed guard, and engine orchestration.
-- **Planning/feasibility artifacts** — `PRD-cairn.md`, `PRD-Mneme-Local-Document-Indexing.md`, the two `*-feasibility-report.md`, `docs/` (scope, ADRs, specs), `CONTEXT.md`, and `spikes/`.
+- **Planning/feasibility artifacts** — `PRD-cairn.md`, `PRD-engine-local-document-indexing.md`, the two `*-feasibility-report.md`, `docs/` (scope, ADRs, specs), `CONTEXT.md`, and `spikes/`.
 
-Note: `PRD-Mneme-Local-Document-Indexing.md` describes a standalone product design that was **superseded** and folded into Cairn's engine — implemented in-process as `@cairn/engine` (a Python ingestion *sidecar* is planned for multi-format parsing, see ADR-0009). The feasibility corrections below still bind the engine's design.
+Note: `PRD-engine-local-document-indexing.md` describes a standalone product design that was **superseded** and folded into Cairn's engine — implemented in-process as `@cairn/engine` (a Python ingestion *sidecar* is planned for multi-format parsing, see ADR-0009). The feasibility corrections below still bind the engine's design.
 
 Git repo: **github.com/SpectrumTantrum/Cairn** (public, `main`).
 
@@ -40,7 +40,7 @@ The engine gate suite is fully self-contained (fake `ModelProvider` + `InMemoryI
 
 ## The reports override the PRDs (read this before implementing anything)
 
-Each PRD was put through a skeptical feasibility review with spikes. **`cairn-feasibility-report.md`** and **`mneme-feasibility-report.md`** are authoritative: they contain corrections that contradict specific claims in the PRDs. If you implement from the raw PRD you will rebuild disproven assumptions. Read the report's *Verdict*, *Assumptions table*, *Spike findings*, and *Revised recommendation* first. (Those corrections still bind the engine's parsing/indexing design even though the standalone product they were written for was folded in.)
+Each PRD was put through a skeptical feasibility review with spikes. **`cairn-feasibility-report.md`** and **`engine-feasibility-report.md`** are authoritative: they contain corrections that contradict specific claims in the PRDs. If you implement from the raw PRD you will rebuild disproven assumptions. Read the report's *Verdict*, *Assumptions table*, *Spike findings*, and *Revised recommendation* first. (Those corrections still bind the engine's parsing/indexing design even though the standalone product they were written for was folded in.)
 
 Binding corrections that are easy to get wrong:
 

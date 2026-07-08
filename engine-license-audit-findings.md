@@ -1,4 +1,4 @@
-# Mneme PRD — Parsing/Library Stack License Audit
+# Engine PRD — Parsing/Library Stack License Audit (historical)
 
 > **Historical document.** "Mneme" was the working name of a standalone indexing product that was folded into Cairn as its internal engine (`@cairn/engine`). The name is retired; the technical corrections in this document still bind the engine design.
 
