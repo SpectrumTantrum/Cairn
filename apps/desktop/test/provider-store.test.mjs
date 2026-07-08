@@ -14,12 +14,32 @@ import { test } from "node:test";
 
 const { ProviderStore, testConnection } = await import("../out-test/provider-store.js");
 
-/** Reversible fake "encryption" — base64 wrapper, enough to exercise the store seam. */
+/**
+ * Reversible fake "encryption" standing in for Electron safeStorage.
+ *
+ * This actually transforms the plaintext bytes (fixed multi-byte XOR key), unlike
+ * a `"enc:" + plain` prefix wrapper: prefixing leaves the plaintext bytes intact
+ * as a substring of the "ciphertext", so once the store base64-encodes that for
+ * disk, the plaintext substring is gone from the on-disk text for the SAME reason
+ * an identity/no-op cipher would be — base64 alone obscures ASCII substrings. That
+ * makes the "plaintext never on disk" assertion pass even when the fake cipher
+ * does nothing, which is a false sense of security. XOR-ing the bytes means the
+ * assertion can only pass when encrypt() actually did something, and the round
+ * trip below proves it's still reversible.
+ */
+const FAKE_CIPHER_KEY = Buffer.from([0x5a, 0xc3, 0x18, 0x7e, 0x91, 0x2f, 0xd4]);
+
+function xorBytes(buf, key) {
+  const out = Buffer.alloc(buf.length);
+  for (let i = 0; i < buf.length; i += 1) out[i] = buf[i] ^ key[i % key.length];
+  return out;
+}
+
 function fakeCrypto(available = true) {
   return {
     available: () => available,
-    encrypt: (plain) => Buffer.from(`enc:${plain}`, "utf8"),
-    decrypt: (cipher) => cipher.toString("utf8").slice(4),
+    encrypt: (plain) => xorBytes(Buffer.from(plain, "utf8"), FAKE_CIPHER_KEY),
+    decrypt: (cipher) => xorBytes(cipher, FAKE_CIPHER_KEY).toString("utf8"),
   };
 }
 
@@ -57,6 +77,7 @@ test("save then list returns metadata with hasKey but no key material", () => {
 
 test("the plaintext key is never written to the store file", () => {
   const { store, filePath, dir } = makeStore();
+  const apiKey = "sk-ant-plaintext-xyz";
   try {
     store.save({
       presetId: "anthropic",
@@ -64,10 +85,24 @@ test("the plaintext key is never written to the store file", () => {
       kind: "anthropic",
       baseUrl: "https://api.anthropic.com/v1",
       model: "claude-3-5-sonnet",
-      secret: { apiKey: "sk-ant-plaintext-xyz" },
+      secret: { apiKey },
     });
     const onDisk = readFileSync(filePath, "utf8");
-    assert.equal(onDisk.includes("sk-ant-plaintext-xyz"), false);
+    assert.equal(onDisk.includes(apiKey), false);
+
+    // Positive control: the fake cipher itself is reversible, so this isn't
+    // passing merely because the cipher is broken/one-way.
+    const crypto = fakeCrypto();
+    assert.equal(crypto.decrypt(crypto.encrypt(apiKey)), apiKey);
+
+    // Guard against a no-op/identity cipher hiding behind the base64 disk
+    // encoding: if `secretCipher` were simply base64(plaintext-json), the
+    // substring check above would still have passed, giving false confidence.
+    const parsed = JSON.parse(onDisk);
+    const secretCipher = parsed.providers[0].secretCipher;
+    const plainSecretJson = JSON.stringify({ apiKey });
+    const noopCipherWouldProduce = Buffer.from(plainSecretJson, "utf8").toString("base64");
+    assert.notEqual(secretCipher, noopCipherWouldProduce);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
