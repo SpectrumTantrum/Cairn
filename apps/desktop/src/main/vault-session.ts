@@ -15,6 +15,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -483,26 +484,64 @@ export class VaultSession {
 
   /**
    * Write an editor buffer back to a vault-relative Markdown path. Rejects paths that
-   * escape the vault lexically (`../`), that resolve out of the vault through a symlink,
+   * escape the vault lexically (`../`), that resolve out of the vault through a symlink
+   * (leaf OR intermediate dir), that land inside the `.cairn/` index/checkpoint dir,
    * or that are not `.md` (ADR-0009: index & cite everything, edit only Markdown).
+   *
+   * This is the single write gate: both editor saves and the Agent apply path
+   * (`agentApplyHunk`) funnel through here, so the symlink guard covers both.
    */
   writeSource(file: string, content: string): void {
+    const vaultRoot = this.requireVault();
     const target = this.resolveSourcePath(file);
     if (!target.toLowerCase().endsWith(".md")) {
       throw new Error("Refusing to write a non-Markdown file.");
     }
-    const vaultRoot = this.requireVault();
+    // Never let the editor or an agent write into the disposable index/checkpoint dir
+    // (`.cairn/` holds index.db + checkpoints.git). `target` is already vault-relative
+    // and symlink-guarded below, so a lexical first-segment check is sufficient.
+    if (relative(vaultRoot, target).split(sep)[0] === ".cairn") {
+      throw new Error("Refusing to write inside the .cairn index directory.");
+    }
     this.assertNoSymlinkEscape(vaultRoot, target);
     writeFileSync(target, content, "utf8");
   }
 
   /**
    * Reject writes whose real (symlink-resolved) location falls outside the vault.
-   * `resolveInsideVault` is purely lexical, so a symlinked directory inside the vault
-   * pointing elsewhere would otherwise let a write escape. We realpath the deepest
-   * existing ancestor of the target and require it to stay under the vault root.
+   * `resolveInsideVault` is purely lexical, so a symlink inside the vault pointing
+   * elsewhere would otherwise let a write escape. Two guards, both required:
+   *
+   * 1. The target LEAF must not itself be a symlink. `writeFileSync` follows symlinks,
+   *    so a `.md` leaf that is a symlink — even a DANGLING one pointing at a
+   *    not-yet-existing path OUTSIDE the vault — would let the write escape and create
+   *    an arbitrary file there. The ancestor-realpath probe (guard 2) cannot catch
+   *    this: `existsSync()` on a dangling symlink is false, so the probe walks PAST the
+   *    leaf up to its in-vault parent, realpath passes, and the write goes through the
+   *    link. `lstat` does not follow the final component, so we detect and refuse it.
+   * 2. Some intermediate directory could be a symlink pointing outside the vault. We
+   *    realpath the deepest existing ancestor of the target and require it to stay
+   *    under the vault root.
+   *
+   * Residual TOCTOU: a symlink could be swapped in for `target` in the window between
+   * the `lstat` here and the `writeFileSync` in the caller. Node exposes no O_NOFOLLOW
+   * open-flag string, so the lstat-reject is the primary guard and this window cannot
+   * be fully closed here. Cairn is a local, single-user tool with no untrusted
+   * concurrent writers, so this narrow local race is accepted under that threat model.
    */
   private assertNoSymlinkEscape(vaultRoot: string, target: string): void {
+    // Guard 1: refuse a symlinked leaf (dangling or not).
+    let leafStat: ReturnType<typeof lstatSync> | null = null;
+    try {
+      leafStat = lstatSync(target);
+    } catch {
+      leafStat = null; // target does not exist yet — a normal new-file write.
+    }
+    if (leafStat?.isSymbolicLink()) {
+      throw new Error("Refusing to write through a symbolic link.");
+    }
+
+    // Guard 2: refuse a symlinked intermediate directory that escapes the vault.
     let probe = target;
     while (!existsSync(probe)) {
       const parent = dirname(probe);

@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -233,6 +234,44 @@ test("writeSource rejects writes that escape the vault through a symlink", () =>
   } finally {
     rmSync(vault, { recursive: true, force: true });
     rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("writeSource rejects writing through a dangling-leaf .md symlink pointing outside the vault", () => {
+  // The proven exploit: a `.md` file inside the vault that is ITSELF a symlink to a
+  // not-yet-existing path outside the vault. existsSync(target) is false (dangling),
+  // so the old ancestor-realpath probe walked up to the in-vault parent and let the
+  // write escape through the link, creating an arbitrary file outside the vault.
+  const vault = makeVaultDir();
+  const outside = makeVaultDir();
+  try {
+    const outsideTarget = join(outside, "pwned.md");
+    symlinkSync(outsideTarget, join(vault, "evil.md"));
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(
+      () => session.writeSource("evil.md", "PWNED"),
+      /Refusing to write through a symbolic link/,
+    );
+    // The escape must NOT have happened: no file was created outside the vault.
+    assert.equal(existsSync(outsideTarget), false, "must not write through the symlink");
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+});
+
+test("writeSource rejects writing into the .cairn index directory", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(
+      () => session.writeSource(".cairn/foo.md", "x"),
+      /Refusing to write inside the .cairn index directory/,
+    );
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
   }
 });
 
