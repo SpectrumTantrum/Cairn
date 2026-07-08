@@ -50,6 +50,52 @@ test("resolveSourcePath returns an absolute path inside the vault", () => {
   }
 });
 
+test("readSource returns the file contents for a vault-relative path", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(join(vault, "note.md"), "# Note\n\nBody line.\n");
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.equal(session.readSource("note.md"), "# Note\n\nBody line.\n");
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("readSource rejects paths outside the vault", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.readSource("../outside.md"), /Refusing to open a path outside/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("readSource reports a friendly error for a missing file", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.readSource("gone.md"), /The source file is no longer available/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("readSource refuses to read a directory", () => {
+  const vault = makeVaultDir();
+  try {
+    mkdirSync(join(vault, "subdir"), { recursive: true });
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.readSource("subdir"), /The source file is no longer available/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("search uses the injected Index adapter when indexed", async () => {
   const vault = makeVaultDir();
   try {

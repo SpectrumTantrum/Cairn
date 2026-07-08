@@ -375,3 +375,43 @@ pre {
   line-height: 1.55;
   white-space: pre-wrap;
 }
+
+.source-file {
+  overflow: auto;
+  max-height: calc(100vh - 248px);
+  margin: 16px 0 0;
+  border: 1px solid #e1dccf;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.82rem;
+  line-height: 1.55;
+}
+
+.source-line {
+  display: grid;
+  grid-template-columns: 3.2em 1fr;
+  gap: 12px;
+  padding: 0 10px;
+  color: #292d28;
+  scroll-margin: 24px;
+}
+
+.source-line-no {
+  color: #9a9384;
+  text-align: right;
+  user-select: none;
+}
+
+.source-line-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.source-line.cited {
+  background: #fbf1c7;
+}
+
+.source-line.cited .source-line-no {
+  color: #b57614;
+  font-weight: 600;
+}

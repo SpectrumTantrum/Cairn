@@ -11,6 +11,7 @@ const USER_ERROR_PREFIXES = [
   "Refusing",
   "The requested vault",
   "The selected vault",
+  "The source file",
   "Ask needs",
 ];
 
@@ -83,6 +84,15 @@ export function registerIpcHandlers(): void {
       const sourcePath = session.resolveSourcePath(file);
       const message = await shell.openPath(sourcePath);
       if (message) throw new Error(message);
+    });
+  });
+
+  ipcMain.handle("source:read", async (_event, file: unknown) => {
+    return handleUserErrors(() => {
+      if (typeof file !== "string") {
+        throw new Error("No source file was provided.");
+      }
+      return session.readSource(file);
     });
   });
 

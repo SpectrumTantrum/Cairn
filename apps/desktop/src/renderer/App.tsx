@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AskResult, IndexStats, OllamaStatus, SearchHit } from "../shared/types.js";
 import { AskPanel } from "./components/AskPanel";
 import { IndexPanel } from "./components/IndexPanel";
@@ -102,6 +102,9 @@ export function App() {
     }
   }
 
+  // Stable identity so SourceViewer's load effect does not re-run every render.
+  const readSource = useCallback((file: string) => window.cairn.readSource(file), []);
+
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -169,6 +172,7 @@ export function App() {
           source={selectedSource}
           disabled={!vaultPath}
           onOpenSource={openSelectedSource}
+          onReadSource={readSource}
         />
       </section>
     </main>

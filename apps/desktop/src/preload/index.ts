@@ -10,6 +10,7 @@ export interface CairnApi {
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string): Promise<AskResult>;
   openSource(file: string): Promise<void>;
+  readSource(file: string): Promise<string>;
   checkOllama(): Promise<OllamaStatus>;
 }
 
@@ -19,6 +20,7 @@ const api: CairnApi = {
   searchVault: (query) => ipcRenderer.invoke("vault:search", query),
   askVault: (question) => ipcRenderer.invoke("vault:ask", question),
   openSource: (file) => ipcRenderer.invoke("source:open", file),
+  readSource: (file) => ipcRenderer.invoke("source:read", file),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
 };
 

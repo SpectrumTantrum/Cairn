@@ -8,7 +8,7 @@ import {
   type IndexStats,
   type SearchHit,
 } from "@cairn/engine";
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 export interface VaultSessionDeps {
@@ -111,6 +111,15 @@ export class VaultSession {
 
   resolveSourcePath(file: string): string {
     return resolveInsideVault(this.requireVault(), file);
+  }
+
+  /** Read a vault-relative source file for in-app viewing. Path-validated against the vault root. */
+  readSource(file: string): string {
+    const target = this.resolveSourcePath(file);
+    if (!existsSync(target) || !statSync(target).isFile()) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    return readFileSync(target, "utf8");
   }
 }
 
