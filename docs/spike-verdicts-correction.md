@@ -22,7 +22,7 @@ the table + "What changed" below). The remaining three are honestly-scoped and u
 
 ## What changed, and when
 
-1. ✅ **Done (2026-06-14)** — this note + a banner on the four affected spike READMEs + a status pointer in `v1-scope.md`.
+1. ✅ **Done (2026-06-14)** — this note + a banner on the four affected spike specs + a status pointer in `v1-scope.md`.
 2. ✅ **Done (2026-06-14)** — rebuilt the retrieval eval as **`spikes/rag-quality-v2/`**: non-leaky human-judged BEIR (SciFact + NFCorpus), hard same-topic distractors, multi-gold/graded scoring, **Qwen3 dense (sym + instruct) vs TF-IDF vs BM25 vs hybrid**, with a published-BM25 validity anchor and a query→gold overlap breakdown. Result: the embedder **beats BM25**, strongest on low-overlap queries; hybrid ≥ both arms. **Independently audited** (validity + leakage/fairness, both PASS, no blocking issues).
 3. ✅ **Done (2026-06-14)** — durable conclusions written into `docs/model-strategy.md` (embedder validation + the load-bearing **instruction-prefix** requirement), `docs/specs/G10-retrieval-api.md` (query instruction prefix in §3; the coverage-threshold note), and `cairn-feasibility-report.md` (row 9). **ADR-0002 unchanged** — it is the model-tiering *shape*; the embedder pick lives in `model-strategy.md`.
 

@@ -40,7 +40,7 @@ node src/cli.ts ask "why did we choose X over Y?" --in /path/to/notes
 `search` results come back as `file:line › heading` citations; `ask` answers **only** from
 your notes — every claim cites a source, and it refuses rather than guess when nothing matches. The index lives in `<folder>/.cairn/` —
 disposable and per-machine; your Markdown files are the source of truth. See
-[`packages/engine/README.md`](packages/engine/README.md) for details.
+[`packages/engine/engine-package.md`](packages/engine/engine-package.md) for details.
 
 ## What's in this repo
 

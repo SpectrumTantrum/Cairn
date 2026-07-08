@@ -55,7 +55,7 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 - Burned-in annotated-PDF export
 
 ## Build prerequisites (spikes — scaffolded, must be *run* before the dependent work)
-Scaffolds written; each dir has a README + runnable stub. These are the genuine remaining unknowns — only running them resolves them.
+Scaffolds written; each dir has a spike spec + runnable stub. These are the genuine remaining unknowns — only running them resolves them.
 
 > ⚠️ **Status (2026-06-14):** these spikes have now been run and adversarially reviewed — **4 of 5 pass their own harness but are not ADR-grade** (leaky/synthetic/narrow fixtures). Read [`spike-verdicts-correction.md`](spike-verdicts-correction.md) before citing any of them; `rag-quality` is being rebuilt.
 - **Hybrid combo:** sqlite-vec + FTS5 + RRF on real chunks → `spikes/hybrid-sqlite/` *(before Phase-1 retrieval relies on hybrid)*

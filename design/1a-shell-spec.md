@@ -191,7 +191,7 @@ and should be dropped. Use the codebase's icon library for all glyphs.
 
 ## Files in this bundle
 - `1a-reference.html` — standalone visual reference of the chosen layout (option 1a). Open in a browser.
-- `README.md` — this document (self-sufficient spec).
+- `1a-shell-spec.md` — this document (self-sufficient spec).
 
 ## Grounding references (from the Cairn repo, if available)
 `docs/adr/0010` (three-pane shell), `0008` (agent write-safety / inline diffs / revert),

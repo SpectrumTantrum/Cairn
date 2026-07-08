@@ -311,7 +311,7 @@ async function runAgentLoop(model: string, chatFn: ChatFn = chat): Promise<RunRe
 //        string-vs-int trap: a model that emits k:"8" (string) FAILS here.
 // Optional fields (e.g. search_notes.k, which has a default and is not in
 // `required`) are VALID when omitted; only type-checked when present. Unknown
-// EXTRA fields are ignored (not in the README's violation list).
+// EXTRA fields are ignored (not in the spike spec's violation list).
 // ---------------------------------------------------------------------------
 interface ValidResult {
   ok: boolean;

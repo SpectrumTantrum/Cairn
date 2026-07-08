@@ -22,7 +22,7 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "engine-package.md"
   ],
   "engines": {
     "node": ">=20"

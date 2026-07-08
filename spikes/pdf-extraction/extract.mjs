@@ -132,7 +132,7 @@ function naiveOrder(items) {
 
 // Column-aware order: detect columns by the LARGEST GAP in the sorted x-origins
 // (gutter detection), bucket items into bands, order within each band, concat
-// left-to-right. This is the "switch to gutter detection" path the spike README
+// left-to-right. This is the "switch to gutter detection" path the spike spec
 // promised — it does NOT hardcode a midpoint, so it also degrades gracefully to
 // a single column when no real gutter exists (single-column page stays intact).
 function detectColumnBands(items, pageWidth) {
