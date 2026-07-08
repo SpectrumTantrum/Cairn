@@ -15,7 +15,13 @@
     "build": "npm run typecheck && electron-vite build",
     "test": "npm run prepare:engine && tsc -p tsconfig.test.json && node --test test/vault-session.test.mjs",
     "prepreview": "npm run prepare:engine",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "prepackage": "npm run prepare:engine && electron-vite build && node scripts/rebuild-engine-native.mjs electron",
+    "package": "electron-builder --dir",
+    "postpackage": "node scripts/rebuild-engine-native.mjs node",
+    "prepackage:dist": "npm run prepare:engine && electron-vite build && node scripts/rebuild-engine-native.mjs electron",
+    "package:dist": "electron-builder --mac dmg zip",
+    "postpackage:dist": "node scripts/rebuild-engine-native.mjs node"
   },
   "dependencies": {
     "@cairn/engine": "file:../../packages/engine",
@@ -28,6 +34,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^42.4.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^6.0.3",
     "vite": "^7.3.5"

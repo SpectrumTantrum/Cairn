@@ -1,0 +1,47 @@
+appId: com.cairn.desktop
+productName: Cairn
+# Output goes to apps/desktop/release/ (gitignored). Engine output stays in dist/;
+# a separate app-output dir avoids confusion.
+directories:
+  output: release
+  buildResources: build
+
+# electron-vite emits the app into out/. package.json is needed so Electron can
+# resolve "main". Native deps (better-sqlite3, sqlite-vec) are externalized by
+# electron-vite and pulled from node_modules by electron-builder's dependency
+# tracer, then rebuilt for Electron's ABI (npmRebuild below).
+files:
+  - out/**
+  - package.json
+
+# Native/loadable files cannot be dlopen'd from inside app.asar, so they must be
+# unpacked to app.asar.unpacked/:
+#   - **/*.node          better-sqlite3's compiled addon (Electron auto-redirects
+#                        require() of these, but they still must live unpacked).
+#   - sqlite-vec-*        the prebuilt vec0.dylib loaded via db.loadExtension, a
+#                        native SQLite call that bypasses Electron's asar shim
+#                        (see SqliteIndex.loadVecExtension in @cairn/engine).
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/sqlite-vec-darwin-*/**"
+  - "**/node_modules/better-sqlite3/**"
+
+# Native rebuild is done deterministically BEFORE packaging by
+# scripts/rebuild-engine-native.mjs (prepackage), not by electron-builder's
+# built-in @electron/rebuild. The built-in path proved non-deterministic for this
+# hoisted-workspace layout: it caches per-ABI under better-sqlite3/bin/ and can
+# silently skip, packaging the wrong (system-Node) ABI. So we disable it here and
+# pack the build/Release binary the prepackage step already compiled for Electron.
+npmRebuild: false
+
+mac:
+  category: public.app-category.productivity
+  # dmg + zip configured for later distribution; `electron-builder --dir` (the
+  # `package` script) overrides these with a fast unpacked .app for iteration.
+  target:
+    - target: dir
+    - target: dmg
+    - target: zip
+  # Code signing and notarization are intentionally DISABLED for this alpha.
+  # identity: null forces an unsigned build (no ad-hoc signing prompts).
+  identity: null

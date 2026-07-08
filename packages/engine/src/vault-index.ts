@@ -74,9 +74,25 @@ export class SqliteIndex implements Index {
     this.dir = join(vaultRoot, ".cairn");
     mkdirSync(this.dir, { recursive: true });
     this.db = new Database(join(this.dir, "index.db"));
-    sqliteVec.load(this.db);
+    this.loadVecExtension();
     this.db.pragma("journal_mode = WAL");
     this.initSchema();
+  }
+
+  /**
+   * Load sqlite-vec's prebuilt loadable extension (.dylib/.so/.dll).
+   *
+   * `db.loadExtension` is a native SQLite C call that bypasses Electron's asar
+   * fs shim, so in a packaged app the resolved path must point at the real file
+   * under `app.asar.unpacked/`, not the virtual path inside `app.asar/`. We take
+   * sqlite-vec's resolved path and rewrite `.asar/` -> `.asar.unpacked/`; this is
+   * a no-op in dev / unpackaged runs (no `.asar` segment present). The extension
+   * must also be listed in electron-builder `asarUnpack` so the file exists there.
+   */
+  private loadVecExtension(): void {
+    const resolved = sqliteVec.getLoadablePath();
+    const unpacked = resolved.replace(/\.asar([\\/])/, ".asar.unpacked$1");
+    this.db.loadExtension(unpacked);
   }
 
   private initSchema(): void {
