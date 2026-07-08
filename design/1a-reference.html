@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cairn shell — option 1a reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@300;400;700&family=Caveat:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#efece4;font-family:'Kalam',cursive;color:#33302a;padding:40px;display:flex;justify-content:center}
+  *{box-sizing:border-box}
+  .shell{display:flex;background:#fbfaf7;border:1.8px solid #cbc4b3;border-radius:12px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+  .pane{display:flex;flex-direction:column;min-height:0}
+  .paneb{border-right:1.6px solid #ded7c8}
+  .hd{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1.4px solid #e2dccd;flex:none}
+  .ttl{font-family:'Caveat',cursive;font-weight:600;color:#3a372f}
+  .ic{width:26px;height:26px;border:1.5px solid #cabfa9;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px;color:#8a8271;flex:none;background:#fff}
+  .ln{height:7px;border-radius:5px;background:#e7e1d4}
+  .fi{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:15px;color:#4a463c;cursor:default}
+  .fi .cr{color:#b3ab98;width:12px;display:inline-block;font-size:12px}
+  .chip{border:1.4px solid #ccc5b4;border-radius:20px;padding:3px 11px;font-size:13.5px;background:#fff;color:#4a463c;display:inline-flex;align-items:center;gap:6px}
+  .card{border:1.5px solid #d5cebd;border-radius:10px;background:#fff}
+  .accent{color:#3763c0}
+</style>
+</head>
+<body>
+  <div class="shell" style="width:1180px;height:820px">
+
+    <!-- LEFT: Obsidian vault rail -->
+    <div class="pane paneb" style="width:246px;background:#f5f2ea">
+      <div class="hd" style="justify-content:space-between">
+        <span class="ttl" style="font-size:16px">Vault</span>
+        <div style="display:flex;gap:6px">
+          <div class="ic" style="width:22px;height:22px">✎</div>
+          <div class="ic" style="width:22px;height:22px">▤</div>
+          <div class="ic" style="width:22px;height:22px">↥</div>
+          <div class="ic" style="width:22px;height:22px">⤢</div>
+        </div>
+      </div>
+      <div style="padding:8px 6px;overflow:hidden;flex:1">
+        <div class="fi"><span class="cr">▸</span>00-inbox</div>
+        <div class="fi"><span class="cr">▸</span>01-courses</div>
+        <div class="fi"><span class="cr">▸</span>02-projects</div>
+        <div class="fi"><span class="cr">▸</span>03-learning</div>
+        <div class="fi"><span class="cr">▸</span>04-references</div>
+        <div class="fi" style="color:#26241f;font-weight:700"><span class="cr">▾</span>05-research</div>
+        <div style="margin-left:14px;border-left:1.4px solid #e2dccd;padding-left:4px">
+          <div class="fi"><span class="cr">▸</span>ai-and-ml</div>
+          <div class="fi" style="color:#26241f;font-weight:700"><span class="cr">▾</span>project-supernova</div>
+          <div style="margin-left:14px;border-left:1.4px solid #e2dccd;padding-left:4px">
+            <div class="fi"><span class="cr">▸</span>research-papers</div>
+            <div class="fi"><span class="cr"></span>advisor-research</div>
+            <div class="fi"><span class="cr"></span>ai-agents-angle</div>
+            <div class="fi" style="background:#e6ecf8;color:#274a91;border:1.4px solid #c3d1ee"><span class="cr"></span>approach-strategy</div>
+            <div class="fi"><span class="cr"></span>project-ideas</div>
+            <div class="fi"><span class="cr"></span>README</div>
+          </div>
+          <div class="fi"><span class="cr">▸</span>redbricklvlup</div>
+        </div>
+        <div class="fi"><span class="cr">▸</span>06-cowork</div>
+        <div class="fi"><span class="cr">▸</span>attachments</div>
+        <div class="fi"><span class="cr">▸</span>templates</div>
+        <div class="fi"><span class="cr"></span>AGENTS</div>
+        <div class="fi"><span class="cr"></span>CLAUDE</div>
+      </div>
+      <div class="hd" style="border-top:1.4px solid #e2dccd;border-bottom:none;justify-content:space-between">
+        <span style="font-size:14px;display:flex;gap:6px;align-items:center"><span style="color:#b3ab98">⇕</span>New New Vault</span>
+        <div style="display:flex;gap:6px"><div class="ic" style="width:22px;height:22px">?</div><div class="ic" style="width:22px;height:22px">⚙</div></div>
+      </div>
+    </div>
+
+    <!-- CENTER: editor -->
+    <div class="pane" style="flex:1;background:#fbfaf7">
+      <div class="hd" style="gap:10px">
+        <span class="chip" style="background:#eef1f6">approach-strategy.md&nbsp; ✕</span>
+        <span style="font-size:13px;color:#a49d8c">05-research › project-supernova</span>
+        <div style="flex:1"></div>
+        <div class="ic" style="width:22px;height:22px">◫</div>
+      </div>
+      <div style="padding:26px 34px;overflow:hidden;flex:1;display:flex;flex-direction:column;gap:16px">
+        <div style="font-family:'Caveat';font-weight:700;font-size:30px;color:#2c2a24"># Approach &amp; Strategy</div>
+        <div class="ln" style="width:88%"></div>
+        <div class="ln" style="width:94%"></div>
+        <div class="ln" style="width:70%"></div>
+        <div style="display:flex;gap:8px;margin:2px 0">
+          <span class="chip" style="border-color:#c3d1ee;background:#eef1f6;color:#3763c0">[[project-ideas]]</span>
+          <span class="chip" style="border-color:#c3d1ee;background:#eef1f6;color:#3763c0">[[pdf: retrieval-2024 · p.4]]</span>
+        </div>
+        <div class="ln" style="width:82%"></div>
+        <!-- inline agent diff hunk (ADR-0008) -->
+        <div class="card" style="margin-top:6px;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:8px;padding:7px 12px;background:#f4f1e9;border-bottom:1.4px solid #e2dccd;font-size:13px;color:#7d7563">
+            <span class="accent">✦</span> Agent edit · hunk 2 of 3
+            <div style="flex:1"></div>
+            <span class="chip" style="padding:2px 9px;border-color:#bcd6bc;background:#e7f1e5;color:#3a7a3a">✓ Accept</span>
+            <span class="chip" style="padding:2px 9px;border-color:#e0c2bc;background:#f6e7e3;color:#a35548">✕ Reject</span>
+          </div>
+          <div style="padding:8px 12px;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;line-height:1.9">
+            <div style="background:#f7e6e2;color:#9c5548;padding:0 6px;border-radius:3px">- resolveEmbedder() calls fetch directly</div>
+            <div style="background:#e6f1e4;color:#437a43;padding:0 6px;border-radius:3px">+ resolveEmbedder() → getModelProvider().embed()</div>
+          </div>
+        </div>
+        <div class="ln" style="width:76%"></div>
+        <div class="ln" style="width:90%"></div>
+      </div>
+      <div class="hd" style="border-top:1.4px solid #e2dccd;border-bottom:none;font-size:12.5px;color:#a49d8c;gap:16px">
+        <span>Ln 42, Col 8</span><span>Markdown</span><span>indexed ✓</span><div style="flex:1"></div><span>Mneme · 1,284 chunks</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: tabbed rail -->
+    <div class="pane" style="width:372px;border-left:1.6px solid #ded7c8;background:#f7f4ec">
+      <div style="display:flex;gap:6px;padding:8px 10px 0">
+        <span class="chip" style="border-color:#3763c0;background:#e6ecf8;color:#274a91;font-weight:700;border-radius:8px 8px 0 0">Chat</span>
+        <span class="chip" style="border-radius:8px 8px 0 0">Sources</span>
+        <span class="chip" style="border-radius:8px 8px 0 0">Studio</span>
+        <div style="flex:1"></div>
+        <div class="ic" style="width:22px;height:22px">⟲</div>
+        <div class="ic" style="width:22px;height:22px">⋯</div>
+      </div>
+      <div style="padding:12px;overflow:hidden;flex:1;display:flex;flex-direction:column;gap:12px;border-top:1.4px solid #e2dccd">
+        <!-- user turn -->
+        <div class="card" style="align-self:flex-end;max-width:82%;padding:8px 12px;background:#eef1f6;border-color:#d4ddef;font-size:14px">Wire embed.ts through the ModelProvider seam</div>
+        <!-- assistant turn -->
+        <div style="display:flex;gap:8px">
+          <div class="ic" style="width:22px;height:22px;border-radius:50%">✦</div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:9px">
+            <div class="ln" style="width:96%"></div>
+            <div class="ln" style="width:88%"></div>
+            <!-- mini decision table -->
+            <div class="card" style="overflow:hidden">
+              <div style="display:grid;grid-template-columns:1fr 1.4fr;font-size:12.5px">
+                <div style="padding:6px 9px;border-bottom:1.2px solid #eae4d6;color:#7d7563">Interface</div>
+                <div style="padding:6px 9px;border-bottom:1.2px solid #eae4d6;border-left:1.2px solid #eae4d6"><span class="chip" style="padding:1px 7px;font-size:11.5px">ModelProvider</span></div>
+                <div style="padding:6px 9px;color:#7d7563">Adapter</div>
+                <div style="padding:6px 9px;border-left:1.2px solid #eae4d6"><span class="chip" style="padding:1px 7px;font-size:11.5px">OllamaClient</span></div>
+              </div>
+            </div>
+            <div class="ln" style="width:72%"></div>
+            <!-- citation -->
+            <div style="display:flex;gap:6px;flex-wrap:wrap">
+              <span class="chip" style="border-color:#c3d1ee;background:#eef1f6;color:#3763c0;padding:2px 8px;font-size:12px">model-provider.ts:14 › seam</span>
+              <span class="chip" style="border-color:#c3d1ee;background:#eef1f6;color:#3763c0;padding:2px 8px;font-size:12px">ADR-0002 › escalation</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- composer -->
+      <div style="padding:10px 12px 12px;border-top:1.4px solid #e2dccd">
+        <div class="card" style="padding:10px 12px;display:flex;flex-direction:column;gap:10px">
+          <span style="font-size:14px;color:#b0a894">Ask, or / for a preset, @ for a node…</span>
+          <div style="display:flex;gap:7px;align-items:center">
+            <span class="chip" style="border-color:#3763c0;background:#e6ecf8;color:#274a91;font-weight:700">Agent ⌄</span>
+            <span class="chip">Qwen3-4B ⌄</span>
+            <span class="chip" style="border-style:dashed">☁ escalate</span>
+            <div style="flex:1"></div>
+            <div class="ic" style="width:24px;height:24px;border-radius:50%">↑</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>
