@@ -2,10 +2,10 @@
 // Defaults to a Qwen3 chat model; thinking is disabled (think:false) to keep answers clean
 // and fast. Override with CHAT_MODEL or --model.
 
-import { getModelProvider, type ChatMessage } from "./model-provider.js";
+import { getModelProvider, type ChatMessage, type ChatStreamCallbacks } from "./model-provider.js";
 import { listModels } from "./embed.js";
 
-export type { ChatMessage };
+export type { ChatMessage, ChatStreamCallbacks };
 
 export async function resolveChatModel(requested?: string): Promise<string> {
   const models = await listModels();
@@ -36,6 +36,29 @@ export async function resolveChatModel(requested?: string): Promise<string> {
 export async function chat(model: string, messages: ChatMessage[], think = false): Promise<string> {
   const raw = await getModelProvider().chat(model, messages, think);
   return stripThinking(raw);
+}
+
+/**
+ * Streaming counterpart to `chat()`. Forwards each token to `callbacks.onToken`
+ * and resolves to the full (thinking-stripped) answer. Falls back to a single
+ * `chat()` call — emitting the whole answer as one token — when the active
+ * ModelProvider does not implement `chatStream` (e.g. a future cloud adapter),
+ * so callers can always rely on `onToken` firing at least once.
+ */
+export async function chatStream(
+  model: string,
+  messages: ChatMessage[],
+  callbacks?: ChatStreamCallbacks,
+  think = false,
+): Promise<string> {
+  const provider = getModelProvider();
+  if (provider.chatStream) {
+    const raw = await provider.chatStream(model, messages, callbacks, think);
+    return stripThinking(raw);
+  }
+  const answer = await chat(model, messages, think);
+  callbacks?.onToken?.(answer);
+  return answer;
 }
 
 function stripThinking(s: string): string {

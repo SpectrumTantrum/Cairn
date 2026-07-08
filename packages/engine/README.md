@@ -1,15 +1,19 @@
-# @cairn/engine — local-first grounded retrieval (MVP CLI)
+# @cairn/engine — local-first grounded retrieval
 
-The headless indexing & retrieval engine behind [Cairn](../../CONTEXT.md) (a.k.a. **Mneme**),
-shipped first as a tiny CLI tracer. Point it at a folder of Markdown; it chunks, indexes,
-and answers **grounded, cited** queries over your own notes — fully local, no telemetry, no
-cloud. This is the spine the eventual desktop app sits on (ADR-0001: the engine is headless
-and CLI-testable by design).
+The headless indexing & retrieval engine behind [Cairn](../../CONTEXT.md) (a.k.a. **Mneme**).
+Point it at a folder of Markdown; it chunks, indexes, and answers **grounded, cited** queries
+over your own notes — fully local, no telemetry, no cloud. This is the spine the desktop app
+sits on (ADR-0001: the engine is headless and CLI-testable by design).
 
-> **Status: MVP tracer.** It does `index` + `search` + `ask`. It is also the honest harness for
-> rebuilding the retrieval eval — see [`docs/spike-verdicts-correction.md`](../../docs/spike-verdicts-correction.md).
-> Dense-retrieval *quality* is not yet independently validated (the prior eval was lexically
-> leaky); the keyword arm carries real weight, which is why a zero-model `--lexical` mode exists.
+> **Status.** Hybrid retrieval (sqlite-vec dense KNN + FTS5 keyword, fused with RRF) backs both
+> single-turn `ask()` and a multi-turn, token-streaming `ChatThread` — both grounded and cited,
+> with a "not in your notes" refusal gate. Scoped retrieval (restrict to a subset of sources),
+> per-call model selection, and a wikilinks module (parse/resolve/backlinks, ADR-0003) round out
+> the programmatic API; the `cairn` CLI (`index` / `search` / `ask`) is one consumer of it. It is
+> also the honest harness for rebuilding the retrieval eval — see
+> [`docs/spike-verdicts-correction.md`](../../docs/spike-verdicts-correction.md). Dense-retrieval
+> *quality* is not yet independently validated (the prior eval was lexically leaky); the keyword
+> arm carries real weight, which is why a zero-model `--lexical` mode exists.
 
 ## Requirements
 
@@ -61,6 +65,35 @@ cairn ask "your question" --in /path/to/notes
 The index lives in `/path/to/notes/.cairn/index.db` — **disposable and per-machine**; the
 Markdown files are the source of truth. Re-running `index` rebuilds it, re-embedding only the
 chunks whose content changed (content-addressed embedding cache).
+
+## Programmatic API (beyond the CLI)
+
+The engine exposes a few in-process seams the desktop shell drives directly. All are
+backward-compatible additions — the single-turn `ask()` and `search()` signatures still
+work unchanged (new fields are optional).
+
+- **Per-call model selection.** `ask(index, q, { model })` and `ChatThread.send(text, { model })`
+  pick any pulled Ollama chat model per request; omit it and `resolveChatModel()` falls back
+  to the internal default (Qwen3 preferred). An unavailable model rejects with a clear error.
+- **Multi-turn grounded chat.** `new ChatThread(index, { mode?, model?, scope?, k? })` holds
+  ordered messages; `send(text, opts?)` runs grounded retrieval on the new turn, calls the
+  model with prior history + the retrieved SOURCES block, and returns the same
+  `grounded/covered/sources` metadata `ask()` returns — including the "Your notes don't cover
+  this." refusal. Single-turn `ask()` is untouched.
+- **Streaming.** Pass `send(text, { onToken })` (or call `chatStream(model, messages, { onToken })`)
+  to receive tokens as the model produces them; the Promise still resolves to the full answer.
+  Streaming rides the `ModelProvider` seam (`chatStream`, implemented by `OllamaClient` via
+  `/api/chat` `stream:true`), so an Electron IPC bridge can forward each token — the engine
+  itself stays HTTP/DOM-free. Providers without `chatStream` degrade to a one-shot emit.
+- **Scoped retrieval.** `search`/`ask`/`ChatThread.send` accept `scope?: string[]` — an
+  include-list of vault-relative paths that restricts retrieval to a subset of sources (powers
+  a Sources tab). Enforced by over-fetching the full ranked pool and filtering before top-k, so
+  a small scope never starves results (sqlite-vec is a brute-force scan at v1 scale anyway).
+  Omitted/empty = whole index. Coverage/refusal is computed over the scoped subset.
+- **Wikilinks (ADR-0003).** `parseWikilinks(md)`, `resolveWikilink(target, files)` (Obsidian
+  rules: exact path > unique basename > unresolved + ambiguity list), and
+  `computeBacklinks(path, docs)` / `buildBacklinkIndex(docs)` — pure functions over
+  vault-relative paths/docs (the persistence seam doesn't enumerate files).
 
 ## What it does (and doesn't)
 

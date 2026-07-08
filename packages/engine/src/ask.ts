@@ -18,7 +18,12 @@ export interface AskResult {
   reason?: string;
 }
 
-const SYSTEM = [
+/**
+ * The grounding system prompt shared by `ask()` (single-turn) and `ChatThread`
+ * (multi-turn). Exported so both grounded paths stay byte-identical — the
+ * refusal string here is what the G10 coverage gate and the desktop UI match on.
+ */
+export const GROUNDING_SYSTEM = [
   "You are Cairn, a local knowledge assistant. Answer the user's question using ONLY the numbered SOURCES below — excerpts from the user's own notes.",
   "Rules:",
   "- Ground every claim in the sources and cite them inline with bracketed numbers, e.g. [1] or [2][3].",
@@ -30,12 +35,13 @@ const SYSTEM = [
 export async function ask(
   index: Index,
   question: string,
-  opts: { k?: number; mode?: Mode; model?: string; coverageThreshold?: number } = {},
+  opts: { k?: number; mode?: Mode; model?: string; scope?: string[]; coverageThreshold?: number } = {},
 ): Promise<AskResult> {
   const k = opts.k ?? 6;
   const { hits, mode, coverage } = await search(index, question, {
     k,
     mode: opts.mode,
+    scope: opts.scope,
     coverageThreshold: opts.coverageThreshold,
   });
 
@@ -56,7 +62,7 @@ export async function ask(
     .join("\n\n");
 
   const answer = await chat(model, [
-    { role: "system", content: SYSTEM },
+    { role: "system", content: GROUNDING_SYSTEM },
     { role: "user", content: `SOURCES:\n${sourcesBlock}\n\nQUESTION: ${question}` },
   ]);
 

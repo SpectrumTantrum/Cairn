@@ -54,8 +54,15 @@ export interface Index {
   rebuildIndex(input: RebuildIndexInput): void;
 
   getChunk(id: number): ChunkRow | undefined;
-  denseArm(qvec: Buffer, pool: number): DenseHit[];
-  ftsArm(match: string, pool: number): { id: number; rank: number }[];
+  /**
+   * Dense (sqlite-vec) arm. When `scope` is a non-empty list of vault-relative
+   * (forward-slash) file paths, the KNN scan is restricted to chunks in those
+   * files *before* the top-`pool` cut, so a small scope can never be starved by
+   * out-of-scope neighbours ranking higher. Omitted/empty = whole index.
+   */
+  denseArm(qvec: Buffer, pool: number, scope?: readonly string[]): DenseHit[];
+  /** FTS5 keyword arm; same `scope` semantics as {@link denseArm}. */
+  ftsArm(match: string, pool: number, scope?: readonly string[]): { id: number; rank: number }[];
 
   close(): void;
 }
@@ -199,10 +206,25 @@ export class SqliteIndex implements Index {
       .get(id) as ChunkRow | undefined;
   }
 
-  denseArm(qvec: Buffer, pool: number): DenseHit[] {
-    const rows = this.db
-      .prepare(`SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ${pool | 0}`)
-      .all(qvec) as { chunk_id: number | bigint; distance: number }[];
+  denseArm(qvec: Buffer, pool: number, scope?: readonly string[]): DenseHit[] {
+    // Scope is pushed into the vec0 KNN pre-filter as a `chunk_id IN (...)`
+    // constraint (allowed alongside MATCH so long as LIMIT is present). The
+    // scope list is passed as a single JSON parameter and expanded with
+    // json_each, so an arbitrarily large include-list needs no SQL var chunking.
+    // `chunks.file` is always forward-slash (indexer normalizes it), matching
+    // how retrieve.ts normalizes the scope list.
+    const scoped = scope !== undefined && scope.length > 0;
+    const sql = scoped
+      ? `SELECT chunk_id, distance FROM vec_chunks
+           WHERE embedding MATCH ?
+             AND chunk_id IN (SELECT id FROM chunks WHERE file IN (SELECT value FROM json_each(?)))
+           ORDER BY distance LIMIT ${pool | 0}`
+      : `SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? ORDER BY distance LIMIT ${pool | 0}`;
+    const stmt = this.db.prepare(sql);
+    const rows = (scoped ? stmt.all(qvec, JSON.stringify(scope)) : stmt.all(qvec)) as {
+      chunk_id: number | bigint;
+      distance: number;
+    }[];
     return rows.map((r) => {
       const distance = Number(r.distance);
       return {
@@ -213,12 +235,21 @@ export class SqliteIndex implements Index {
     });
   }
 
-  ftsArm(match: string, pool: number): { id: number; rank: number }[] {
+  ftsArm(match: string, pool: number, scope?: readonly string[]): { id: number; rank: number }[] {
     if (!match) return [];
+    const scoped = scope !== undefined && scope.length > 0;
     try {
-      return this.db
-        .prepare(`SELECT rowid AS id, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ${pool | 0}`)
-        .all(match) as { id: number; rank: number }[];
+      const sql = scoped
+        ? `SELECT rowid AS id, rank FROM fts_chunks
+             WHERE fts_chunks MATCH ?
+               AND rowid IN (SELECT id FROM chunks WHERE file IN (SELECT value FROM json_each(?)))
+             ORDER BY rank LIMIT ${pool | 0}`
+        : `SELECT rowid AS id, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ${pool | 0}`;
+      const stmt = this.db.prepare(sql);
+      return (scoped ? stmt.all(match, JSON.stringify(scope)) : stmt.all(match)) as {
+        id: number;
+        rank: number;
+      }[];
     } catch {
       return [];
     }
@@ -227,6 +258,18 @@ export class SqliteIndex implements Index {
   close(): void {
     this.db.close();
   }
+}
+
+/**
+ * Predicate for the InMemoryIndex test seam: mirrors the SqliteIndex SQL scope
+ * filter. Both sides compare forward-slash file paths (retrieve.ts normalizes
+ * the scope list; here we normalize the stored file too). Empty/omitted scope
+ * admits everything.
+ */
+function scopeFilter(scope?: readonly string[]): (file: string) => boolean {
+  if (scope === undefined || scope.length === 0) return () => true;
+  const set = new Set(scope);
+  return (file: string) => set.has(file.replace(/\\/g, "/"));
 }
 
 function parseFtsTokens(match: string): string[] {
@@ -310,9 +353,11 @@ export class InMemoryIndex implements Index {
     return row;
   }
 
-  denseArm(qvec: Buffer, pool: number): DenseHit[] {
+  denseArm(qvec: Buffer, pool: number, scope?: readonly string[]): DenseHit[] {
+    const inScope = scopeFilter(scope);
     const rows: DenseHit[] = [];
     for (const [id, vec] of this.vectors) {
+      if (!inScope(this.chunks.get(id)?.file ?? "")) continue;
       const cosine = cosineFromBuffers(qvec, vec);
       rows.push({ id, distance: 1 - cosine, cosine });
     }
@@ -320,11 +365,13 @@ export class InMemoryIndex implements Index {
     return rows.slice(0, pool);
   }
 
-  ftsArm(match: string, pool: number): { id: number; rank: number }[] {
+  ftsArm(match: string, pool: number, scope?: readonly string[]): { id: number; rank: number }[] {
     const tokens = parseFtsTokens(match);
     if (tokens.length === 0) return [];
+    const inScope = scopeFilter(scope);
     const scored: { id: number; score: number }[] = [];
     for (const chunk of this.chunks.values()) {
+      if (!inScope(chunk.file)) continue;
       const lower = chunk.text.toLowerCase();
       const hits = tokens.filter((t) => lower.includes(t)).length;
       if (hits > 0) scored.push({ id: chunk.id, score: hits });

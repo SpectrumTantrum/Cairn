@@ -47,6 +47,18 @@ export interface SearchOpts {
   mode?: Mode;
   embedder?: string;
   coverageThreshold?: number;
+  /**
+   * Optional include-list of vault-relative file paths. When set (and non-empty),
+   * retrieval is restricted to chunks whose source file is in the list; omitted or
+   * empty means the whole index. Powers the Sources tab (scoped chat/search).
+   *
+   * Enforced *in SQL*: each arm (`Index.denseArm` / `Index.ftsArm`) applies the
+   * include-list as a pre-filter before its top-`pool` cut, so a small scope is
+   * never starved by out-of-scope rows ranking higher — no application-layer
+   * over-fetch of the full ranked pool. Coverage (`poolMaxCosine`) is therefore
+   * computed over the already-scoped dense rows.
+   */
+  scope?: string[];
 }
 
 export interface SearchCoverage {
@@ -66,7 +78,12 @@ export async function search(
   const wantHybrid = (opts.mode ?? "auto") !== "lexical";
   const canHybrid = wantHybrid && index.hasVectors() && (await getModelProvider().isReachable());
 
-  const ftsIds = index.ftsArm(sanitizeForFts(query), pool).map((h) => h.id);
+  // Scope enforcement is pushed into each arm's SQL (see SearchOpts.scope): the
+  // include-list pre-filters the ranked pool before the top-`pool` cut, so a
+  // small scope cannot starve the top-k. No application-layer over-fetch.
+  const scope = normalizeScope(opts.scope);
+
+  const ftsIds = index.ftsArm(sanitizeForFts(query), pool, scope).map((h) => h.id);
 
   if (!canHybrid) {
     const hits = ftsIds.slice(0, k).map((id) => toHit(index, id, NaN, NaN, false, true));
@@ -84,7 +101,7 @@ export async function search(
   const embedder = opts.embedder ?? index.getMeta("embedder") ?? "";
   const [qvec] = await embed(embedder, [formatQueryForEmbedding(embedder, query)]);
   const qbuf = Buffer.from(Float32Array.from(qvec).buffer);
-  const denseRows = index.denseArm(qbuf, pool);
+  const denseRows = index.denseArm(qbuf, pool, scope);
   const denseIds = denseRows.map((h) => h.id);
   const denseCosines = new Map(denseRows.map((h) => [h.id, h.cosine]));
   const poolMaxCosine = denseRows.length > 0 ? Math.max(...denseRows.map((h) => h.cosine)) : Number.NEGATIVE_INFINITY;
@@ -123,4 +140,14 @@ function toHit(index: Index, id: number, score: number, cosine: number, inDense:
 function snippetOf(text: string): string {
   const clean = text.replace(/\s+/g, " ").trim();
   return clean.length > 200 ? clean.slice(0, 200) + "…" : clean;
+}
+
+/**
+ * Normalize a scope include-list to forward-slash paths, or undefined when
+ * absent/empty. The arms match these against `chunks.file`, which the indexer
+ * always stores with forward slashes.
+ */
+function normalizeScope(scope?: string[]): string[] | undefined {
+  if (!scope || scope.length === 0) return undefined;
+  return scope.map((p) => p.replace(/\\/g, "/"));
 }
