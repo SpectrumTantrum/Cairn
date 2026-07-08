@@ -78,7 +78,7 @@ function resolveInsideVault(vaultPath: string, file: string): string {
   return target;
 }
 
-/** Active vault policy + Mneme orchestration for the desktop shell (main process). */
+/** Active vault policy + the engine orchestration for the desktop shell (main process). */
 export interface ChatSendOpts {
   model?: string;
   scope?: string[];

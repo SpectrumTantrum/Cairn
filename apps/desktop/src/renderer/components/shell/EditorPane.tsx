@@ -139,7 +139,7 @@ function StatusBar({
       />
       <span className="spacer" />
       <span className="status-item">
-        Mneme · {indexStats ? `${indexStats.chunks.toLocaleString()} chunks` : "not indexed"}
+        Cairn · {indexStats ? `${indexStats.chunks.toLocaleString()} chunks` : "not indexed"}
       </span>
     </div>
   );

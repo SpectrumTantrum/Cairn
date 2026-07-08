@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// cairn — the headless CLI face of the Mneme engine (ADR-0001). Two commands:
+// cairn — the headless CLI face of the engine (ADR-0001). Two commands:
 //   cairn index  <folder> [--lexical] [--embedder <tag>]
 //   cairn search <query...> [--in <folder>] [-k <n>] [--lexical]
 
