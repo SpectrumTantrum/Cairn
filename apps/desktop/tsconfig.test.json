@@ -10,5 +10,5 @@
     "rootDir": "src/main",
     "types": ["node"]
   },
-  "include": ["src/main/vault-session.ts"]
+  "include": ["src/main/vault-session.ts", "src/main/provider-store.ts"]
 }

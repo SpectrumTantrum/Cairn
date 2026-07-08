@@ -1,11 +1,14 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AskResult, ChatSendResult, IndexStats, SearchHit } from "@cairn/engine";
+import type { AskResult, ChatSendResult, IndexStats, ProviderPreset, SearchHit } from "@cairn/engine";
 import type {
   AgentApplyResult,
   AgentStartResult,
   ChatSendPayload,
   ChatTokenEvent,
   OllamaStatus,
+  ProviderInput,
+  ProviderMeta,
+  TestConnectionResult,
   TreeNode,
 } from "../shared/types.js";
 
@@ -18,6 +21,10 @@ export type {
   ChatTokenEvent,
   IndexStats,
   OllamaStatus,
+  ProviderInput,
+  ProviderMeta,
+  ProviderPreset,
+  TestConnectionResult,
   SearchHit,
   TreeNode,
 };
@@ -46,6 +53,16 @@ export interface CairnApi {
   agentReject(runId: string, proposalId: string): Promise<AgentApplyResult>;
   /** Revert the whole run to its checkpoint, byte-identical. */
   agentRevert(runId: string): Promise<{ reverted: boolean }>;
+  // ---- BYOK cloud providers (ADR-0002) ----
+  /** Static preset registry for the settings form (no secrets). */
+  providerPresets(): Promise<ProviderPreset[]>;
+  /** Configured providers — metadata only, never key material. */
+  listProviders(): Promise<ProviderMeta[]>;
+  /** Create/update a provider. The `secret` is stored via safeStorage; never echoed back. */
+  saveProvider(input: ProviderInput): Promise<ProviderMeta>;
+  deleteProvider(id: string): Promise<void>;
+  /** Token-free connection probe (lists models where supported). */
+  testProvider(input: ProviderInput): Promise<TestConnectionResult>;
 }
 
 // Allow-list of the only channels the renderer may subscribe to. Keeps the
@@ -78,6 +95,11 @@ const api: CairnApi = {
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
   agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),
   agentRevert: (runId) => ipcRenderer.invoke("agent:revert", { runId }),
+  providerPresets: () => ipcRenderer.invoke("providers:presets"),
+  listProviders: () => ipcRenderer.invoke("providers:list"),
+  saveProvider: (input) => ipcRenderer.invoke("providers:save", input),
+  deleteProvider: (id) => ipcRenderer.invoke("providers:delete", id),
+  testProvider: (input) => ipcRenderer.invoke("providers:test", input),
 };
 
 contextBridge.exposeInMainWorld("cairn", api);

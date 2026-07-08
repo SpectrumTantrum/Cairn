@@ -10,6 +10,7 @@ import {
   type EditProposal,
   type Index,
   type IndexStats,
+  type ModelProvider,
   type SearchHit,
 } from "@cairn/engine";
 import { createHash, randomUUID } from "node:crypto";
@@ -84,6 +85,12 @@ export interface ChatSendOpts {
   model?: string;
   scope?: string[];
   onToken?: (token: string) => void;
+  /**
+   * Cloud-escalation transport (ADR-0002). Present ONLY when the renderer sent an
+   * explicit, confirmed escalate action; when set, THIS turn's chat call routes to
+   * the cloud provider (retrieval/embeddings stay local). Absent ⇒ local Ollama.
+   */
+  provider?: ModelProvider;
 }
 
 /** Result of starting an Agent run — the collected proposals, nothing applied yet. */
@@ -210,6 +217,7 @@ export class VaultSession {
       model: opts.model,
       scope: opts.scope,
       onToken: opts.onToken,
+      provider: opts.provider,
     });
   }
 

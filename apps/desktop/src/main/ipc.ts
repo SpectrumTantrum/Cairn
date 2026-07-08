@@ -1,8 +1,32 @@
-import { dialog, ipcMain, shell } from "electron";
-import { getModelProvider } from "@cairn/engine";
+import { app, dialog, ipcMain, safeStorage, shell } from "electron";
+import { join } from "node:path";
+import { CloudProvider, getModelProvider, PROVIDER_PRESETS } from "@cairn/engine";
 import { createVaultSession } from "./vault-session.js";
+import {
+  ProviderStore,
+  testConnection,
+  type ProviderInput,
+  type SecretCrypto,
+} from "./provider-store.js";
 
 const session = createVaultSession();
+
+// Lazily constructed after app-ready (getPath("userData") needs the app initialized).
+let providerStore: ProviderStore | null = null;
+function providers(): ProviderStore {
+  if (!providerStore) {
+    const crypto: SecretCrypto = {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: (plain) => safeStorage.encryptString(plain),
+      decrypt: (cipher) => safeStorage.decryptString(cipher),
+    };
+    providerStore = new ProviderStore({
+      filePath: join(app.getPath("userData"), "cloud-providers.json"),
+      crypto,
+    });
+  }
+  return providerStore;
+}
 
 const USER_ERROR_PREFIXES = [
   "Choose",
@@ -10,6 +34,11 @@ const USER_ERROR_PREFIXES = [
   "No source",
   "No content",
   "Refusing",
+  "Cloud",
+  "Secure key storage",
+  "Stored API key",
+  "That cloud provider",
+  "Pick a cloud provider",
   "The requested vault",
   "The selected vault",
   "The source file",
@@ -52,6 +81,66 @@ function asScope(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const files = value.filter((x): x is string => typeof x === "string");
   return files.length > 0 ? files : undefined;
+}
+
+const PROVIDER_KINDS = new Set(["openai-compat", "anthropic", "azure-openai", "bedrock"]);
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+/** Shallow string→string record, dropping non-string values (untrusted IPC input). */
+function strRecord(v: unknown): Record<string, string> | undefined {
+  if (typeof v !== "object" || v === null) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+    if (typeof val === "string") out[k] = val;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * Validate an untrusted provider draft from the renderer into a ProviderInput.
+ * Secret fields are read but never logged or echoed; only apiKey / AWS credential
+ * strings are accepted, so the renderer cannot smuggle arbitrary structure into the
+ * encrypted blob.
+ */
+function coerceProviderInput(payload: unknown): ProviderInput {
+  const p = asRecord(payload);
+  const kind = typeof p.kind === "string" && PROVIDER_KINDS.has(p.kind) ? (p.kind as ProviderInput["kind"]) : undefined;
+  if (!kind) throw new Error("Refusing to save a provider with an unknown kind.");
+  const label = str(p.label);
+  if (!label) throw new Error("Give this cloud provider a name.");
+  const baseUrl = typeof p.baseUrl === "string" ? p.baseUrl.trim() : "";
+  const model = typeof p.model === "string" ? p.model.trim() : "";
+
+  const secretIn = asRecord(p.secret);
+  const secret = {
+    apiKey: str(secretIn.apiKey),
+    accessKeyId: str(secretIn.accessKeyId),
+    secretAccessKey: str(secretIn.secretAccessKey),
+    sessionToken: str(secretIn.sessionToken),
+  };
+  const hasSecret = Object.values(secret).some((v) => v !== undefined);
+
+  const maxTokens = typeof p.maxTokens === "number" && Number.isFinite(p.maxTokens) ? p.maxTokens : undefined;
+
+  return {
+    id: str(p.id),
+    presetId: str(p.presetId),
+    label,
+    kind,
+    baseUrl,
+    model,
+    authHeader: str(p.authHeader),
+    extraHeaders: strRecord(p.extraHeaders),
+    extraBody: typeof p.extraBody === "object" && p.extraBody !== null ? (p.extraBody as Record<string, unknown>) : undefined,
+    apiVersion: str(p.apiVersion),
+    deployment: str(p.deployment),
+    region: str(p.region),
+    maxTokens,
+    secret: hasSecret ? secret : undefined,
+  };
 }
 
 export function registerIpcHandlers(): void {
@@ -109,9 +198,29 @@ export function registerIpcHandlers(): void {
       const requestId = typeof p.requestId === "number" ? p.requestId : 0;
       const model = typeof p.model === "string" ? p.model : undefined;
       const sender = event.sender;
+
+      // Escalation gate (ADR-0002): an outbound cloud call happens ONLY when the
+      // renderer sent an explicit, confirmed `escalate` block naming a CONFIGURED
+      // provider. No escalate block ⇒ the turn stays on the local Ollama provider.
+      let provider: CloudProvider | undefined;
+      let cloudModel: string | undefined;
+      const escalate = asRecord(p.escalate);
+      const providerId = typeof escalate.providerId === "string" ? escalate.providerId : "";
+      if (providerId) {
+        if (!providers().has(providerId)) {
+          throw new Error("That cloud provider is no longer configured.");
+        }
+        cloudModel = typeof escalate.model === "string" && escalate.model ? escalate.model : undefined;
+        if (!cloudModel) {
+          throw new Error("Pick a cloud provider model before escalating.");
+        }
+        provider = new CloudProvider(providers().resolveConfig(providerId));
+      }
+
       return session.chatSend(text, {
-        model,
+        model: provider ? cloudModel : model,
         scope: asScope(p.scope),
+        provider,
         onToken: (token) => {
           if (!sender.isDestroyed()) sender.send("chat:token", { requestId, token });
         },
@@ -214,6 +323,34 @@ export function registerIpcHandlers(): void {
         throw new Error("Refusing to revert without a run id.");
       }
       return session.agentRevertRun(runId);
+    });
+  });
+
+  // ---- BYOK cloud providers (ADR-0002) --------------------------------------
+  // Metadata-only list (never returns keys); save/delete; a token-free test probe;
+  // and the static preset registry for the settings form. Keys enter via `save` and
+  // are injected into transport only inside `chat:send`'s escalation branch above.
+  ipcMain.handle("providers:presets", async () => PROVIDER_PRESETS);
+
+  ipcMain.handle("providers:list", async () => {
+    return handleUserErrors(() => providers().list());
+  });
+
+  ipcMain.handle("providers:save", async (_event, payload: unknown) => {
+    return handleUserErrors(() => providers().save(coerceProviderInput(payload)));
+  });
+
+  ipcMain.handle("providers:delete", async (_event, id: unknown) => {
+    return handleUserErrors(() => {
+      if (typeof id !== "string" || !id) throw new Error("That cloud provider is no longer configured.");
+      providers().delete(id);
+    });
+  });
+
+  ipcMain.handle("providers:test", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const input = coerceProviderInput(payload);
+      return testConnection(providers().configFromInput(input));
     });
   });
 
