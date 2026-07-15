@@ -1513,6 +1513,22 @@ button {
   font-size: 11px;
   font-weight: 600;
 }
+/* Local (Ollama) answer provenance — deliberately quieter than .cloud-badge: local is the
+   default, so no fill/border/accent, just a muted glyph + model name (issue #14). */
+.local-meta {
+  margin-bottom: 5px;
+}
+.local-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.local-badge svg {
+  opacity: 0.7;
+}
 .usage-line {
   font-size: 11px;
   color: var(--text-muted);

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, ChevronDown, Cloud, Sparkles } from "lucide-react";
+import { AlertTriangle, ChevronDown, Cloud, HardDrive, Sparkles } from "lucide-react";
 import type {
   ChatSendResult,
   EscalateTarget,
@@ -156,7 +156,11 @@ function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: S
         {result.escalated ? <Cloud size={14} /> : <Sparkles size={14} />}
       </span>
       <div className="chat-assistant-body">
-        {result.escalated ? <EscalatedMeta result={result} /> : null}
+        {result.escalated ? (
+          <EscalatedMeta result={result} />
+        ) : result.covered && result.model ? (
+          <LocalMeta model={result.model} />
+        ) : null}
         <div className={`assistant-text${result.covered ? "" : " unsupported"}`}>
           {result.answer}
         </div>
@@ -183,6 +187,21 @@ function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: S
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Quiet provenance badge on a LOCAL (Ollama-grounded) answer turn (issue #14). Local is the
+ * default, not an event — so this is deliberately muted, far lighter than EscalatedMeta: just
+ * the model name behind a hard-drive glyph, no usage/cost/disclosure (none apply locally).
+ */
+function LocalMeta({ model }: { model: string }) {
+  return (
+    <div className="local-meta">
+      <span className="local-badge" title="Answered locally by Ollama — no cloud calls">
+        <HardDrive size={11} /> {model}
+      </span>
     </div>
   );
 }
