@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -430,4 +431,295 @@ test("chat history grows across turns and resets after resetChat", async () => {
     resetModelProvider();
     rmSync(vault, { recursive: true, force: true });
   }
+});
+
+// ============================================================================
+// Vault mutations (issue #21) — create / rename / delete / move.
+// Every op funnels through the same write-gate as source:write. The security
+// tests below mirror the source:write escape-attempt cases for EACH op: lexical
+// `../` traversal, a symlinked leaf, a symlinked intermediate dir, and a
+// `.cairn/` target. Creation/rename/move deliberately allow any extension
+// (ADR-0009: index & cite everything) — only in-app *editing* stays Markdown-only.
+// ============================================================================
+
+/** Run `fn(session, vault)` against a fresh vault dir, cleaning up afterward. */
+function withVault(fn) {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    fn(session, vault);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+}
+
+/** Like `withVault`, but also provisions a second dir OUTSIDE the vault (symlink targets). */
+function withVaultAndOutside(fn) {
+  const vault = makeVaultDir();
+  const outside = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    fn(session, vault, outside);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  }
+}
+
+// ---- Happy paths -----------------------------------------------------------
+
+test("createFile creates an empty vault-relative file", () => {
+  withVault((session, vault) => {
+    session.createFile("new-note.md");
+    assert.equal(existsSync(join(vault, "new-note.md")), true);
+    assert.equal(session.readSource("new-note.md"), "");
+  });
+});
+
+test("createFile allows non-Markdown extensions (ADR-0009 index-everything)", () => {
+  withVault((session, vault) => {
+    session.createFile("data.csv");
+    assert.equal(existsSync(join(vault, "data.csv")), true);
+  });
+});
+
+test("createFile refuses to clobber an existing entry", () => {
+  withVault((session) => {
+    session.createFile("dup.md");
+    assert.throws(() => session.createFile("dup.md"), /A file or folder with that name already exists/);
+  });
+});
+
+test("createFolder creates a vault-relative folder", () => {
+  withVault((session, vault) => {
+    session.createFolder("projects");
+    assert.equal(statSync(join(vault, "projects")).isDirectory(), true);
+  });
+});
+
+test("createFolder refuses to clobber an existing entry", () => {
+  withVault((session) => {
+    session.createFolder("dir");
+    assert.throws(() => session.createFolder("dir"), /A file or folder with that name already exists/);
+  });
+});
+
+test("rename moves a file to a new basename in the same parent", () => {
+  withVault((session, vault) => {
+    session.createFile("old.md");
+    session.rename("old.md", "new.md");
+    assert.equal(existsSync(join(vault, "old.md")), false);
+    assert.equal(existsSync(join(vault, "new.md")), true);
+  });
+});
+
+test("rename refuses to overwrite an existing destination", () => {
+  withVault((session) => {
+    session.createFile("a.md");
+    session.createFile("b.md");
+    assert.throws(() => session.rename("a.md", "b.md"), /A file or folder with that name already exists/);
+  });
+});
+
+test("rename reports a friendly error when the source is missing", () => {
+  withVault((session) => {
+    assert.throws(() => session.rename("ghost.md", "x.md"), /The source file is no longer available/);
+  });
+});
+
+test("move relocates a file into an existing subfolder", () => {
+  withVault((session, vault) => {
+    session.createFolder("inbox");
+    session.createFile("loose.md");
+    session.move("loose.md", "inbox/loose.md");
+    assert.equal(existsSync(join(vault, "loose.md")), false);
+    assert.equal(existsSync(join(vault, "inbox", "loose.md")), true);
+  });
+});
+
+test("deletePath removes a file", () => {
+  withVault((session, vault) => {
+    session.createFile("trash.md");
+    session.deletePath("trash.md");
+    assert.equal(existsSync(join(vault, "trash.md")), false);
+  });
+});
+
+test("deletePath removes a folder recursively", () => {
+  withVault((session, vault) => {
+    session.createFolder("folder");
+    session.createFile("folder/inner.md");
+    session.deletePath("folder");
+    assert.equal(existsSync(join(vault, "folder")), false);
+  });
+});
+
+test("deletePath reports a friendly error when the target is missing", () => {
+  withVault((session) => {
+    assert.throws(() => session.deletePath("nope.md"), /The source file is no longer available/);
+  });
+});
+
+// ---- createFile security ---------------------------------------------------
+
+test("createFile rejects a lexical ../ traversal", () => {
+  withVault((session) => {
+    assert.throws(() => session.createFile("../escape.md"), /Refusing to open a path outside/);
+  });
+});
+
+test("createFile rejects a symlinked leaf pointing outside the vault", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    const outsideTarget = join(outside, "pwned.md");
+    symlinkSync(outsideTarget, join(vault, "evil.md"));
+    assert.throws(() => session.createFile("evil.md"), /Refusing to write through a symbolic link/);
+    assert.equal(existsSync(outsideTarget), false, "must not create through the symlink");
+  });
+});
+
+test("createFile rejects a symlinked intermediate directory escaping the vault", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    symlinkSync(outside, join(vault, "escape"));
+    assert.throws(() => session.createFile("escape/new.md"), /Refusing to write a path outside/);
+    assert.equal(existsSync(join(outside, "new.md")), false);
+  });
+});
+
+test("createFile rejects a target inside the .cairn index directory", () => {
+  withVault((session) => {
+    assert.throws(() => session.createFile(".cairn/foo.md"), /Refusing to write inside the .cairn index directory/);
+  });
+});
+
+// ---- createFolder security -------------------------------------------------
+
+test("createFolder rejects a lexical ../ traversal", () => {
+  withVault((session) => {
+    assert.throws(() => session.createFolder("../escape"), /Refusing to open a path outside/);
+  });
+});
+
+test("createFolder rejects a symlinked leaf", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    symlinkSync(outside, join(vault, "linkdir"));
+    assert.throws(() => session.createFolder("linkdir"), /Refusing to write through a symbolic link/);
+  });
+});
+
+test("createFolder rejects a symlinked intermediate directory escaping the vault", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    symlinkSync(outside, join(vault, "escape"));
+    assert.throws(() => session.createFolder("escape/child"), /Refusing to write a path outside/);
+    assert.equal(existsSync(join(outside, "child")), false);
+  });
+});
+
+test("createFolder rejects a target inside the .cairn index directory", () => {
+  withVault((session) => {
+    assert.throws(() => session.createFolder(".cairn/sub"), /Refusing to write inside the .cairn index directory/);
+  });
+});
+
+// ---- rename security (destination validated the same as create) ------------
+
+test("rename rejects a ../ traversal destination", () => {
+  withVault((session) => {
+    session.createFile("note.md");
+    assert.throws(() => session.rename("note.md", "../escape.md"), /Refusing to open a path outside/);
+  });
+});
+
+test("rename rejects a symlinked-leaf destination", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    session.createFile("note.md");
+    symlinkSync(join(outside, "pwned.md"), join(vault, "evil.md"));
+    assert.throws(() => session.rename("note.md", "evil.md"), /Refusing to write through a symbolic link/);
+  });
+});
+
+test("rename rejects a destination through a symlinked intermediate directory", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    session.createFile("note.md");
+    symlinkSync(outside, join(vault, "escape"));
+    assert.throws(() => session.rename("note.md", "escape/note.md"), /Refusing to write a path outside/);
+    assert.equal(existsSync(join(outside, "note.md")), false);
+  });
+});
+
+test("rename rejects a .cairn destination", () => {
+  withVault((session) => {
+    session.createFile("note.md");
+    assert.throws(() => session.rename("note.md", ".cairn/note.md"), /Refusing to write inside the .cairn index directory/);
+  });
+});
+
+// ---- move security (same gate as rename) -----------------------------------
+
+test("move rejects a ../ traversal destination", () => {
+  withVault((session) => {
+    session.createFile("note.md");
+    assert.throws(() => session.move("note.md", "../escape.md"), /Refusing to open a path outside/);
+  });
+});
+
+test("move rejects a symlinked-leaf destination", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    session.createFile("note.md");
+    symlinkSync(join(outside, "pwned.md"), join(vault, "evil.md"));
+    assert.throws(() => session.move("note.md", "evil.md"), /Refusing to write through a symbolic link/);
+  });
+});
+
+test("move rejects a destination through a symlinked intermediate directory", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    session.createFile("note.md");
+    symlinkSync(outside, join(vault, "escape"));
+    assert.throws(() => session.move("note.md", "escape/note.md"), /Refusing to write a path outside/);
+    assert.equal(existsSync(join(outside, "note.md")), false);
+  });
+});
+
+test("move rejects a .cairn destination", () => {
+  withVault((session) => {
+    session.createFile("note.md");
+    assert.throws(() => session.move("note.md", ".cairn/note.md"), /Refusing to write inside the .cairn index directory/);
+  });
+});
+
+// ---- delete security -------------------------------------------------------
+
+test("deletePath rejects a ../ traversal", () => {
+  withVault((session) => {
+    assert.throws(() => session.deletePath("../escape.md"), /Refusing to open a path outside/);
+  });
+});
+
+test("deletePath rejects a symlinked leaf (never deletes through a link)", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    const outsideTarget = join(outside, "keep.md");
+    writeFileSync(outsideTarget, "keep me\n");
+    symlinkSync(outsideTarget, join(vault, "evil.md"));
+    assert.throws(() => session.deletePath("evil.md"), /Refusing to write through a symbolic link/);
+    assert.equal(existsSync(outsideTarget), true, "must not delete the symlink's target");
+  });
+});
+
+test("deletePath rejects a target through a symlinked intermediate directory", () => {
+  withVaultAndOutside((session, vault, outside) => {
+    writeFileSync(join(outside, "victim.md"), "x\n");
+    symlinkSync(outside, join(vault, "escape"));
+    assert.throws(() => session.deletePath("escape/victim.md"), /Refusing to write a path outside/);
+    assert.equal(existsSync(join(outside, "victim.md")), true);
+  });
+});
+
+test("deletePath rejects a target inside the .cairn index directory", () => {
+  withVault((session, vault) => {
+    mkdirSync(join(vault, ".cairn"), { recursive: true });
+    writeFileSync(join(vault, ".cairn", "index.db"), "");
+    assert.throws(() => session.deletePath(".cairn/index.db"), /Refusing to write inside the .cairn index directory/);
+    assert.equal(existsSync(join(vault, ".cairn", "index.db")), true);
+  });
 });

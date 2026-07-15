@@ -18,6 +18,7 @@ import type { ChatTurn } from "./components/shell/ChatTab";
 import type { AgentMode } from "./components/shell/Composer";
 import type { UiProposal } from "./components/shell/AgentTurn";
 import { SettingsPanel } from "./components/shell/SettingsPanel";
+import { TreeDialogs, type TreeDialog } from "./components/shell/TreeDialogs";
 import { useResizable } from "./components/shell/useResizable";
 
 function errorMessage(error: unknown): string {
@@ -27,6 +28,29 @@ function errorMessage(error: unknown): string {
 function basename(p: string): string {
   const i = p.lastIndexOf("/");
   return i === -1 ? p : p.slice(i + 1);
+}
+
+/** Join a folder path ("" = vault root) with a basename into a vault-relative path. */
+function joinVaultPath(parent: string, name: string): string {
+  return parent ? `${parent}/${name}` : name;
+}
+
+/** Parent folder of a vault-relative path ("" when the path is at the root). */
+function parentPath(p: string): string {
+  const i = p.lastIndexOf("/");
+  return i === -1 ? "" : p.slice(0, i);
+}
+
+/** Default a bare name to `.md` (New note / rename of a Markdown node); keep any existing extension. */
+function ensureMdExtension(name: string): string {
+  return /\.[^./\\]+$/.test(name) ? name : `${name}.md`;
+}
+
+/** Remap a path when `from` (file or folder) was renamed/moved to `to`. null = unaffected. */
+function remapPath(p: string, from: string, to: string): string | null {
+  if (p === from) return to;
+  if (p.startsWith(`${from}/`)) return `${to}${p.slice(from.length)}`;
+  return null;
 }
 
 function vaultName(path: string): string {
@@ -70,6 +94,8 @@ export function App() {
   const [vaultPath, setVaultPath] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // The open create/rename/move/delete dialog for the vault tree (issue #21).
+  const [treeDialog, setTreeDialog] = useState<TreeDialog | null>(null);
 
   // Editor
   const [activeNode, setActiveNode] = useState<TreeNode | null>(null);
@@ -306,6 +332,150 @@ export function App() {
       setIndexState(indexStats ? "stale" : "none");
     }
   }, [vaultPath, ollama.up, indexStats]);
+
+  // ---- Vault mutations (issue #21) ------------------------------------------
+  // The rail buttons + tree context menu open a dialog; the submit handlers below
+  // call the mutation IPC, then refresh the tree and rebind the open editor.
+  //
+  // Note: the tree refresh uses the default listTree() order. This base branch does
+  // NOT include issue #22 (sort modes) — listTree takes no sort arg here — so there
+  // is no active sort mode to preserve. When #22 lands, thread the active mode
+  // through this single call site.
+  const refreshTree = useCallback(async (): Promise<void> => {
+    const nodes = await window.cairn.listTree();
+    setTree(nodes);
+  }, []);
+
+  // Open-dialog intents (surfaced by VaultRail buttons + FileTree context menu).
+  const onNewFile = useCallback((parent: string) => setTreeDialog({ kind: "newFile", parent }), []);
+  const onNewFolder = useCallback((parent: string) => setTreeDialog({ kind: "newFolder", parent }), []);
+  const onRenameNode = useCallback((node: TreeNode) => setTreeDialog({ kind: "rename", node }), []);
+  const onMoveNode = useCallback((node: TreeNode) => setTreeDialog({ kind: "move", node }), []);
+  const onDeleteNode = useCallback((node: TreeNode) => setTreeDialog({ kind: "delete", node }), []);
+
+  // Rebind the open editor / active node / expanded set after a rename or move.
+  const remapAfterMove = useCallback((from: string, to: string) => {
+    setActiveNode((cur) => {
+      if (!cur) return cur;
+      const np = remapPath(cur.path, from, to);
+      return np ? { ...cur, path: np, name: basename(np) } : cur;
+    });
+    setDocKey((cur) => (cur ? remapPath(cur, from, to) ?? cur : cur));
+    setExpanded((prev) => {
+      const next = new Set<string>();
+      for (const p of prev) next.add(remapPath(p, from, to) ?? p);
+      return next;
+    });
+  }, []);
+
+  const submitNewFile = useCallback(
+    async (parent: string, rawName: string) => {
+      const name = ensureMdExtension(rawName.trim());
+      if (!name) return;
+      const path = joinVaultPath(parent, name);
+      setError(null);
+      try {
+        await window.cairn.createFile(path);
+        if (parent) setExpanded((prev) => new Set(prev).add(parent));
+        await refreshTree();
+        setTreeDialog(null);
+        if (name.toLowerCase().endsWith(".md")) void openMarkdown({ name, path, type: "markdown" });
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [refreshTree, openMarkdown],
+  );
+
+  const submitNewFolder = useCallback(
+    async (parent: string, rawName: string) => {
+      const name = rawName.trim();
+      if (!name) return;
+      const path = joinVaultPath(parent, name);
+      setError(null);
+      try {
+        await window.cairn.createFolder(path);
+        setExpanded((prev) => {
+          const next = new Set(prev);
+          if (parent) next.add(parent);
+          return next;
+        });
+        await refreshTree();
+        setTreeDialog(null);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [refreshTree],
+  );
+
+  const submitRename = useCallback(
+    async (node: TreeNode, rawName: string) => {
+      const trimmed = rawName.trim();
+      const name = node.type === "markdown" ? ensureMdExtension(trimmed) : trimmed;
+      if (!name || name === node.name) {
+        setTreeDialog(null);
+        return;
+      }
+      const to = joinVaultPath(parentPath(node.path), name);
+      setError(null);
+      try {
+        await window.cairn.renamePath(node.path, to);
+        await refreshTree();
+        setTreeDialog(null);
+        remapAfterMove(node.path, to);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [refreshTree, remapAfterMove],
+  );
+
+  const submitMove = useCallback(
+    async (node: TreeNode, destFolder: string) => {
+      const to = joinVaultPath(destFolder, node.name);
+      if (to === node.path) {
+        setTreeDialog(null);
+        return;
+      }
+      setError(null);
+      try {
+        await window.cairn.movePath(node.path, to);
+        if (destFolder) setExpanded((prev) => new Set(prev).add(destFolder));
+        await refreshTree();
+        setTreeDialog(null);
+        remapAfterMove(node.path, to);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [refreshTree, remapAfterMove],
+  );
+
+  const submitDelete = useCallback(
+    async (node: TreeNode) => {
+      setError(null);
+      try {
+        await window.cairn.deletePath(node.path);
+        await refreshTree();
+        setTreeDialog(null);
+        const affectsOpen = docKey !== null && (docKey === node.path || docKey.startsWith(`${node.path}/`));
+        if (affectsOpen) {
+          closeTab();
+        } else if (activeNode && (activeNode.path === node.path || activeNode.path.startsWith(`${node.path}/`))) {
+          setActiveNode(null);
+        }
+        setExpanded((prev) => {
+          const next = new Set<string>();
+          for (const p of prev) if (p !== node.path && !p.startsWith(`${node.path}/`)) next.add(p);
+          return next;
+        });
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [refreshTree, docKey, activeNode, closeTab],
+  );
 
   /** Citation click-through: open the cited file in the center pane and flash the line. */
   const openCitation = useCallback(
@@ -577,6 +747,12 @@ export function App() {
           onCollapseAll={collapseAll}
           onSwitchVault={chooseVault}
           onOpenSettings={() => setSettingsOpen(true)}
+          canMutate={!!vaultPath}
+          onNewFile={onNewFile}
+          onNewFolder={onNewFolder}
+          onRenameNode={onRenameNode}
+          onMoveNode={onMoveNode}
+          onDeleteNode={onDeleteNode}
         />
       </div>
 
@@ -654,6 +830,19 @@ export function App() {
             />
           </div>
         </>
+      ) : null}
+
+      {treeDialog ? (
+        <TreeDialogs
+          dialog={treeDialog}
+          tree={tree}
+          onCancel={() => setTreeDialog(null)}
+          onCreateFile={submitNewFile}
+          onCreateFolder={submitNewFolder}
+          onRename={submitRename}
+          onMove={submitMove}
+          onDelete={submitDelete}
+        />
       ) : null}
 
       {settingsOpen ? (

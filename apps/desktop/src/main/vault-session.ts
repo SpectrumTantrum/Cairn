@@ -21,6 +21,8 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
+  renameSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -513,6 +515,90 @@ export class VaultSession {
     }
     this.assertNoSymlinkEscape(vaultRoot, target);
     writeFileSync(target, content, "utf8");
+  }
+
+  // ---- Vault mutations (issue #21) --------------------------------------------
+  // create / rename / delete / move. Every op funnels through the SAME gate as
+  // `source:write`: a lexical `../` refusal (resolveInsideVault), a `.cairn/`
+  // refusal, and the symlink-escape guard (leaf + intermediate dir). Unlike
+  // `writeSource` these do NOT impose the `.md`-only rule — creation/rename/move may
+  // target ANY file type (ADR-0009: index & cite everything). Only in-app *editing*
+  // (writeSource) stays Markdown-only; that read-anything / write-Markdown split is
+  // intentional and preserved here.
+
+  /**
+   * Resolve a vault-relative mutation target with the full write-gate guards minus
+   * the `.md`-only rule. Shared by every mutation so the four escape classes
+   * (lexical `../`, symlinked leaf, symlinked intermediate dir, and `.cairn/`) are
+   * enforced in exactly one place rather than duplicated per op.
+   */
+  private resolveMutationTarget(file: string): string {
+    const vaultRoot = this.requireVault();
+    const target = resolveInsideVault(vaultRoot, file);
+    if (relative(vaultRoot, target).split(sep)[0] === ".cairn") {
+      throw new Error("Refusing to write inside the .cairn index directory.");
+    }
+    this.assertNoSymlinkEscape(vaultRoot, target);
+    return target;
+  }
+
+  private isSymlink(path: string): boolean {
+    try {
+      return lstatSync(path).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  }
+
+  /** Create a new, empty file at a vault-relative path (any extension; ADR-0009). Refuses to clobber. */
+  createFile(file: string): void {
+    const target = this.resolveMutationTarget(file);
+    if (existsSync(target) || this.isSymlink(target)) {
+      throw new Error("A file or folder with that name already exists.");
+    }
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, "", { encoding: "utf8", flag: "wx" });
+  }
+
+  /** Create a new folder at a vault-relative path. Refuses to clobber an existing entry. */
+  createFolder(dir: string): void {
+    const target = this.resolveMutationTarget(dir);
+    if (existsSync(target) || this.isSymlink(target)) {
+      throw new Error("A file or folder with that name already exists.");
+    }
+    mkdirSync(target, { recursive: true });
+  }
+
+  /** Rename a file/folder in place (new basename, same parent). Thin wrapper over the shared move. */
+  rename(from: string, to: string): void {
+    this.moveEntry(from, to);
+  }
+
+  /** Move a file/folder to a new vault-relative location (context-menu move; no DnD in this slice). */
+  move(from: string, to: string): void {
+    this.moveEntry(from, to);
+  }
+
+  private moveEntry(from: string, to: string): void {
+    const src = this.resolveMutationTarget(from);
+    if (!existsSync(src)) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    const dest = this.resolveMutationTarget(to);
+    if (existsSync(dest) || this.isSymlink(dest)) {
+      throw new Error("A file or folder with that name already exists.");
+    }
+    mkdirSync(dirname(dest), { recursive: true });
+    renameSync(src, dest);
+  }
+
+  /** Delete a file or folder (folders recursively) at a vault-relative path. Requires it to exist. */
+  deletePath(file: string): void {
+    const target = this.resolveMutationTarget(file);
+    if (!existsSync(target)) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    rmSync(target, { recursive: true, force: false });
   }
 
   /**
