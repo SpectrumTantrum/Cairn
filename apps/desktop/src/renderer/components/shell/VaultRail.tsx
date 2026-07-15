@@ -186,7 +186,7 @@ export function VaultRail({
           <button type="button" className="icon-btn" disabled title="Coming in v1 — needs help/docs surface">
             <HelpCircle size={16} />
           </button>
-          <button type="button" className="icon-btn" title="Settings — cloud models (BYOK)" onClick={onOpenSettings}>
+          <button type="button" className="icon-btn" title="Settings" onClick={onOpenSettings}>
             <Settings size={16} />
           </button>
         </div>

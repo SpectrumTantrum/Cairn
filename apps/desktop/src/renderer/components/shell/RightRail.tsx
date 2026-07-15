@@ -7,8 +7,9 @@ import type { AgentMode } from "./Composer";
 import { SourcesTab } from "./SourcesTab";
 import { StudioTab } from "./StudioTab";
 import { ThreadHistory } from "./ThreadHistory";
+import type { RightTab } from "../../settings";
 
-export type RightTab = "chat" | "sources" | "studio";
+export type { RightTab };
 
 interface RightRailProps {
   activeTab: RightTab;
