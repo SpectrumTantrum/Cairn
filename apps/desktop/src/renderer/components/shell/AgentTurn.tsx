@@ -1,5 +1,6 @@
 import { Check, Sparkles, Undo2, X } from "lucide-react";
 import type { DiffLine, EditProposal, SearchHit } from "../../../shared/types.js";
+import { CitationCard } from "./CitationCard";
 
 /** A proposal plus its live approval status in the UI. */
 export type ProposalStatus = "pending" | "applied" | "rejected" | "skipped";
@@ -83,19 +84,13 @@ export function AgentTurn({ turn, onApply, onReject, onRevert, onCite }: AgentTu
         {turn.sources.length > 0 ? (
           <div className="citation-row">
             {turn.sources.map((s, i) => (
-              <button
-                type="button"
-                className="citation-pill"
+              <CitationCard
                 key={`${s.file}:${s.line}:${i}`}
-                title={`Open ${s.file} at line ${s.line}`}
-                onClick={() => onCite(s)}
-              >
-                <span className="citation-index">{i + 1}</span>
-                <span className="cite-loc">
-                  {basename(s.file)}:{s.line}
-                  {s.heading ? ` › ${s.heading}` : ""}
-                </span>
-              </button>
+                hit={s}
+                variant="pill"
+                index={i + 1}
+                onOpen={onCite}
+              />
             ))}
           </div>
         ) : null}
@@ -169,9 +164,4 @@ function DiffLineRow({ line }: { line: DiffLine }) {
       {"\n"}
     </span>
   );
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
 }

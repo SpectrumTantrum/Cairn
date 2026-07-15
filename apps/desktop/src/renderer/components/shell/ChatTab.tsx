@@ -10,6 +10,7 @@ import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
 import type { AgentThreadTurn } from "./AgentTurn";
+import { CitationCard } from "./CitationCard";
 
 export type ChatTurn =
   | { role: "user"; text: string }
@@ -170,19 +171,13 @@ function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: S
         {result.sources.length > 0 ? (
           <div className="citation-row">
             {result.sources.map((s, i) => (
-              <button
-                type="button"
-                className="citation-pill"
+              <CitationCard
                 key={`${s.file}:${s.line}:${i}`}
-                title={`Open ${s.file} at line ${s.line}`}
-                onClick={() => onCite(s)}
-              >
-                <span className="citation-index">{i + 1}</span>
-                <span className="cite-loc">
-                  {basename(s.file)}:{s.line}
-                  {s.heading ? ` › ${s.heading}` : ""}
-                </span>
-              </button>
+                hit={s}
+                variant="pill"
+                index={i + 1}
+                onOpen={onCite}
+              />
             ))}
           </div>
         ) : null}
@@ -261,9 +256,4 @@ function EscalatedMeta({ result }: { result: ChatSendResult }) {
       ) : null}
     </div>
   );
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
 }

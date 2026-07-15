@@ -558,8 +558,18 @@ button {
   flex-wrap: wrap;
   gap: 6px;
 }
-.citation-pill {
-  display: inline-flex;
+
+/* ---- Shared citation card (issue #15) ----
+   One component, two variants: `pill` (compact, chat citations) and `full` (vertical,
+   vault-search results + Sources-tab rows). */
+.citation-card {
+  display: flex;
+  text-align: left;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.citation-card-pill {
+  flex-direction: row;
   align-items: center;
   gap: 5px;
   max-width: 100%;
@@ -569,15 +579,45 @@ button {
   box-shadow: inset 0 0 0 1px var(--accent-border);
   color: var(--accent-strong);
   font-size: var(--fs-meta);
-  cursor: pointer;
 }
-.citation-pill:hover {
+.citation-card-pill:hover {
   background: var(--accent-fill-hover);
 }
-.citation-pill .cite-loc {
+.citation-card-pill .citation-loc {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.citation-card-full {
+  flex-direction: column;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 8px;
+}
+.citation-card-full:hover {
+  background: var(--surface-hover);
+}
+.citation-card-full .citation-loc {
+  font-size: 12.5px;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.citation-card-full .citation-line {
+  color: var(--text-faint);
+}
+.citation-card-full .citation-heading {
+  color: var(--text-muted);
+}
+.citation-snippet {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .citation-index {
   color: var(--accent);
@@ -780,18 +820,23 @@ button {
 }
 .source-check-row {
   display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 8px 9px;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 2px 5px;
   border-radius: 7px;
   color: var(--text);
   font-size: 13px;
 }
-.source-check-row:hover {
-  background: var(--surface-hover);
+/* The full citation card owns its own hover; the checkbox/type-chip nudge down so they
+   align with the card's first (location) line rather than the vertical centre of a
+   multi-line snippet. */
+.source-check-row .citation-card-full {
+  flex: 1;
+  min-width: 0;
 }
 .source-check-box {
   flex: none;
+  margin-top: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -801,19 +846,9 @@ button {
   border: 1px solid var(--divider-strong);
   color: var(--accent);
 }
-.source-check-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.source-check-name:hover {
-  color: var(--accent-strong);
-}
 .type-chip {
   flex: none;
+  margin-top: 6px;
   padding: 1px 7px;
   border-radius: var(--r-pill);
   border: 1px solid var(--divider-strong);
@@ -996,41 +1031,6 @@ button {
 .vault-search-results .muted {
   padding: 8px 6px;
   font-size: 12.5px;
-}
-.search-result {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  width: 100%;
-  padding: 7px 8px;
-  border-radius: 7px;
-  text-align: left;
-  cursor: pointer;
-}
-.search-result:hover {
-  background: var(--surface-hover);
-}
-.search-result-file {
-  font-size: 12.5px;
-  color: var(--text-strong);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.search-result-line {
-  color: var(--text-faint);
-}
-.search-result-heading {
-  color: var(--text-muted);
-}
-.search-result-snippet {
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--text-muted);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 /* ---- Agent-edit diff cards (ADR-0008): bordered card, header, Accept/Reject,

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import type { SearchHit, TreeNode, TreeSortMode } from "../../../shared/types.js";
+import { CitationCard } from "./CitationCard";
 import { FileTree } from "./FileTree";
 
 /** Human labels for the sort toggle's tooltip (current mode + next-on-click). */
@@ -257,28 +258,15 @@ function VaultSearch({ query, results, searching, onChange, onSubmit, onClose, o
           <p className="muted">No matches in this vault.</p>
         ) : (
           results.map((hit, i) => (
-            <button
-              type="button"
-              className="search-result"
+            <CitationCard
               key={`${hit.file}:${hit.line}:${i}`}
-              title={`Open ${hit.file} at line ${hit.line}`}
-              onClick={() => onOpenResult(hit)}
-            >
-              <span className="search-result-file">
-                {basename(hit.file)}
-                <span className="search-result-line">:{hit.line}</span>
-                {hit.heading ? <span className="search-result-heading"> › {hit.heading}</span> : null}
-              </span>
-              <span className="search-result-snippet">{hit.snippet}</span>
-            </button>
+              hit={hit}
+              variant="full"
+              onOpen={onOpenResult}
+            />
           ))
         )}
       </div>
     </div>
   );
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
 }
