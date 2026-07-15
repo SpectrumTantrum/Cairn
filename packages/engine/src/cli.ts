@@ -55,7 +55,19 @@ function parseArgs(args: string[]): Parsed {
 }
 
 async function runIndex(p: Parsed): Promise<void> {
-  const folder = resolve(p.positional[0] ?? ".");
+  // The folder is REQUIRED for `index` — we must never default to cwd, or a bare
+  // `cairn index` silently writes a multi-MB `.cairn/index.db` into whatever
+  // directory it was run from (see issue #39). `search`/`ask` keep the cwd default
+  // since they are read-only. `--in` also counts as providing the folder.
+  const arg =
+    p.positional[0] ?? (typeof p.flags.in === "string" ? p.flags.in : undefined);
+  if (!arg) {
+    console.error(
+      "cairn index requires a folder argument, e.g. `cairn index ./notes` — refusing to index the current directory implicitly.",
+    );
+    process.exit(1);
+  }
+  const folder = resolve(arg);
   const lexical = !!p.flags.lexical;
   process.stderr.write(`Indexing ${folder} (${lexical ? "lexical" : "hybrid"})…\n`);
   const t0 = Date.now();
