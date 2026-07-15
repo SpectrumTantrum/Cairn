@@ -45,17 +45,16 @@ before(async () => {
 
 after(() => resetModelProvider());
 
-test("registry ships seven templates with exactly one enabled (Study Guide)", () => {
+test("registry ships seven templates, all enabled, each carrying a prompt with a filenameStem", () => {
   assert.equal(STUDIO_TEMPLATES.length, 7);
-  const enabled = STUDIO_TEMPLATES.filter((t) => t.enabled);
-  assert.equal(enabled.length, 1);
-  assert.equal(enabled[0].id, "study-guide");
-  assert.ok(enabled[0].prompt, "the enabled template carries a prompt scaffold");
-  assert.ok(enabled[0].prompt.filenameStem);
-  // Every disabled template still carries card metadata so the desktop can render it.
-  for (const t of STUDIO_TEMPLATES.filter((x) => !x.enabled)) {
-    assert.ok(t.title && t.description && t.icon && t.needs, `${t.id} has card metadata`);
-    assert.equal(t.prompt, undefined, `${t.id} ships no prompt yet`);
+  // The #26 fan-out enabled every template. Each carries card metadata AND a grounded prompt.
+  assert.equal(STUDIO_TEMPLATES.filter((t) => t.enabled).length, 7);
+  for (const t of STUDIO_TEMPLATES) {
+    assert.equal(t.enabled, true, `${t.id} is enabled`);
+    assert.ok(t.title && t.description && t.icon, `${t.id} has card metadata`);
+    assert.ok(t.prompt, `${t.id} carries a prompt scaffold`);
+    assert.ok(t.prompt.structure, `${t.id} prompt has structure guidance`);
+    assert.ok(t.prompt.filenameStem, `${t.id} prompt has a filenameStem`);
   }
   assert.ok(getStudioTemplate("study-guide"));
   assert.equal(getStudioTemplate("does-not-exist"), undefined);
@@ -236,7 +235,7 @@ test("a path-traversal topic yields a single flat .md filename that cannot escap
   }
 });
 
-test("an unknown or not-yet-enabled template id is refused before any model call", async () => {
+test("an unknown template id is refused before any model call", async () => {
   const index = new InMemoryIndex();
   try {
     seed(index);
@@ -244,10 +243,11 @@ test("an unknown or not-yet-enabled template id is refused before any model call
       () => generateStudioNote({ index, templateId: "nope", topic: "x", mode: "lexical" }),
       /Unknown Studio template/,
     );
-    await assert.rejects(
-      () => generateStudioNote({ index, templateId: "quiz", topic: "x", mode: "lexical" }),
-      /not available yet/,
-    );
+    // The /not available yet/ guard (disabled or prompt-less template) still lives in
+    // generateStudioNote, but the #26 fan-out enabled all seven shipped templates, so no
+    // template id can exercise it — and generateStudioNote takes only a templateId (it looks
+    // the template up from the fixed registry), so there is no clean seam to inject a disabled
+    // one without contorting the design. The guard is intentionally left untested here.
   } finally {
     index.close();
   }

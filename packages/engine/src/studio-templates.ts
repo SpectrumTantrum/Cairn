@@ -3,9 +3,9 @@
 // plumbing. The shared grounded-generation pipeline (studio-generate.ts), the write-safety
 // apply path (ADR-0008), and the desktop cards all read this one registry.
 //
-// This slice ships exactly ONE enabled template (Study Guide). The other six are registered
-// but `enabled: false` so the desktop can render their (disabled, "coming soon") cards from
-// the same source of truth, each with a `needs` note explaining what still has to land.
+// The #26 fan-out lands all seven templates enabled, each carrying its own grounded-generation
+// prompt. The `enabled` flag and `needs` note remain in the shape so a future template can still
+// register as a disabled "coming soon" card from this same source of truth before its prompt exists.
 
 /** The grounded-generation scaffold for an enabled template. */
 export interface StudioPrompt {

@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "cairn": "node dist/cli.js",
-    "test:smoke": "npm run build && node --test test/retrieval-gate.test.mjs test/index-search.test.mjs test/model-provider.test.mjs test/retrieve.test.mjs test/ask-coverage.test.mjs test/reindex-pipeline.test.mjs test/scope.test.mjs test/chat-thread.test.mjs test/wikilinks.test.mjs test/agent-run.test.mjs test/studio-generate.test.mjs test/cloud-provider.test.mjs test/cli-index-guard.test.mjs",
+    "test:smoke": "npm run build && node --test test/retrieval-gate.test.mjs test/index-search.test.mjs test/model-provider.test.mjs test/retrieve.test.mjs test/ask-coverage.test.mjs test/reindex-pipeline.test.mjs test/scope.test.mjs test/chat-thread.test.mjs test/wikilinks.test.mjs test/agent-run.test.mjs test/studio-generate.test.mjs test/studio-template-briefing.test.mjs test/studio-template-faq.test.mjs test/studio-template-timeline.test.mjs test/studio-template-mind-map.test.mjs test/studio-template-flashcards.test.mjs test/studio-template-quiz.test.mjs test/cloud-provider.test.mjs test/cli-index-guard.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "license": "MIT",

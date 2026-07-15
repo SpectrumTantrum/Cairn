@@ -15,8 +15,9 @@ import type { StudioTemplateMeta } from "../../../shared/types.js";
 /**
  * Studio grounded-output generators (issue #26). Cards — their titles, descriptions, icons,
  * and enabled state — now come from the ENGINE template registry (via `studio:templates`);
- * this component only renders them. Exactly one template (Study Guide) is enabled this slice;
- * the other six render disabled with a `needs` tooltip. Adding a future generator is a
+ * this component only renders them. The #26 fan-out enabled all seven templates, so every card
+ * renders as an enabled generator; the disabled ("coming soon", `needs` tooltip) branch is kept
+ * for any future template registered before its prompt lands. Adding a future generator is a
  * registry entry + prompt in the engine, not a change here.
  */
 
