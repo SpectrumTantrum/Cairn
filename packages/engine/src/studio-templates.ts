@@ -68,8 +68,18 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     title: "Briefing",
     description: "A concise briefing document synthesised from the selected sources.",
     icon: "FileText",
-    enabled: false,
-    needs: "grounded generation",
+    enabled: true,
+    prompt: {
+      structure: [
+        "Produce an executive BRIEFING with exactly these Markdown sections, in this order:",
+        "## Context — 2 to 4 sentences framing the topic and why it matters; cite the source of each claim.",
+        "## Key points — a bulleted list. Each bullet states one salient finding in one or two sentences and cites the source(s) it is drawn from.",
+        "## Implications — 2 to 4 sentences on what the key points mean or what follows from them, each grounded in the sources.",
+        "## Open questions — 2 to 5 questions the sources leave unresolved, each grounded in what the sources do (and do not) say.",
+        "Do NOT write your own Sources list — a cited Sources section is appended for you.",
+      ].join("\n"),
+      filenameStem: "Briefing",
+    },
   },
   {
     id: "faq",
