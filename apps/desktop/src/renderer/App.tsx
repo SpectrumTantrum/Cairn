@@ -23,8 +23,13 @@ import type { UiProposal } from "./components/shell/AgentTurn";
 import { SettingsPanel } from "./components/shell/SettingsPanel";
 import { SettingsDialog } from "./components/shell/SettingsDialog";
 import { TreeDialogs, type TreeDialog } from "./components/shell/TreeDialogs";
+import { CommandPalette, type Command } from "./components/shell/CommandPalette";
 import { useResizable } from "./components/shell/useResizable";
 import { RIGHT_WIDTH, VAULT_WIDTH, readRightTab, writeRightTab } from "./settings";
+
+/** ⌘K on macOS, Ctrl+K elsewhere — used for the palette hint + open chord (issue #13). */
+const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
+const PALETTE_HINT = IS_MAC ? "⌘K" : "Ctrl+K";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -114,6 +119,11 @@ export function App() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // The open create/rename/move/delete dialog for the vault tree (issue #21).
   const [treeDialog, setTreeDialog] = useState<TreeDialog | null>(null);
+  // ⌘K / Ctrl+K command palette overlay (issue #13).
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Set by the "Focus Ask" command; the effect below focuses the composer once the right
+  // rail is open and on the chat tab (the textarea only exists then).
+  const [pendingAskFocus, setPendingAskFocus] = useState(false);
 
   // Editor
   const [activeNode, setActiveNode] = useState<TreeNode | null>(null);
@@ -883,11 +893,110 @@ export function App() {
 
   const composerDisabled = !vaultPath || !indexed || !ollama.up;
 
+  // ---- Command palette (issue #13) ------------------------------------------
+  // Every command is an EXISTING renderer action — no new IPC. The palette opens on
+  // ⌘K/Ctrl+K from anywhere (including inside CodeMirror/the composer) because the chord
+  // carries a modifier; plain typing never matches, so it can't steal focus mid-edit.
+
+  /** "Focus search": open the vault search (its input auto-focuses) or re-focus it if already open. */
+  const focusSearch = useCallback(() => {
+    if (!searchOpen) toggleSearch();
+    else document.querySelector<HTMLInputElement>(".vault-search-input")?.focus();
+  }, [searchOpen, toggleSearch]);
+
+  /** "Focus Ask": reveal the chat composer and hand it focus (see the effect below for timing). */
+  const focusAsk = useCallback(() => {
+    setRightRailOpen(true);
+    setRightTab("chat");
+    setPendingAskFocus(true);
+  }, []);
+
+  // Focus the composer textarea once it actually exists (right rail open + chat tab). The
+  // textarea is deep in the tree and only mounts under those conditions, so we wait for the
+  // committed state rather than focusing synchronously in focusAsk.
+  useEffect(() => {
+    if (!pendingAskFocus) return;
+    if (!rightRailOpen || rightTab !== "chat") return;
+    document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
+    setPendingAskFocus(false);
+  }, [pendingAskFocus, rightRailOpen, rightTab]);
+
+  // Global open-chord. Capture phase + stopPropagation so it beats CodeMirror's and the
+  // composer's own key handling — the palette opens from anywhere. A blocking modal
+  // (vault dialog / providers / preferences / escalation confirm) suppresses opening so only one overlay
+  // is ever stacked; toggling closed is always allowed.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent): void {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (e.key !== "k" && e.key !== "K") return;
+      if (!paletteOpen && (treeDialog || settingsOpen || prefsOpen || pendingEscalation)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setPaletteOpen((open) => !open);
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [paletteOpen, treeDialog, settingsOpen, prefsOpen, pendingEscalation]);
+
+  const commands = useMemo<Command[]>(() => {
+    const indexReason = !vaultPath
+      ? "Choose a vault first"
+      : indexState === "indexing"
+        ? "Indexing…"
+        : undefined;
+    const searchReason = !vaultPath
+      ? "Choose a vault first"
+      : !indexed
+        ? "Index this vault first"
+        : undefined;
+    return [
+      {
+        id: "choose-vault",
+        title: "Choose vault",
+        hint: "Vault",
+        keywords: "open switch folder select workspace",
+        run: () => void chooseVault(),
+      },
+      {
+        id: "index-vault",
+        title: "Index vault",
+        keywords: "reindex build embed search",
+        disabled: !vaultPath || indexState === "indexing",
+        disabledReason: indexReason,
+        run: () => void runIndex(),
+      },
+      {
+        id: "focus-search",
+        title: "Focus search",
+        keywords: "find lookup grep vault",
+        disabled: !vaultPath || !indexed,
+        disabledReason: searchReason,
+        run: focusSearch,
+      },
+      {
+        id: "focus-ask",
+        title: "Focus Ask",
+        keywords: "chat question compose ground",
+        disabled: composerDisabled,
+        disabledReason: composerReason ?? undefined,
+        run: focusAsk,
+      },
+      {
+        id: "toggle-right-rail",
+        title: "Toggle right rail",
+        keywords: "chat sources studio panel hide show",
+        run: () => setRightRailOpen((v) => !v),
+      },
+    ];
+  }, [vaultPath, indexed, indexState, composerDisabled, composerReason, runIndex, focusSearch, focusAsk]);
+
   return (
     <div className="shell">
       <div className="pane vault-rail" style={{ width: vaultRail.width }}>
         <VaultRail
           vaultName={vaultPath ? vaultName(vaultPath) : null}
+          paletteHint={PALETTE_HINT}
+          onOpenPalette={() => setPaletteOpen(true)}
           nodes={tree}
           expanded={expanded}
           activePath={activeNode?.path ?? null}
@@ -1025,6 +1134,10 @@ export function App() {
           }}
           onClose={() => setPrefsOpen(false)}
         />
+      ) : null}
+
+      {paletteOpen ? (
+        <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />
       ) : null}
 
       {settingsOpen ? (

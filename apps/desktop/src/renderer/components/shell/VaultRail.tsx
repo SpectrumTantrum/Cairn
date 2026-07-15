@@ -27,6 +27,9 @@ const SORT_NEXT: Record<TreeSortMode, TreeSortMode> = {
 
 interface VaultRailProps {
   vaultName: string | null;
+  // command palette (issue #13) — discoverable ⌘K/Ctrl+K hint in the header
+  paletteHint: string;
+  onOpenPalette(): void;
   nodes: TreeNode[];
   expanded: Set<string>;
   activePath: string | null;
@@ -61,6 +64,8 @@ interface VaultRailProps {
 
 export function VaultRail({
   vaultName,
+  paletteHint,
+  onOpenPalette,
   nodes,
   expanded,
   activePath,
@@ -91,7 +96,18 @@ export function VaultRail({
   return (
     <>
       <div className="rail-header">
-        <span className="rail-title">Vault</span>
+        <span className="rail-title-group">
+          <span className="rail-title">Vault</span>
+          <button
+            type="button"
+            className="command-hint"
+            title="Command palette"
+            aria-label="Open command palette"
+            onClick={onOpenPalette}
+          >
+            <kbd>{paletteHint}</kbd>
+          </button>
+        </span>
         <div className="rail-actions">
           <button
             type="button"

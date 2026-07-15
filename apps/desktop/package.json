@@ -13,7 +13,7 @@
     "pretypecheck": "npm run prepare:engine",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && electron-vite build",
-    "test": "npm run prepare:engine && tsc -p tsconfig.test.json && tsc -p tsconfig.editor-nav.test.json && tsc -p tsconfig.settings.test.json && node --test test/vault-session.test.mjs test/agent-run.test.mjs test/provider-store.test.mjs test/thread-store.test.mjs test/editor-nav.test.mjs test/settings.test.mjs",
+    "test": "npm run prepare:engine && tsc -p tsconfig.test.json && tsc -p tsconfig.editor-nav.test.json && tsc -p tsconfig.settings.test.json && tsc -p tsconfig.command-palette.test.json && node --test test/vault-session.test.mjs test/agent-run.test.mjs test/provider-store.test.mjs test/thread-store.test.mjs test/editor-nav.test.mjs test/settings.test.mjs test/command-palette.test.mjs",
     "prepreview": "npm run prepare:engine",
     "preview": "electron-vite preview",
     "prepackage": "npm run prepare:engine && electron-vite build && node scripts/rebuild-engine-native.mjs electron",
