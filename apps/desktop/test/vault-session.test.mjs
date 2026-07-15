@@ -5,6 +5,7 @@ import {
   realpathSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -164,6 +165,102 @@ test("listTree ignores .cairn and dotfiles and sorts folders before files", () =
     assert.equal(courses.children.length, 1);
     assert.equal(courses.children[0].path, "01-courses/algebra.md");
     assert.equal(courses.children[0].type, "markdown");
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("listTree defaults to name sort and now carries mtime/size on files", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(join(vault, "b.md"), "# b\n");
+    writeFileSync(join(vault, "a.md"), "# a\n");
+    mkdirSync(join(vault, "sub"), { recursive: true });
+
+    const session = createVaultSession();
+    session.setVault(vault);
+
+    // No sort arg ⇒ name order, byte-identical to an explicit "name" listing.
+    const def = session.listTree();
+    const named = session.listTree("", "name");
+    assert.deepEqual(def.map((n) => n.name), ["sub", "a.md", "b.md"]);
+    assert.deepEqual(def.map((n) => n.name), named.map((n) => n.name));
+
+    // Files carry the mtime/size sort keys (even in name mode); folders omit them.
+    const file = def.find((n) => n.name === "a.md");
+    assert.equal(typeof file.mtime, "number");
+    assert.equal(typeof file.size, "number");
+    const folder = def.find((n) => n.name === "sub");
+    assert.equal(folder.mtime, undefined);
+    assert.equal(folder.size, undefined);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("listTree mtime sort orders files newest-first, folders still first", () => {
+  const vault = makeVaultDir();
+  try {
+    mkdirSync(join(vault, "zeta-folder"), { recursive: true });
+    writeFileSync(join(vault, "old.md"), "# old\n");
+    writeFileSync(join(vault, "mid.md"), "# mid\n");
+    writeFileSync(join(vault, "new.md"), "# new\n");
+    // Deterministic, distinct mtimes (atime, mtime) in epoch seconds.
+    utimesSync(join(vault, "old.md"), 1000, 1000);
+    utimesSync(join(vault, "mid.md"), 2000, 2000);
+    utimesSync(join(vault, "new.md"), 3000, 3000);
+
+    const session = createVaultSession();
+    session.setVault(vault);
+    const tree = session.listTree("", "mtime");
+
+    // Folder leads (omits mtime), then files sorted most-recently-modified first.
+    assert.deepEqual(tree.map((n) => n.name), ["zeta-folder", "new.md", "mid.md", "old.md"]);
+    assert.equal(tree[0].type, "folder");
+    assert.equal(typeof tree[1].mtime, "number");
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("listTree size sort orders files largest-first, folders still first", () => {
+  const vault = makeVaultDir();
+  try {
+    mkdirSync(join(vault, "afolder"), { recursive: true });
+    writeFileSync(join(vault, "small.md"), "x"); // 1 byte
+    writeFileSync(join(vault, "large.md"), "x".repeat(100)); // 100 bytes
+    writeFileSync(join(vault, "medium.md"), "x".repeat(10)); // 10 bytes
+
+    const session = createVaultSession();
+    session.setVault(vault);
+    const tree = session.listTree("", "size");
+
+    assert.deepEqual(tree.map((n) => n.name), ["afolder", "large.md", "medium.md", "small.md"]);
+    assert.equal(tree[0].type, "folder");
+    assert.equal(tree[1].size, 100);
+    assert.equal(tree[3].size, 1);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("listTree keeps folders in name order even in mtime mode", () => {
+  const vault = makeVaultDir();
+  try {
+    mkdirSync(join(vault, "b-folder"), { recursive: true });
+    mkdirSync(join(vault, "a-folder"), { recursive: true });
+    writeFileSync(join(vault, "note.md"), "# n\n");
+    // Make b-folder's dir mtime the newest; folders must ignore it and stay name-ordered.
+    utimesSync(join(vault, "b-folder"), 9999, 9999);
+    utimesSync(join(vault, "a-folder"), 1, 1);
+
+    const session = createVaultSession();
+    session.setVault(vault);
+    const tree = session.listTree("", "mtime");
+
+    assert.deepEqual(tree.map((n) => n.name), ["a-folder", "b-folder", "note.md"]);
+    assert.equal(tree[0].mtime, undefined);
+    assert.equal(tree[0].size, undefined);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

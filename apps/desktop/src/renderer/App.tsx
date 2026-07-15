@@ -8,6 +8,7 @@ import type {
   ProviderPreset,
   SearchHit,
   TreeNode,
+  TreeSortMode,
 } from "../shared/types.js";
 import { VaultRail } from "./components/shell/VaultRail";
 import { EditorPane } from "./components/shell/EditorPane";
@@ -65,10 +66,17 @@ function dedupeByFile(sources: SearchHit[]): SearchHit[] {
 
 const RIGHT_TAB_KEY = "cairn.rightTab";
 
+/** File-tree sort cycle order; the toggle advances through these in turn. */
+const SORT_ORDER: TreeSortMode[] = ["name", "mtime", "size"];
+function nextSortMode(mode: TreeSortMode): TreeSortMode {
+  return SORT_ORDER[(SORT_ORDER.indexOf(mode) + 1) % SORT_ORDER.length];
+}
+
 export function App() {
   // Vault + tree
   const [vaultPath, setVaultPath] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
+  const [sortMode, setSortMode] = useState<TreeSortMode>("name");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   // Editor
@@ -217,7 +225,7 @@ export function App() {
       setSearchQuery("");
       setSearchResults([]);
       void window.cairn.resetChat();
-      const nodes = await window.cairn.listTree();
+      const nodes = await window.cairn.listTree(sortMode);
       setTree(nodes);
     } catch (err) {
       setError(errorMessage(err));
@@ -234,6 +242,19 @@ export function App() {
   }, []);
 
   const collapseAll = useCallback(() => setExpanded(new Set()), []);
+
+  /** Advance the tree sort mode (name → mtime → size → …) and re-fetch in the new order. */
+  const cycleSort = useCallback(async () => {
+    if (!vaultPath) return;
+    const next = nextSortMode(sortMode);
+    setSortMode(next);
+    try {
+      const nodes = await window.cairn.listTree(next);
+      setTree(nodes);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [vaultPath, sortMode]);
 
   /** Load a Markdown node into the editor; optionally flash a cited line afterwards. */
   const openMarkdown = useCallback(async (node: TreeNode, flashLine?: number) => {
@@ -563,6 +584,9 @@ export function App() {
           nodes={tree}
           expanded={expanded}
           activePath={activeNode?.path ?? null}
+          sortMode={sortMode}
+          canSort={!!vaultPath}
+          onCycleSort={cycleSort}
           searchOpen={searchOpen}
           searchQuery={searchQuery}
           searchResults={searchResults}

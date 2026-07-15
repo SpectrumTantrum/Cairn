@@ -37,6 +37,9 @@ export interface VaultSessionDeps {
   openIndex: (vaultRoot: string) => Index;
 }
 
+/** Sort order for the file tree. Folders stay grouped first in every mode. */
+export type TreeSortMode = "name" | "mtime" | "size";
+
 /** A folder or file node in the vault file tree (main-process source of truth). */
 export interface TreeNode {
   /** Basename, as shown in the tree. */
@@ -47,14 +50,40 @@ export interface TreeNode {
   type: "folder" | "markdown" | "other";
   /** Present only on folders. */
   children?: TreeNode[];
+  /**
+   * Last-modified time in epoch ms. Populated on FILES only (folders omit it); the
+   * mtime sort therefore orders files while folders stay in name order. Absent when a
+   * file vanished mid-walk (transient race) — such a node sorts as 0.
+   */
+  mtime?: number;
+  /** File size in bytes. Populated on FILES only (folders omit it); see `mtime`. */
+  size?: number;
 }
 
-/** Folders before files; then natural (numeric-aware) case-insensitive name order. */
-function compareTreeNodes(a: TreeNode, b: TreeNode): number {
+/** Natural (numeric-aware), case-insensitive name order. */
+function compareByName(a: TreeNode, b: TreeNode): number {
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+}
+
+/**
+ * Folders always sort before files (the invariant). Folders carry no mtime/size, so
+ * they stay in name order in every mode; files sort by the chosen key — mtime
+ * (newest first) or size (largest first) — with name as a stable tiebreaker.
+ */
+function compareTreeNodes(a: TreeNode, b: TreeNode, sort: TreeSortMode): number {
   const aFolder = a.type === "folder";
   const bFolder = b.type === "folder";
   if (aFolder !== bFolder) return aFolder ? -1 : 1;
-  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+  if (aFolder && bFolder) return compareByName(a, b);
+  if (sort === "mtime") {
+    const delta = (b.mtime ?? 0) - (a.mtime ?? 0); // most-recently-modified first
+    return delta !== 0 ? delta : compareByName(a, b);
+  }
+  if (sort === "size") {
+    const delta = (b.size ?? 0) - (a.size ?? 0); // largest first
+    return delta !== 0 ? delta : compareByName(a, b);
+  }
+  return compareByName(a, b);
 }
 
 function normalizeVaultPath(input: string): string {
@@ -291,19 +320,20 @@ export class VaultSession {
   }
 
   /**
-   * Recursively list the vault as a folder/file tree for the vault rail. Folders and
-   * files are returned sorted (folders first, natural name order); dotfiles and the
-   * `.cairn` index dir are skipped, and symlinks are never followed (escape + loop
-   * safety). `rel` optionally scopes the listing to a subdirectory, path-validated
-   * against the vault root the same way reads/writes are.
+   * Recursively list the vault as a folder/file tree for the vault rail. Folders are
+   * always grouped before files; `sort` chooses the file order (name / mtime / size),
+   * defaulting to name to preserve today's behavior. Dotfiles and the `.cairn` index
+   * dir are skipped, and symlinks are never followed (escape + loop safety). `rel`
+   * optionally scopes the listing to a subdirectory, path-validated against the vault
+   * root the same way reads/writes are.
    */
-  listTree(rel = ""): TreeNode[] {
+  listTree(rel = "", sort: TreeSortMode = "name"): TreeNode[] {
     const vaultRoot = this.requireVault();
     const startDir = rel.trim() === "" ? vaultRoot : resolveInsideVault(vaultRoot, rel);
-    return this.readTree(vaultRoot, startDir);
+    return this.readTree(vaultRoot, startDir, sort);
   }
 
-  private readTree(vaultRoot: string, dir: string): TreeNode[] {
+  private readTree(vaultRoot: string, dir: string, sort: TreeSortMode): TreeNode[] {
     const nodes: TreeNode[] = [];
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const name = entry.name;
@@ -312,13 +342,25 @@ export class VaultSession {
       const abs = join(dir, name);
       const relPath = relative(vaultRoot, abs).split(sep).join("/");
       if (entry.isDirectory()) {
-        nodes.push({ name, path: relPath, type: "folder", children: this.readTree(vaultRoot, abs) });
+        nodes.push({ name, path: relPath, type: "folder", children: this.readTree(vaultRoot, abs, sort) });
       } else if (entry.isFile()) {
         const type = name.toLowerCase().endsWith(".md") ? "markdown" : "other";
-        nodes.push({ name, path: relPath, type });
+        // Stat inline during the walk (no second directory pass) to populate the
+        // mtime/size sort keys. A file vanishing mid-walk is a transient local race;
+        // include it unsized rather than aborting the whole listing.
+        let mtime: number | undefined;
+        let size: number | undefined;
+        try {
+          const stats = statSync(abs);
+          mtime = stats.mtimeMs;
+          size = stats.size;
+        } catch {
+          // File disappeared between readdir and stat; leave mtime/size undefined.
+        }
+        nodes.push({ name, path: relPath, type, mtime, size });
       }
     }
-    nodes.sort(compareTreeNodes);
+    nodes.sort((a, b) => compareTreeNodes(a, b, sort));
     return nodes;
   }
 
