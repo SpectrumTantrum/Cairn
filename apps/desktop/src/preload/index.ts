@@ -9,6 +9,9 @@ import type {
   ProviderInput,
   ProviderMeta,
   TestConnectionResult,
+  ThreadMeta,
+  ThreadRecord,
+  ThreadSaveInput,
   TreeNode,
   TreeSortMode,
 } from "../shared/types.js";
@@ -26,6 +29,9 @@ export type {
   ProviderMeta,
   ProviderPreset,
   TestConnectionResult,
+  ThreadMeta,
+  ThreadRecord,
+  ThreadSaveInput,
   SearchHit,
   TreeNode,
   TreeSortMode,
@@ -66,6 +72,14 @@ export interface CairnApi {
   deleteProvider(id: string): Promise<void>;
   /** Token-free connection probe (lists models where supported). */
   testProvider(input: ProviderInput): Promise<TestConnectionResult>;
+  // ---- Chat thread history (issue #25) ----
+  /** Past chat threads, newest-updated first — metadata only, no turn payloads. */
+  listThreads(): Promise<ThreadMeta[]>;
+  /** Upsert a thread (omit id to create, pass it to update). Returns its metadata. */
+  saveThread(input: ThreadSaveInput): Promise<ThreadMeta>;
+  /** Full thread with its turns, or null if it no longer exists. */
+  loadThread(id: string): Promise<ThreadRecord | null>;
+  deleteThread(id: string): Promise<void>;
 }
 
 // Allow-list of the only channels the renderer may subscribe to. Keeps the
@@ -103,6 +117,10 @@ const api: CairnApi = {
   saveProvider: (input) => ipcRenderer.invoke("providers:save", input),
   deleteProvider: (id) => ipcRenderer.invoke("providers:delete", id),
   testProvider: (input) => ipcRenderer.invoke("providers:test", input),
+  listThreads: () => ipcRenderer.invoke("threads:list"),
+  saveThread: (input) => ipcRenderer.invoke("threads:save", input),
+  loadThread: (id) => ipcRenderer.invoke("threads:load", id),
+  deleteThread: (id) => ipcRenderer.invoke("threads:delete", id),
 };
 
 contextBridge.exposeInMainWorld("cairn", api);

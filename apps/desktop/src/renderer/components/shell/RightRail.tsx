@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
-import type { EscalateTarget, ProviderMeta, SearchHit } from "../../../shared/types.js";
+import type { EscalateTarget, ProviderMeta, SearchHit, ThreadMeta } from "../../../shared/types.js";
 import { ChatTab } from "./ChatTab";
 import type { ChatTurn } from "./ChatTab";
 import type { AgentMode } from "./Composer";
 import { SourcesTab } from "./SourcesTab";
 import { StudioTab } from "./StudioTab";
+import { ThreadHistory } from "./ThreadHistory";
 
 export type RightTab = "chat" | "sources" | "studio";
 
@@ -12,6 +14,12 @@ interface RightRailProps {
   activeTab: RightTab;
   onTabChange(tab: RightTab): void;
   onNewThread(): void;
+  // thread history (issue #25)
+  threads: ThreadMeta[];
+  activeThreadId: string | null;
+  onOpenHistory(): void;
+  onLoadThread(id: string): void;
+  onDeleteThread(id: string): void;
   // chat
   thread: ChatTurn[];
   busy: boolean;
@@ -50,6 +58,16 @@ const TABS: { id: RightTab; label: string }[] = [
 
 export function RightRail(props: RightRailProps) {
   const { activeTab, onTabChange, onNewThread, thread, busy } = props;
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  function toggleHistory(): void {
+    setHistoryOpen((open) => {
+      const next = !open;
+      if (next) props.onOpenHistory();
+      return next;
+    });
+  }
+
   return (
     <>
       <div className="rail-tabstrip">
@@ -73,14 +91,34 @@ export function RightRail(props: RightRailProps) {
         >
           <Plus size={16} />
         </button>
-        <button
-          type="button"
-          className="icon-btn"
-          disabled
-          title="Coming in v1 — thread history & options"
-        >
-          <MoreHorizontal size={16} />
-        </button>
+        <div className="thread-history-anchor">
+          <button
+            type="button"
+            className={`icon-btn${historyOpen ? " active" : ""}`}
+            title="Thread history"
+            aria-haspopup="menu"
+            aria-expanded={historyOpen}
+            onClick={toggleHistory}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          {historyOpen ? (
+            <ThreadHistory
+              threads={props.threads}
+              activeThreadId={props.activeThreadId}
+              onLoad={(id) => {
+                setHistoryOpen(false);
+                props.onLoadThread(id);
+              }}
+              onDelete={props.onDeleteThread}
+              onNewThread={() => {
+                setHistoryOpen(false);
+                onNewThread();
+              }}
+              onClose={() => setHistoryOpen(false)}
+            />
+          ) : null}
+        </div>
       </div>
 
       <div className="rail-body">

@@ -8,6 +8,7 @@ import {
   type ProviderInput,
   type SecretCrypto,
 } from "./provider-store.js";
+import { ThreadStore } from "./thread-store.js";
 
 const session = createVaultSession();
 
@@ -26,6 +27,18 @@ function providers(): ProviderStore {
     });
   }
   return providerStore;
+}
+
+// Chat thread history (issue #25). Lives in userData, NOT the vault — chat history is
+// not vault content and must never be indexed or cited as a source.
+let threadStore: ThreadStore | null = null;
+function threads(): ThreadStore {
+  if (!threadStore) {
+    threadStore = new ThreadStore({
+      filePath: join(app.getPath("userData"), "chat-threads.json"),
+    });
+  }
+  return threadStore;
 }
 
 const USER_ERROR_PREFIXES = [
@@ -360,6 +373,38 @@ export function registerIpcHandlers(): void {
     return handleUserErrors(() => {
       const input = coerceProviderInput(payload);
       return testConnection(providers().configFromInput(input));
+    });
+  });
+
+  // ---- Chat thread history (issue #25) --------------------------------------
+  // Persisted in userData (never the vault). `list` returns metadata only; `save`
+  // upserts (mint id on create, keep it on update); `load`/`delete` operate by id.
+  // `turns` cross the boundary opaquely — the store never interprets the ChatTurn shape.
+  ipcMain.handle("threads:list", async () => {
+    return handleUserErrors(() => threads().list());
+  });
+
+  ipcMain.handle("threads:save", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const turns = Array.isArray(p.turns) ? p.turns : [];
+      const id = typeof p.id === "string" && p.id.length > 0 ? p.id : undefined;
+      const title = typeof p.title === "string" ? p.title : undefined;
+      return threads().save({ id, title, turns });
+    });
+  });
+
+  ipcMain.handle("threads:load", async (_event, id: unknown) => {
+    return handleUserErrors(() => {
+      if (typeof id !== "string" || !id) return null;
+      return threads().load(id);
+    });
+  });
+
+  ipcMain.handle("threads:delete", async (_event, id: unknown) => {
+    return handleUserErrors(() => {
+      if (typeof id !== "string" || !id) return;
+      threads().delete(id);
     });
   });
 

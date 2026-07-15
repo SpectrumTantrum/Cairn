@@ -2,6 +2,7 @@ export type { AskResult, ChatSendResult, ChatUsage, EditProposal, DiffLine, Diff
 export type { ProviderKind, ProviderPreset } from "@cairn/engine";
 export type { TreeNode, TreeSortMode, AgentStartResult, AgentApplyResult } from "../main/vault-session.js";
 export type { ProviderMeta, ProviderInput, TestConnectionResult } from "../main/provider-store.js";
+export type { ThreadMeta, ThreadRecord, ThreadSaveInput } from "../main/thread-store.js";
 
 export interface OllamaStatus {
   up: boolean;
