@@ -119,10 +119,22 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: "mind-map",
     title: "Mind Map",
-    description: "An interactive concept graph over the selected sources.",
+    description:
+      "A hierarchical concept outline over the selected sources — a central topic branching into subtopics and leaf ideas, every branch cited.",
     icon: "Network",
-    enabled: false,
-    needs: "interactive graph output",
+    enabled: true,
+    prompt: {
+      structure: [
+        "Produce a MIND MAP as a hierarchical Markdown OUTLINE — a text outline, NOT an interactive canvas or graph:",
+        "## <central topic> — a single root heading naming the central topic of the map.",
+        "### <main branch> — one subheading per major branch off the central topic; use several branches.",
+        "Under each branch, nest bullets (and deeper sub-bullets) for the leaf ideas, indenting each level further.",
+        "Keep every node a SHORT label — a few words, not sentences or paragraphs; favour breadth (many branches and leaves) over prose.",
+        "Ground each branch and leaf in the sources and cite them inline with bracketed numbers, e.g. [1] or [2][3].",
+        "Do NOT write your own Sources list — a cited Sources section is appended for you.",
+      ].join("\n"),
+      filenameStem: "Mind Map",
+    },
   },
   {
     id: "flashcards",
