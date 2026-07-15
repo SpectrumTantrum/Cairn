@@ -1,27 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readPaneWidth, writePaneWidth, type PaneWidthSpec } from "../../settings";
 
 interface ResizableOpts {
-  storageKey: string;
-  initial: number;
-  min: number;
-  max: number;
+  /** Persisted-width contract (key + default + clamp bounds) from the settings module. */
+  spec: PaneWidthSpec;
   /** "left" rail grows as the pointer moves right; "right" rail grows moving left. */
   edge: "left" | "right";
 }
 
 /** Pointer-driven pane resize with min/max clamping and localStorage persistence. */
-export function useResizable({ storageKey, initial, min, max, edge }: ResizableOpts) {
-  const [width, setWidth] = useState<number>(() => {
-    const stored = Number(window.localStorage.getItem(storageKey));
-    return Number.isFinite(stored) && stored >= min && stored <= max ? stored : initial;
-  });
+export function useResizable({ spec, edge }: ResizableOpts) {
+  const { initial, min, max } = spec;
+  const [width, setWidth] = useState<number>(() => readPaneWidth(window.localStorage, spec));
   const [dragging, setDragging] = useState(false);
   const startX = useRef(0);
   const startW = useRef(0);
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, String(Math.round(width)));
-  }, [storageKey, width]);
+    writePaneWidth(window.localStorage, spec, width);
+  }, [spec, width]);
+
+  /** Snap back to the default width (the settings panel's "reset layout" control). */
+  const reset = useCallback(() => setWidth(initial), [initial]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -51,5 +51,5 @@ export function useResizable({ storageKey, initial, min, max, edge }: ResizableO
     };
   }, [dragging, edge, min, max]);
 
-  return { width, dragging, onPointerDown };
+  return { width, dragging, onPointerDown, reset };
 }

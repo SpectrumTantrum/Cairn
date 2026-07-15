@@ -21,8 +21,10 @@ import type { ChatTurn } from "./components/shell/ChatTab";
 import type { AgentMode } from "./components/shell/Composer";
 import type { UiProposal } from "./components/shell/AgentTurn";
 import { SettingsPanel } from "./components/shell/SettingsPanel";
+import { SettingsDialog } from "./components/shell/SettingsDialog";
 import { TreeDialogs, type TreeDialog } from "./components/shell/TreeDialogs";
 import { useResizable } from "./components/shell/useResizable";
+import { RIGHT_WIDTH, VAULT_WIDTH, readRightTab, writeRightTab } from "./settings";
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -98,8 +100,6 @@ function dedupeByFile(sources: SearchHit[]): SearchHit[] {
   return out;
 }
 
-const RIGHT_TAB_KEY = "cairn.rightTab";
-
 /** File-tree sort cycle order; the toggle advances through these in turn. */
 const SORT_ORDER: TreeSortMode[] = ["name", "mtime", "size"];
 function nextSortMode(mode: TreeSortMode): TreeSortMode {
@@ -138,7 +138,10 @@ export function App() {
   // BYOK cloud escalation (ADR-0002)
   const [providers, setProviders] = useState<ProviderMeta[]>([]);
   const [presets, setPresets] = useState<ProviderPreset[]>([]);
+  // `settingsOpen` = the BYOK cloud-provider surface (ADR-0002, SettingsPanel). `prefsOpen`
+  // = the general UI-preferences settings (issue #24, SettingsDialog). One overlay at a time.
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [prefsOpen, setPrefsOpen] = useState(false);
   // Armed escalation for the NEXT turn (null = stays local on Ollama).
   const [escalateTarget, setEscalateTarget] = useState<EscalateTarget | null>(null);
   // First-use confirm gate: once a provider is confirmed (or the session-wide skip is
@@ -149,9 +152,7 @@ export function App() {
   const [pendingEscalation, setPendingEscalation] = useState<{ question: string; target: EscalateTarget } | null>(null);
 
   // Right rail
-  const [rightTab, setRightTab] = useState<RightTab>(
-    () => (window.localStorage.getItem(RIGHT_TAB_KEY) as RightTab | null) ?? "chat",
-  );
+  const [rightTab, setRightTab] = useState<RightTab>(() => readRightTab(window.localStorage));
   const [rightRailOpen, setRightRailOpen] = useState(true);
   const [thread, setThread] = useState<ChatTurn[]>([]);
   // Thread history persistence (issue #25). Threads live in userData (main process),
@@ -187,8 +188,8 @@ export function App() {
 
   const [error, setError] = useState<string | null>(null);
 
-  const vaultRail = useResizable({ storageKey: "cairn.vaultWidth", initial: 246, min: 190, max: 420, edge: "left" });
-  const rightRail = useResizable({ storageKey: "cairn.rightWidth", initial: 372, min: 300, max: 560, edge: "right" });
+  const vaultRail = useResizable({ spec: VAULT_WIDTH, edge: "left" });
+  const rightRail = useResizable({ spec: RIGHT_WIDTH, edge: "right" });
 
   const dirty = buffer !== savedContent;
   const indexed = indexStats !== null;
@@ -201,7 +202,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(RIGHT_TAB_KEY, rightTab);
+    writeRightTab(window.localStorage, rightTab);
   }, [rightTab]);
 
   // Subscribe once to streamed chat tokens. Tokens tagged with a superseded requestId
@@ -906,7 +907,7 @@ export function App() {
           onOpenNode={openNode}
           onCollapseAll={collapseAll}
           onSwitchVault={chooseVault}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => setPrefsOpen(true)}
           canMutate={!!vaultPath}
           onNewFile={onNewFile}
           onNewFolder={onNewFolder}
@@ -1007,6 +1008,22 @@ export function App() {
           onRename={submitRename}
           onMove={submitMove}
           onDelete={submitDelete}
+        />
+      ) : null}
+
+      {prefsOpen ? (
+        <SettingsDialog
+          rightTab={rightTab}
+          onRightTabChange={setRightTab}
+          onResetLayout={() => {
+            vaultRail.reset();
+            rightRail.reset();
+          }}
+          onOpenProviders={() => {
+            setPrefsOpen(false);
+            setSettingsOpen(true);
+          }}
+          onClose={() => setPrefsOpen(false)}
         />
       ) : null}
 
