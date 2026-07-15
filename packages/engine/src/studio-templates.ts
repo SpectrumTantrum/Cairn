@@ -76,8 +76,18 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     title: "FAQ",
     description: "Frequently-asked questions answered from the selected sources.",
     icon: "HelpCircle",
-    enabled: false,
-    needs: "grounded generation",
+    enabled: true,
+    prompt: {
+      structure: [
+        "Produce an FAQ as grounded question-and-answer pairs, ordered from the most fundamental question to the most advanced:",
+        "Ask the questions a reader of these sources would actually have — the things the sources set out to explain — not trivia.",
+        "Format each entry as a `### ` heading holding the question, followed by the answer in one or two sentences.",
+        "Answer ONLY from the sources and cite each answer inline with bracketed numbers, e.g. [1] or [2][3].",
+        "If the sources do not answer a question, do not invent one — leave it out rather than answering beyond the sources.",
+        "Do NOT write your own Sources list — a cited Sources section is appended for you.",
+      ].join("\n"),
+      filenameStem: "FAQ",
+    },
   },
   {
     id: "timeline",
