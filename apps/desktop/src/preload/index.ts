@@ -10,6 +10,7 @@ import type {
   ProviderMeta,
   TestConnectionResult,
   TreeNode,
+  TreeSortMode,
 } from "../shared/types.js";
 
 export type {
@@ -27,6 +28,7 @@ export type {
   TestConnectionResult,
   SearchHit,
   TreeNode,
+  TreeSortMode,
 };
 
 export interface CairnApi {
@@ -40,7 +42,8 @@ export interface CairnApi {
   resetChat(): Promise<void>;
   /** Subscribe to streamed chat tokens. Returns an unsubscribe fn. */
   onChatToken(listener: (event: ChatTokenEvent) => void): () => void;
-  listTree(): Promise<TreeNode[]>;
+  /** List the vault tree; `sort` chooses file order (name / mtime / size), default name. */
+  listTree(sort?: TreeSortMode): Promise<TreeNode[]>;
   openSource(file: string): Promise<void>;
   readSource(file: string): Promise<string>;
   writeSource(file: string, content: string): Promise<void>;
@@ -86,7 +89,7 @@ const api: CairnApi = {
   chatSend: (payload) => ipcRenderer.invoke("chat:send", payload),
   resetChat: () => ipcRenderer.invoke("chat:reset"),
   onChatToken: (listener) => subscribe<ChatTokenEvent>("chat:token", listener),
-  listTree: () => ipcRenderer.invoke("vault:listTree"),
+  listTree: (sort) => ipcRenderer.invoke("vault:listTree", sort),
   openSource: (file) => ipcRenderer.invoke("source:open", file),
   readSource: (file) => ipcRenderer.invoke("source:read", file),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),

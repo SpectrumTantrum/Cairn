@@ -1,7 +1,7 @@
 import { app, dialog, ipcMain, safeStorage, shell } from "electron";
 import { join } from "node:path";
 import { CloudProvider, getModelProvider, PROVIDER_PRESETS } from "@cairn/engine";
-import { createVaultSession } from "./vault-session.js";
+import { createVaultSession, type TreeSortMode } from "./vault-session.js";
 import {
   ProviderStore,
   testConnection,
@@ -81,6 +81,15 @@ function asScope(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const files = value.filter((x): x is string => typeof x === "string");
   return files.length > 0 ? files : undefined;
+}
+
+const SORT_MODES = new Set<TreeSortMode>(["name", "mtime", "size"]);
+
+/** Coerce an untrusted IPC value into a valid tree sort mode, defaulting to name. */
+function asSortMode(value: unknown): TreeSortMode {
+  return typeof value === "string" && SORT_MODES.has(value as TreeSortMode)
+    ? (value as TreeSortMode)
+    : "name";
 }
 
 const PROVIDER_KINDS = new Set(["openai-compat", "anthropic", "azure-openai", "bedrock"]);
@@ -272,8 +281,8 @@ export function registerIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle("vault:listTree", async () => {
-    return handleUserErrors(() => session.listTree());
+  ipcMain.handle("vault:listTree", async (_event, sort: unknown) => {
+    return handleUserErrors(() => session.listTree("", asSortMode(sort)));
   });
 
   // ---- Agent write-loop (ADR-0008) ------------------------------------------

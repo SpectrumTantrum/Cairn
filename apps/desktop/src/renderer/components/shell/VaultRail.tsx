@@ -10,16 +10,32 @@ import {
   X,
 } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import type { SearchHit, TreeNode } from "../../../shared/types.js";
+import type { SearchHit, TreeNode, TreeSortMode } from "../../../shared/types.js";
 import { FileTree } from "./FileTree";
 
 const STUB_HINT = "Coming in v1 — needs vault-mutation write support";
+
+/** Human labels for the sort toggle's tooltip (current mode + next-on-click). */
+const SORT_LABELS: Record<TreeSortMode, string> = {
+  name: "name",
+  mtime: "date modified",
+  size: "size",
+};
+const SORT_NEXT: Record<TreeSortMode, TreeSortMode> = {
+  name: "mtime",
+  mtime: "size",
+  size: "name",
+};
 
 interface VaultRailProps {
   vaultName: string | null;
   nodes: TreeNode[];
   expanded: Set<string>;
   activePath: string | null;
+  // sort
+  sortMode: TreeSortMode;
+  canSort: boolean;
+  onCycleSort(): void;
   // search
   searchOpen: boolean;
   searchQuery: string;
@@ -43,6 +59,9 @@ export function VaultRail({
   nodes,
   expanded,
   activePath,
+  sortMode,
+  canSort,
+  onCycleSort,
   searchOpen,
   searchQuery,
   searchResults,
@@ -72,8 +91,9 @@ export function VaultRail({
           <button
             type="button"
             className="icon-btn"
-            disabled
-            title="Coming in v1 — needs sort-order options"
+            title={`Sort by ${SORT_LABELS[sortMode]} — click to sort by ${SORT_LABELS[SORT_NEXT[sortMode]]}`}
+            onClick={onCycleSort}
+            disabled={!canSort}
           >
             <ArrowUpDown size={16} />
           </button>
