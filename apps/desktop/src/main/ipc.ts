@@ -1,6 +1,6 @@
 import { app, dialog, ipcMain, safeStorage, shell } from "electron";
 import { join } from "node:path";
-import { CloudProvider, getModelProvider, PROVIDER_PRESETS } from "@cairn/engine";
+import { CloudProvider, getModelProvider, PROVIDER_PRESETS, studioTemplateMetas } from "@cairn/engine";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
 import {
   ProviderStore,
@@ -61,6 +61,8 @@ const USER_ERROR_PREFIXES = [
   "This agent run",
   "That proposed edit",
   "Revert is unsafe",
+  "Studio needs",
+  "The requested Studio",
 ];
 
 function toUserError(error: unknown): Error {
@@ -398,6 +400,28 @@ export function registerIpcHandlers(): void {
         throw new Error("Refusing to revert without a run id.");
       }
       return session.agentRevertRun(runId);
+    });
+  });
+
+  // ---- Studio grounded generation (issue #26) -------------------------------
+  // `templates` is the static registry metadata for the Studio cards (no prompts). `generate`
+  // runs the shared pipeline and returns an AgentStartResult; the generated note then flows
+  // through the SAME agent:apply / agent:revert gate above — no dedicated write path.
+  ipcMain.handle("studio:templates", async () => studioTemplateMetas());
+
+  ipcMain.handle("studio:generate", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const templateId = typeof p.templateId === "string" ? p.templateId : "";
+      const topic = typeof p.topic === "string" ? p.topic : "";
+      if (!templateId) {
+        throw new Error("The requested Studio template is missing.");
+      }
+      if (!topic.trim()) {
+        throw new Error("Studio needs a topic to generate from.");
+      }
+      const model = typeof p.model === "string" ? p.model : undefined;
+      return session.studioGenerate(templateId, { topic, model, scope: asScope(p.scope) });
     });
   });
 

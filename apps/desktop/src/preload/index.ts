@@ -8,6 +8,7 @@ import type {
   OllamaStatus,
   ProviderInput,
   ProviderMeta,
+  StudioTemplateMeta,
   TestConnectionResult,
   ThreadMeta,
   ThreadRecord,
@@ -28,6 +29,7 @@ export type {
   ProviderInput,
   ProviderMeta,
   ProviderPreset,
+  StudioTemplateMeta,
   TestConnectionResult,
   ThreadMeta,
   ThreadRecord,
@@ -73,6 +75,19 @@ export interface CairnApi {
   agentReject(runId: string, proposalId: string): Promise<AgentApplyResult>;
   /** Revert the whole run to its checkpoint, byte-identical. */
   agentRevert(runId: string): Promise<{ reverted: boolean }>;
+  // ---- Studio grounded generation (issue #26) ----
+  /** The Studio template registry metadata (no prompt scaffolds). */
+  studioTemplates(): Promise<StudioTemplateMeta[]>;
+  /**
+   * Run a Studio template's grounded generation. Returns an AgentStartResult whose single
+   * proposal is applied/reverted through the SAME agent:* gate as Agent mode.
+   */
+  studioGenerate(payload: {
+    templateId: string;
+    topic: string;
+    model?: string;
+    scope?: string[];
+  }): Promise<AgentStartResult>;
   // ---- BYOK cloud providers (ADR-0002) ----
   /** Static preset registry for the settings form (no secrets). */
   providerPresets(): Promise<ProviderPreset[]>;
@@ -128,6 +143,8 @@ const api: CairnApi = {
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
   agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),
   agentRevert: (runId) => ipcRenderer.invoke("agent:revert", { runId }),
+  studioTemplates: () => ipcRenderer.invoke("studio:templates"),
+  studioGenerate: (payload) => ipcRenderer.invoke("studio:generate", payload),
   providerPresets: () => ipcRenderer.invoke("providers:presets"),
   listProviders: () => ipcRenderer.invoke("providers:list"),
   saveProvider: (input) => ipcRenderer.invoke("providers:save", input),
