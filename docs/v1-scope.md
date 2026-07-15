@@ -12,7 +12,7 @@ This document is the authoritative v1 **scope**. For architecture/technical deci
 - Obsidian-compatible plain-Markdown vault; CodeMirror editor; `[[wikilinks]]` + backlinks; tags
 - **Three-pane desktop shell (ADR-0010):** left rail = Obsidian-style vault navigation (file tree + backlinks/outline); center = CodeMirror 6 Markdown editor (MIT), polymorphic by node type (PDF → viewer, AV → player); right rail = Cursor-style agent sidebar. Agent edits render as **inline per-hunk accept/reject diffs in the editor** (ADR-0008), not in chat; citation click-through opens the anchor target in the center pane (ADR-0009). *v1 direction — the desktop alpha stays panel-based per `docs/mvp-scope.md`.*
 - Heterogeneous **graph** over typed nodes — `note`, `pdf`, `flashcard` — all plain files, edges = wikilinks (ADR-0003)
-- git auto-snapshots (isomorphic-git)
+- git auto-snapshots (system git via `execFile`, dedicated checkpoint repo — ADR-0008 §0, amended 2026-07-15)
 
 **Retrieval (in-process TS engine, ADR-0001)**
 - Index = sqlite-vec + FTS5 + metadata under `.cairn/` (disposable, per-machine, never synced)
