@@ -161,10 +161,19 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
   {
     id: "quiz",
     title: "Quiz",
-    description: "An interactive quiz with explanations for wrong answers.",
+    description:
+      "A self-test quiz over the selected sources — multiple-choice and short-answer questions with a cited answer key.",
     icon: "ListChecks",
-    enabled: false,
-    needs: "interactive quiz output",
+    enabled: true,
+    prompt: {
+      structure: [
+        "Produce a QUIZ with exactly these Markdown sections, in this order:",
+        "## Questions — a numbered list mixing multiple-choice and short-answer questions that cover the sources' key material. For each multiple-choice question, give exactly 4 options labelled A, B, C, D with exactly one correct. For each short-answer question, ask for a brief written response. Every question MUST be answerable from the sources alone — never require outside knowledge, and do NOT put citations in this section.",
+        "## Answer Key — a numbered list matching the questions above. For each answer, state the correct option (or expected short answer) and cite the source(s) it is grounded in with bracketed numbers, e.g. [1] or [2][3].",
+        "Do NOT write your own Sources list — a cited Sources section is appended for you.",
+      ].join("\n"),
+      filenameStem: "Quiz",
+    },
   },
 ];
 
