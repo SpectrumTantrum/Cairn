@@ -53,6 +53,17 @@ export interface CairnApi {
   openSource(file: string): Promise<void>;
   readSource(file: string): Promise<string>;
   writeSource(file: string, content: string): Promise<void>;
+  // ---- Vault mutations (issue #21) ----
+  /** Create a new (empty) file at a vault-relative path. Any extension (ADR-0009). */
+  createFile(path: string): Promise<void>;
+  /** Create a new folder at a vault-relative path. */
+  createFolder(path: string): Promise<void>;
+  /** Rename a file/folder in place (new basename, same parent). */
+  renamePath(from: string, to: string): Promise<void>;
+  /** Move a file/folder to a new vault-relative location. */
+  movePath(from: string, to: string): Promise<void>;
+  /** Delete a file or folder (folders recursively). Confirmation is a renderer concern. */
+  deletePath(path: string): Promise<void>;
   checkOllama(): Promise<OllamaStatus>;
   /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
   agentStart(payload: { goal: string; model?: string; scope?: string[] }): Promise<AgentStartResult>;
@@ -107,6 +118,11 @@ const api: CairnApi = {
   openSource: (file) => ipcRenderer.invoke("source:open", file),
   readSource: (file) => ipcRenderer.invoke("source:read", file),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),
+  createFile: (path) => ipcRenderer.invoke("vault:createFile", { path }),
+  createFolder: (path) => ipcRenderer.invoke("vault:createFolder", { path }),
+  renamePath: (from, to) => ipcRenderer.invoke("vault:rename", { from, to }),
+  movePath: (from, to) => ipcRenderer.invoke("vault:move", { from, to }),
+  deletePath: (path) => ipcRenderer.invoke("vault:delete", { path }),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
   agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),

@@ -13,8 +13,6 @@ import type { KeyboardEvent } from "react";
 import type { SearchHit, TreeNode, TreeSortMode } from "../../../shared/types.js";
 import { FileTree } from "./FileTree";
 
-const STUB_HINT = "Coming in v1 — needs vault-mutation write support";
-
 /** Human labels for the sort toggle's tooltip (current mode + next-on-click). */
 const SORT_LABELS: Record<TreeSortMode, string> = {
   name: "name",
@@ -52,6 +50,13 @@ interface VaultRailProps {
   onCollapseAll(): void;
   onSwitchVault(): void;
   onOpenSettings(): void;
+  // vault mutations (issue #21) — `parent` is a folder path ("" = vault root)
+  canMutate: boolean;
+  onNewFile(parent: string): void;
+  onNewFolder(parent: string): void;
+  onRenameNode(node: TreeNode): void;
+  onMoveNode(node: TreeNode): void;
+  onDeleteNode(node: TreeNode): void;
 }
 
 export function VaultRail({
@@ -76,16 +81,34 @@ export function VaultRail({
   onCollapseAll,
   onSwitchVault,
   onOpenSettings,
+  canMutate,
+  onNewFile,
+  onNewFolder,
+  onRenameNode,
+  onMoveNode,
+  onDeleteNode,
 }: VaultRailProps) {
   return (
     <>
       <div className="rail-header">
         <span className="rail-title">Vault</span>
         <div className="rail-actions">
-          <button type="button" className="icon-btn" disabled title={STUB_HINT}>
+          <button
+            type="button"
+            className="icon-btn"
+            title="New note"
+            onClick={() => onNewFile("")}
+            disabled={!canMutate}
+          >
             <FilePlus size={16} />
           </button>
-          <button type="button" className="icon-btn" disabled title={STUB_HINT}>
+          <button
+            type="button"
+            className="icon-btn"
+            title="New folder"
+            onClick={() => onNewFolder("")}
+            disabled={!canMutate}
+          >
             <FolderPlus size={16} />
           </button>
           <button
@@ -137,6 +160,11 @@ export function VaultRail({
           activePath={activePath}
           onToggleFolder={onToggleFolder}
           onOpenNode={onOpenNode}
+          onNewFile={onNewFile}
+          onNewFolder={onNewFolder}
+          onRenameNode={onRenameNode}
+          onMoveNode={onMoveNode}
+          onDeleteNode={onDeleteNode}
         />
       ) : (
         <div className="file-tree">

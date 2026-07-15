@@ -1649,3 +1649,62 @@ button {
   color: var(--text-muted);
   background: var(--surface-input);
 }
+
+/* ===================== Vault tree context menu (issue #21) ===================== */
+.context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+}
+.context-menu {
+  position: fixed;
+  z-index: 71;
+  min-width: 168px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--divider-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+.context-menu li {
+  list-style: none;
+}
+.context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.context-menu button:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+.context-menu button.danger {
+  color: var(--danger);
+}
+.context-menu button.danger:hover {
+  background: var(--surface-hover);
+  color: var(--danger);
+}
+.context-menu .context-sep {
+  height: 1px;
+  margin: 4px 2px;
+  background: var(--divider);
+}
+
+/* Destructive confirm button (delete). */
+.primary-btn.danger-btn {
+  background: var(--danger);
+  color: #16110f;
+}
+.primary-btn.danger-btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+}

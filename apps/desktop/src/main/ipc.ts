@@ -298,6 +298,59 @@ export function registerIpcHandlers(): void {
     return handleUserErrors(() => session.listTree("", asSortMode(sort)));
   });
 
+  // ---- Vault mutations (issue #21) ------------------------------------------
+  // create / rename / delete / move — each funnels through VaultSession's shared
+  // mutation gate (lexical `../` + `.cairn/` + symlink-escape guards), the same
+  // validation `source:write` uses. Delete confirmation is a renderer concern; the
+  // main process just enacts the already-validated op. The renderer refreshes the
+  // tree via `vault:listTree` afterward.
+  ipcMain.handle("vault:createFile", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const path = typeof p.path === "string" ? p.path : undefined;
+      if (path === undefined) throw new Error("No source file was provided.");
+      session.createFile(path);
+    });
+  });
+
+  ipcMain.handle("vault:createFolder", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const path = typeof p.path === "string" ? p.path : undefined;
+      if (path === undefined) throw new Error("No source file was provided.");
+      session.createFolder(path);
+    });
+  });
+
+  ipcMain.handle("vault:rename", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const from = typeof p.from === "string" ? p.from : undefined;
+      const to = typeof p.to === "string" ? p.to : undefined;
+      if (from === undefined || to === undefined) throw new Error("No source file was provided.");
+      session.rename(from, to);
+    });
+  });
+
+  ipcMain.handle("vault:move", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const from = typeof p.from === "string" ? p.from : undefined;
+      const to = typeof p.to === "string" ? p.to : undefined;
+      if (from === undefined || to === undefined) throw new Error("No source file was provided.");
+      session.move(from, to);
+    });
+  });
+
+  ipcMain.handle("vault:delete", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const path = typeof p.path === "string" ? p.path : undefined;
+      if (path === undefined) throw new Error("No source file was provided.");
+      session.deletePath(path);
+    });
+  });
+
   // ---- Agent write-loop (ADR-0008) ------------------------------------------
   // start collects proposals (no writes); apply is the per-hunk approval gate (the
   // only path to disk); revert undoes the whole run byte-identically.
