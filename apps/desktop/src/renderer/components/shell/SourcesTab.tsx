@@ -1,5 +1,7 @@
 import { Check } from "lucide-react";
 import type { SearchHit } from "../../../shared/types.js";
+import { CitationCard } from "./CitationCard";
+import { typeChip } from "../../cite-format";
 
 interface SourcesTabProps {
   sources: SearchHit[];
@@ -48,14 +50,7 @@ export function SourcesTab({ sources, excluded, onToggle, onOpen }: SourcesTabPr
               >
                 {checked ? <Check size={12} /> : null}
               </button>
-              <button
-                type="button"
-                className="source-check-name"
-                title={`Open ${s.file}`}
-                onClick={() => onOpen(s)}
-              >
-                {basename(s.file)}
-              </button>
+              <CitationCard hit={s} variant="full" onOpen={onOpen} />
               <span className="type-chip">{typeChip(s.file)}</span>
             </div>
           );
@@ -74,17 +69,4 @@ function dedupe(sources: SearchHit[]): SearchHit[] {
     out.push(s);
   }
   return out;
-}
-
-function basename(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i === -1 ? p : p.slice(i + 1);
-}
-
-function typeChip(file: string): string {
-  const ext = file.slice(file.lastIndexOf(".") + 1).toLowerCase();
-  if (ext === "md") return "MD";
-  if (ext === "pdf") return "PDF";
-  if (["mp3", "wav", "m4a", "mp4", "mov", "webm"].includes(ext)) return "AV";
-  return ext.toUpperCase();
 }
