@@ -86,7 +86,7 @@ Cursor-style agent sidebar) is **v1 direction, not the alpha** — see `docs/adr
 - Graph.
 - Full editor/write modes.
 - Agent.
-- Studio — except the grounded-generation pipeline + Study Guide proving slice, reopened by maintainer decision 2026-07-15 (issue #26); the remaining six templates follow as registry entries.
+- Studio — except the grounded-generation pipeline + Study Guide proving slice, reopened by maintainer decision 2026-07-15 (issue #26); all seven templates shipped as registry entries.
 - Cloud/BYOK.
 - Windows/Linux packaging.
 - TTS/audio.
