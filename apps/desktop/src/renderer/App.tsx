@@ -7,6 +7,7 @@ import type {
   ProviderMeta,
   ProviderPreset,
   SearchHit,
+  ThreadMeta,
   TreeNode,
 } from "../shared/types.js";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -50,6 +51,14 @@ function settleStreaming(thread: ChatTurn[], settled: ChatTurn): ChatTurn[] {
   const next = thread.slice(0, -1);
   next.push(settled);
   return next;
+}
+
+/** Derive a thread title from its first user turn (issue #25). Falls back to "New thread". */
+function deriveThreadTitle(turns: ChatTurn[]): string {
+  const firstUser = turns.find((t) => t.role === "user");
+  const text = firstUser && "text" in firstUser ? firstUser.text.trim() : "";
+  if (!text) return "New thread";
+  return text.length > 60 ? `${text.slice(0, 57)}…` : text;
 }
 
 function dedupeByFile(sources: SearchHit[]): SearchHit[] {
@@ -106,6 +115,16 @@ export function App() {
   );
   const [rightRailOpen, setRightRailOpen] = useState(true);
   const [thread, setThread] = useState<ChatTurn[]>([]);
+  // Thread history persistence (issue #25). Threads live in userData (main process),
+  // not the vault. `activeThreadId` is the persisted thread the visible turns belong to
+  // (null until the first turn is saved); the ref mirror keeps the persist effect and
+  // async handlers reading a fresh id without re-subscribing.
+  const [threads, setThreads] = useState<ThreadMeta[]>([]);
+  const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+  const activeThreadIdRef = useRef<string | null>(null);
+  // Set before we replace `thread` from a load/reset so the persist effect skips that
+  // one render (a freshly-loaded thread must not be re-saved and bumped to the top).
+  const suppressPersistRef = useRef(false);
   const [asking, setAsking] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [mode, setMode] = useState<AgentMode>("ask");
@@ -139,6 +158,7 @@ export function App() {
     void refreshOllama();
     void window.cairn.providerPresets().then(setPresets).catch(() => setPresets([]));
     void refreshProviders();
+    void refreshThreads();
   }, []);
 
   useEffect(() => {
@@ -154,6 +174,85 @@ export function App() {
     });
     return off;
   }, []);
+
+  // Persist the thread whenever it settles (issue #25). Guarded so streamed tokens
+  // (asking === true) don't write on every delta and a just-loaded thread isn't re-saved.
+  // Upsert keeps updating the same `activeThreadId` across turns; the returned id is
+  // captured on the first save of a brand-new thread.
+  useEffect(() => {
+    if (suppressPersistRef.current) {
+      suppressPersistRef.current = false;
+      return;
+    }
+    if (asking) return; // mid-stream; wait for the settled turn
+    if (thread.length === 0) return; // new-thread reset — nothing to persist
+    const id = activeThreadIdRef.current ?? undefined;
+    void window.cairn
+      .saveThread({ id, title: deriveThreadTitle(thread), turns: thread })
+      .then((meta) => {
+        activeThreadIdRef.current = meta.id;
+        setActiveThreadId(meta.id);
+        void refreshThreads();
+      })
+      .catch(() => {
+        // History persistence is best-effort; a failed save never blocks chatting.
+      });
+  }, [thread, asking]);
+
+  const refreshThreads = useCallback(async (): Promise<void> => {
+    try {
+      setThreads(await window.cairn.listThreads());
+    } catch {
+      setThreads([]);
+    }
+  }, []);
+
+  /** Load a persisted thread into the visible chat (display-only history — see report). */
+  const loadThread = useCallback(async (id: string): Promise<void> => {
+    try {
+      const record = await window.cairn.loadThread(id);
+      if (!record) {
+        await refreshThreads(); // it was deleted out from under the list
+        return;
+      }
+      // Supersede any in-flight request and drop the engine's server-side context: the
+      // loaded turns are prior display history, not a rehydrated engine conversation.
+      activeRequestId.current = -1;
+      void window.cairn.resetChat();
+      setAsking(false);
+      suppressPersistRef.current = true;
+      setThread(record.turns as ChatTurn[]);
+      activeThreadIdRef.current = record.id;
+      setActiveThreadId(record.id);
+      setLastSources([]);
+      setExcludedSources(new Set());
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [refreshThreads]);
+
+  const deleteThread = useCallback(
+    async (id: string): Promise<void> => {
+      try {
+        await window.cairn.deleteThread(id);
+        // If the open thread was deleted, drop back to a blank composer.
+        if (activeThreadIdRef.current === id) {
+          activeRequestId.current = -1;
+          void window.cairn.resetChat();
+          suppressPersistRef.current = true;
+          setThread([]);
+          activeThreadIdRef.current = null;
+          setActiveThreadId(null);
+          setLastSources([]);
+          setExcludedSources(new Set());
+        }
+        await refreshThreads();
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    },
+    [refreshThreads],
+  );
 
   // Sources scope for the NEXT question: the current answer's unique source files, minus
   // any unchecked in the Sources tab. Only becomes an active scope once something is
@@ -211,6 +310,9 @@ export function App() {
       activeRequestId.current = -1;
       setAsking(false);
       setThread([]);
+      // Detach from any persisted thread; the new vault starts a fresh conversation.
+      activeThreadIdRef.current = null;
+      setActiveThreadId(null);
       setLastSources([]);
       setExcludedSources(new Set());
       setSearchOpen(false);
@@ -498,6 +600,9 @@ export function App() {
     setThread([]);
     setLastSources([]);
     setExcludedSources(new Set());
+    // Detach from the persisted thread so the next turn starts a fresh one (issue #25).
+    activeThreadIdRef.current = null;
+    setActiveThreadId(null);
   }
 
   async function runSearch(): Promise<void> {
@@ -625,6 +730,11 @@ export function App() {
               activeTab={rightTab}
               onTabChange={setRightTab}
               onNewThread={newThread}
+              threads={threads}
+              activeThreadId={activeThreadId}
+              onOpenHistory={() => void refreshThreads()}
+              onLoadThread={(id) => void loadThread(id)}
+              onDeleteThread={(id) => void deleteThread(id)}
               thread={thread}
               busy={asking}
               input={chatInput}

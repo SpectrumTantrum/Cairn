@@ -1532,3 +1532,120 @@ button {
   font-size: 11px;
   color: var(--text-faint);
 }
+
+/* Thread history popover (issue #25) */
+.thread-history-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.thread-history {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  width: 268px;
+  max-height: 340px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-raised);
+  border: 1px solid var(--divider-strong);
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.thread-history-new {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--text-strong);
+  border-bottom: 1px solid var(--divider);
+}
+.thread-history-new:hover {
+  background: var(--surface-hover);
+}
+.thread-history-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+.thread-history-empty {
+  margin: 0;
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
+}
+.thread-history-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 6px;
+}
+.thread-history-row:hover {
+  background: var(--surface-hover);
+}
+.thread-history-row.active {
+  background: var(--accent-fill);
+}
+.thread-history-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 9px;
+  text-align: left;
+}
+.thread-history-title {
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.thread-history-row.active .thread-history-title {
+  color: var(--accent-strong);
+}
+.thread-history-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.thread-history-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 5px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  opacity: 0;
+}
+.thread-history-row:hover .thread-history-delete {
+  opacity: 1;
+}
+.thread-history-delete:hover {
+  background: var(--surface-input);
+  color: var(--rm-text);
+}
+.thread-history-confirm {
+  display: flex;
+  gap: 4px;
+  margin-right: 5px;
+}
+.thread-history-confirm-yes,
+.thread-history-confirm-no {
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 5px;
+}
+.thread-history-confirm-yes {
+  color: var(--rm-text);
+  background: var(--rm-bg);
+}
+.thread-history-confirm-no {
+  color: var(--text-muted);
+  background: var(--surface-input);
+}
