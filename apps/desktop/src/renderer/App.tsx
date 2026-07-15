@@ -7,6 +7,7 @@ import type {
   ProviderMeta,
   ProviderPreset,
   SearchHit,
+  StudioTemplateMeta,
   ThreadMeta,
   TreeNode,
   TreeSortMode,
@@ -184,6 +185,8 @@ export function App() {
   // Vault-relative file paths unchecked in the Sources tab — excluded from the NEXT
   // question's retrieval. Empty = whole index (no scope). Reset on each new answer / thread.
   const [excludedSources, setExcludedSources] = useState<Set<string>>(new Set());
+  // Studio template registry metadata (issue #26). Static — fetched once from the engine.
+  const [studioTemplates, setStudioTemplates] = useState<StudioTemplateMeta[]>([]);
 
   // Streaming chat request bookkeeping. requestIdRef mints monotonically increasing ids;
   // activeRequestId marks the one whose tokens/result are still wanted (a new send, a
@@ -210,6 +213,7 @@ export function App() {
     void window.cairn.providerPresets().then(setPresets).catch(() => setPresets([]));
     void refreshProviders();
     void refreshThreads();
+    void window.cairn.studioTemplates().then(setStudioTemplates).catch(() => setStudioTemplates([]));
   }, []);
 
   useEffect(() => {
@@ -761,6 +765,47 @@ export function App() {
     }
   }
 
+  // Studio generation (issue #26): run a template's grounded pipeline, then surface its
+  // single note proposal as an agent turn in the Chat tab so it flows through the EXISTING
+  // diff-preview / approval / revert UI. No separate write path — same agent:apply gate.
+  async function submitStudio(templateId: string, topic: string): Promise<void> {
+    const t = topic.trim();
+    if (!t || asking) return;
+    const template = studioTemplates.find((x) => x.id === templateId);
+    const label = template ? `${template.title}: ${t}` : t;
+    setRightTab("chat"); // reveal the approval UI where the diff card renders
+    setThread((prev) => [...prev, { role: "user", text: label }]);
+    setAsking(true);
+    setError(null);
+    try {
+      const res = await window.cairn.studioGenerate({
+        templateId,
+        topic: t,
+        model: selectedModel ?? undefined,
+        scope: scopeActive ? includedFiles : undefined,
+      });
+      const proposals: UiProposal[] = res.proposals.map((p) => ({ ...p, status: "pending" }));
+      setThread((prev) => [
+        ...prev,
+        {
+          role: "agent",
+          runId: res.runId,
+          answer: res.answer,
+          proposals,
+          sources: res.sources,
+          stopReason: res.stopReason,
+          steps: res.steps,
+        },
+      ]);
+      if (res.sources.length > 0) setLastSources(res.sources);
+      setExcludedSources(new Set());
+    } catch (err) {
+      setThread((prev) => [...prev, { role: "error", text: errorMessage(err) }]);
+    } finally {
+      setAsking(false);
+    }
+  }
+
   const patchProposal = useCallback((runId: string, proposalId: string, patch: Partial<UiProposal>) => {
     setThread((prev) =>
       prev.map((t) =>
@@ -1100,6 +1145,8 @@ export function App() {
               sources={lastSources}
               excludedSources={excludedSources}
               onToggleSource={toggleSource}
+              studioTemplates={studioTemplates}
+              onStudioGenerate={(templateId, topic) => void submitStudio(templateId, topic)}
             />
           </div>
         </>

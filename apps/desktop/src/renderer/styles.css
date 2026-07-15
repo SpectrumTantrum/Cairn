@@ -894,6 +894,63 @@ button {
   color: var(--text);
 }
 
+/* Enabled Studio generator card (issue #26): full opacity, interactive. */
+.studio-card.enabled {
+  grid-column: 1 / -1;
+  cursor: default;
+  opacity: 1;
+}
+.studio-card.enabled .studio-card-top {
+  color: var(--text);
+  justify-content: flex-start;
+  gap: 8px;
+}
+.studio-card-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.studio-topic-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 9px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--divider-strong);
+  border-radius: var(--r-input, 6px);
+}
+.studio-topic-input:disabled {
+  opacity: 0.6;
+}
+.studio-generate-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--on-accent, #fff);
+  background: var(--accent, #4f6ef2);
+  border: none;
+  border-radius: var(--r-input, 6px);
+  cursor: pointer;
+}
+.studio-generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.studio-scope-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
 /* Shared empty/hint text */
 .muted {
   color: var(--text-muted);

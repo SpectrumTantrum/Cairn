@@ -1,6 +1,8 @@
 import {
   ask,
   ChatThread,
+  diffLines,
+  generateStudioNote,
   indexVault,
   openIndex,
   runAgent,
@@ -417,6 +419,114 @@ export class VaultSession {
     } finally {
       index.close();
     }
+  }
+
+  /**
+   * Studio grounded generation (issue #26). Runs the shared engine pipeline (retrieve →
+   * generate → cite) and wraps the proposed note as a single-proposal Agent run so the
+   * generated note enters the vault ONLY through the same ADR-0008 checkpoint/apply/revert
+   * machinery — this is a thin adapter over that write path, NOT a second one. Applies
+   * nothing and takes no checkpoint; that happens on `agentApplyHunk` like every other run.
+   *
+   * A refusal (retrieval did not cover the topic) yields a run with zero proposals, mirroring
+   * `agentStart`'s empty-proposal shape so the same UI renders it.
+   */
+  async studioGenerate(
+    templateId: string,
+    opts: { topic: string; model?: string; scope?: string[] },
+  ): Promise<AgentStartResult> {
+    const vaultPath = this.requireVault();
+    this.assertIndexed(vaultPath);
+    const topic = opts.topic.trim();
+    if (!topic) {
+      throw new Error("Studio needs a topic to generate from.");
+    }
+
+    const index = this.openIndexFn(vaultPath);
+    try {
+      const result = await generateStudioNote({
+        index,
+        templateId,
+        topic,
+        model: opts.model,
+        scope: opts.scope,
+        mode: "auto",
+      });
+      const runId = randomUUID();
+
+      if (!result.note) {
+        // Refusal — an active run with no proposals (nothing to apply, nothing to revert).
+        this.activeRun = {
+          runId,
+          proposals: new Map(),
+          resolved: new Set(),
+          applied: [],
+          rejected: [],
+          checkpointSha: null,
+          runCommitSha: null,
+        };
+        return {
+          runId,
+          answer: result.answer,
+          proposals: [],
+          sources: result.sources,
+          steps: 0,
+          stopReason: "done",
+          grounded: result.grounded,
+          model: result.model,
+        };
+      }
+
+      // Friendly collision resolution for the DEFAULT path; the apply-time op:"add" check in
+      // agentApplyHunk remains the safety net against a race between here and approval.
+      const path = this.uniqueNotePath(vaultPath, result.note.path);
+      const proposal: EditProposal = {
+        id: "p1",
+        path,
+        op: "add",
+        newContent: result.note.content,
+        baseHash: "",
+        preview: diffLines("", result.note.content),
+      };
+      this.activeRun = {
+        runId,
+        proposals: new Map([[proposal.id, proposal]]),
+        resolved: new Set(),
+        applied: [],
+        rejected: [],
+        checkpointSha: null,
+        runCommitSha: null,
+      };
+      return {
+        runId,
+        answer: result.answer,
+        proposals: [proposal],
+        sources: result.sources,
+        steps: 0,
+        stopReason: "done",
+        grounded: result.grounded,
+        model: result.model,
+      };
+    } finally {
+      index.close();
+    }
+  }
+
+  /**
+   * Resolve a note filename collision the friendly way — append " 2", " 3"… before the
+   * extension until the vault-relative path is free. Purely lexical/existence-based; the
+   * op:"add" concurrency check at apply time still guards a TOCTOU race.
+   */
+  private uniqueNotePath(vaultRoot: string, relPath: string): string {
+    if (!existsSync(resolveInsideVault(vaultRoot, relPath))) return relPath;
+    const dot = relPath.lastIndexOf(".");
+    const stem = dot === -1 ? relPath : relPath.slice(0, dot);
+    const ext = dot === -1 ? "" : relPath.slice(dot);
+    for (let n = 2; n < 1000; n++) {
+      const candidate = `${stem} ${n}${ext}`;
+      if (!existsSync(resolveInsideVault(vaultRoot, candidate))) return candidate;
+    }
+    return relPath; // pathological fallback; apply will skip on collision
   }
 
   private requireRun(runId: string): ActiveRun {

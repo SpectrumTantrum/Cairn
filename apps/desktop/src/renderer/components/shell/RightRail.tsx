@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { MoreHorizontal, Plus } from "lucide-react";
-import type { EscalateTarget, ProviderMeta, SearchHit, ThreadMeta } from "../../../shared/types.js";
+import type { EscalateTarget, ProviderMeta, SearchHit, StudioTemplateMeta, ThreadMeta } from "../../../shared/types.js";
 import { ChatTab } from "./ChatTab";
 import type { ChatTurn } from "./ChatTab";
 import type { AgentMode } from "./Composer";
@@ -49,6 +49,9 @@ interface RightRailProps {
   sources: SearchHit[];
   excludedSources: Set<string>;
   onToggleSource(file: string): void;
+  // studio (issue #26)
+  studioTemplates: StudioTemplateMeta[];
+  onStudioGenerate(templateId: string, topic: string): void;
 }
 
 const TABS: { id: RightTab; label: string }[] = [
@@ -157,7 +160,14 @@ export function RightRail(props: RightRailProps) {
             onOpen={props.onCite}
           />
         ) : (
-          <StudioTab />
+          <StudioTab
+            templates={props.studioTemplates}
+            busy={props.busy}
+            disabled={props.composerDisabled}
+            disabledReason={props.composerReason}
+            scopeCount={props.scopeCount}
+            onGenerate={props.onStudioGenerate}
+          />
         )}
       </div>
     </>

@@ -22,6 +22,10 @@ export type {
 export { chat, chatStream, resolveChatModel } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
+export { STUDIO_TEMPLATES, getStudioTemplate, studioTemplateMetas } from "./studio-templates.js";
+export type { StudioTemplate, StudioTemplateMeta, StudioPrompt } from "./studio-templates.js";
+export { generateStudioNote } from "./studio-generate.js";
+export type { StudioGenerateOptions, StudioGenerateResult, GeneratedNote } from "./studio-generate.js";
 export { diffLines } from "./diff.js";
 export type { DiffLine, DiffPreview } from "./diff.js";
 export {
