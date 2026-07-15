@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, safeStorage, shell } from "electron";
+import { app, dialog, ipcMain, safeStorage } from "electron";
 import { join } from "node:path";
 import { CloudProvider, getModelProvider, PROVIDER_PRESETS } from "@cairn/engine";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
@@ -253,17 +253,6 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("chat:reset", async () => {
     return handleUserErrors(() => {
       session.resetChat();
-    });
-  });
-
-  ipcMain.handle("source:open", async (_event, file: unknown) => {
-    return handleUserErrors(async () => {
-      if (typeof file !== "string") {
-        throw new Error("No source file was provided.");
-      }
-      const sourcePath = session.resolveSourcePath(file);
-      const message = await shell.openPath(sourcePath);
-      if (message) throw new Error(message);
     });
   });
 

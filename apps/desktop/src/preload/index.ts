@@ -50,7 +50,6 @@ export interface CairnApi {
   onChatToken(listener: (event: ChatTokenEvent) => void): () => void;
   /** List the vault tree; `sort` chooses file order (name / mtime / size), default name. */
   listTree(sort?: TreeSortMode): Promise<TreeNode[]>;
-  openSource(file: string): Promise<void>;
   readSource(file: string): Promise<string>;
   writeSource(file: string, content: string): Promise<void>;
   // ---- Vault mutations (issue #21) ----
@@ -115,7 +114,6 @@ const api: CairnApi = {
   resetChat: () => ipcRenderer.invoke("chat:reset"),
   onChatToken: (listener) => subscribe<ChatTokenEvent>("chat:token", listener),
   listTree: (sort) => ipcRenderer.invoke("vault:listTree", sort),
-  openSource: (file) => ipcRenderer.invoke("source:open", file),
   readSource: (file) => ipcRenderer.invoke("source:read", file),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),
   createFile: (path) => ipcRenderer.invoke("vault:createFile", { path }),
