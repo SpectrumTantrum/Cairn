@@ -149,6 +149,41 @@ test("a filename collision is resolved to a unique path at generation time", asy
   }
 });
 
+test("the note-path gate refuses a hand-crafted proposal path that escapes the vault", async () => {
+  // #26 verifier finding: the Studio note path is safe by construction (the engine's
+  // slugForFilename flattens separators), but the desktop MUST re-validate rather than
+  // trust that upstream. resolveInsideVault is the shared vault-boundary gate that BOTH
+  // note-path resolution (uniqueNotePath, at generation) and the apply gate funnel through;
+  // exercise the gate directly with paths slugForFilename would never emit but a compromised
+  // upstream could hand it.
+  const vault = makeVault({ "spacing.md": "# Spacing\n\nOriginal.\n" });
+  try {
+    const session = createVaultSession({
+      openIndex: () => indexFor(vault, [{ file: "spacing.md", text: "spaced repetition" }]),
+    });
+    session.setVault(vault);
+
+    // resolveSourcePath is what the apply gate calls on a proposal's path before writing.
+    assert.throws(
+      () => session.resolveSourcePath("../escape.md"),
+      /outside the selected vault/,
+    );
+    assert.throws(
+      () => session.resolveSourcePath("../../etc/passwd"),
+      /outside the selected vault/,
+    );
+
+    // uniqueNotePath is the generation-time collision resolver; it validates through the
+    // same gate, so a malicious proposed note path is rejected before it becomes a proposal.
+    assert.throws(
+      () => session.uniqueNotePath(vault, "../escape.md"),
+      /outside the selected vault/,
+    );
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("studioGenerate refuses (zero proposals) when retrieval does not cover the topic", async () => {
   const vault = makeVault({ "spacing.md": "# Spacing\n\nOriginal.\n" });
   setModelProvider(studyGuideProvider("should never run"));

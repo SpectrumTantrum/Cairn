@@ -63,11 +63,23 @@ const USER_ERROR_PREFIXES = [
   "Revert is unsafe",
   "Studio needs",
   "The requested Studio",
+  "Unknown Studio template",
+];
+
+// Deliberately-surfaced user messages whose safe text is NOT at the start — a value is
+// interpolated as the prefix (e.g. a Studio template title). Matched by regex so they are
+// allow-listed by intent, not merely returned by the generic fallback branch below.
+const USER_ERROR_PATTERNS = [
+  // studio-generate.ts: `The "<title>" generator is not available yet.`
+  /^The ".+" generator is not available yet\.$/,
 ];
 
 function toUserError(error: unknown): Error {
   const message = error instanceof Error ? error.message : String(error);
-  if (USER_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix))) {
+  if (
+    USER_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix)) ||
+    USER_ERROR_PATTERNS.some((re) => re.test(message))
+  ) {
     return new Error(message);
   }
   if (/ollama|fetch failed|ECONNREFUSED|embedder|chat model|\/api\/(embed|chat|tags)|HTTP \d+/i.test(message)) {

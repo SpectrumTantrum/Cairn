@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
+import { dirname, relative, resolve } from "node:path";
 
 let generateStudioNote;
 let STUDIO_TEMPLATES;
@@ -173,6 +174,63 @@ test("generateStudioNote refuses (no note) when retrieval does not cover the top
     assert.equal(result.note, null);
     assert.match(result.answer, /don't cover/i);
     assert.equal(chatCalls, 0, "no generation is attempted without covered retrieval");
+  } finally {
+    index.close();
+  }
+});
+
+test("a path-traversal topic yields a single flat .md filename that cannot escape the vault", async () => {
+  // Regression lock for the #26 verifier finding: the note path is safe by construction
+  // (slugForFilename strips / \ and other separators; filenameStem comes from the registry),
+  // but nothing asserted it. A malicious topic must NOT smuggle a directory component — let
+  // alone a `../` — into the proposed note.path.
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chat: async () => "## Overview\n\nUnix stores account records in /etc/passwd [1].\n",
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    // Seed a chunk that lexically covers the traversal topic ("etc", "passwd") so a note is
+    // actually produced — the refusal path would otherwise mask whether the filename is safe.
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 1,
+      chunks: [
+        {
+          id: 1,
+          file: "notes/unix.md",
+          ordinal: 0,
+          line: 1,
+          heading: "Accounts",
+          text: "The /etc/passwd file lists Unix user accounts and their home directories.",
+          hash: "h1",
+        },
+      ],
+    });
+
+    const result = await generateStudioNote({
+      index,
+      templateId: "study-guide",
+      topic: "../../etc/passwd",
+      mode: "lexical",
+    });
+
+    assert.ok(result.note, "retrieval covered the topic, so a note is proposed");
+    const notePath = result.note.path;
+
+    // The slug is flattened: the proposed path is a single .md filename with NO path
+    // separators. A traversal topic cannot inject a forward- or back-slash component.
+    assert.doesNotMatch(notePath, /[\\/]/, "no forward- or back-slash path separators");
+    assert.match(notePath, /^Study Guide - .+\.md$/);
+
+    // Defense-in-depth: even after path.resolve against an arbitrary vault root, the flat
+    // filename lands directly inside that root — it neither escapes nor descends into a subdir.
+    const vaultRoot = "/tmp/some-vault";
+    const rel = relative(vaultRoot, resolve(vaultRoot, notePath));
+    assert.equal(dirname(rel), ".", "resolves directly inside the vault root");
+    assert.doesNotMatch(rel, /^\.\.(\/|\\|$)/, "does not escape the vault root");
   } finally {
     index.close();
   }
