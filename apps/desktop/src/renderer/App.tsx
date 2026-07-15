@@ -12,6 +12,7 @@ import type {
   TreeSortMode,
 } from "../shared/types.js";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
+import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
 import { EditorPane } from "./components/shell/EditorPane";
 import type { IndexState } from "./components/shell/EditorPane";
@@ -883,13 +884,10 @@ export function App() {
     [docKey, openMarkdown],
   );
 
-  const composerReason = useMemo(() => {
-    if (!vaultPath) return "Choose a vault to ask grounded questions.";
-    if (!indexed) return "Index this vault before asking (status bar, bottom of the editor).";
-    if (!ollama.up)
-      return "Ask needs local Ollama running with a chat model. No cloud calls are ever made.";
-    return null;
-  }, [vaultPath, indexed, ollama.up]);
+  const composerReason = useMemo(
+    () => composerDisabledReason({ hasVault: Boolean(vaultPath), indexed, ollamaUp: ollama.up }),
+    [vaultPath, indexed, ollama.up],
+  );
 
   const composerDisabled = !vaultPath || !indexed || !ollama.up;
 
