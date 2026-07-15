@@ -104,8 +104,17 @@ export const STUDIO_TEMPLATES: StudioTemplate[] = [
     title: "Timeline",
     description: "A chronological timeline extracted from the selected sources.",
     icon: "Clock",
-    enabled: false,
-    needs: "grounded generation",
+    enabled: true,
+    prompt: {
+      structure: [
+        "Produce a TIMELINE with exactly these Markdown sections, in this order:",
+        "## Timeline — a chronological sequence of the events and developments described in the sources, earliest first. Format each as a bulleted list item that begins with its date or ordering cue AS STATED IN THE SOURCES, then a one to two sentence description, and cites the source(s) the entry is drawn from.",
+        "Use ONLY dates and time references that appear in the sources — never invent, infer, or approximate a date. When the sources give no explicit date for an event, order it by whatever relative sequencing they state and use relative ordering language (e.g. \"before\", \"after\", \"later\", \"subsequently\") instead of a fabricated date.",
+        "## Gaps in the record — 1 to 3 sentences noting periods or transitions the sources do not cover, so the reader knows what the timeline leaves out.",
+        "Do NOT write your own Sources list — a cited Sources section is appended for you.",
+      ].join("\n"),
+      filenameStem: "Timeline",
+    },
   },
   {
     id: "mind-map",
