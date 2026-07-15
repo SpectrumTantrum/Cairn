@@ -11,6 +11,7 @@ import type {
   TreeNode,
   TreeSortMode,
 } from "../shared/types.js";
+import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { VaultRail } from "./components/shell/VaultRail";
 import { EditorPane } from "./components/shell/EditorPane";
 import type { IndexState } from "./components/shell/EditorPane";
@@ -124,6 +125,10 @@ export function App() {
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const [flash, setFlash] = useState<{ line: number; nonce: number } | null>(null);
   const flashNonce = useRef(0);
+  // Re-entrancy guard for openMarkdown (issue #40): a navigation that may autosave the
+  // current buffer is in flight. Rapid double-clicks are dropped until it resolves so we
+  // never double-save the dirty file or interleave a save with the buffer swap.
+  const navigatingRef = useRef(false);
 
   // Engine status
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
@@ -384,28 +389,56 @@ export function App() {
     }
   }, [vaultPath, sortMode]);
 
-  /** Load a Markdown node into the editor; optionally flash a cited line afterwards. */
+  /**
+   * Load a Markdown node into the editor; optionally flash a cited line afterwards.
+   *
+   * Every navigation path routes through here (tree clicks, citation pills, search
+   * results), so autosave-before-navigate lives here (issue #40): if the current buffer
+   * is dirty, flush it to the CURRENT file via the existing `source:write` path BEFORE
+   * replacing it. If that save fails we surface the error and stay on the dirty buffer
+   * rather than navigate-and-discard. `navigatingRef` drops re-entrant calls so a rapid
+   * double-click can't double-save or interleave a save with the buffer swap.
+   */
   const openMarkdown = useCallback(async (node: TreeNode, flashLine?: number) => {
-    setActiveNode(node);
-    setLoading(true);
-    setLoadError(null);
+    if (navigatingRef.current) return;
+    navigatingRef.current = true;
     try {
-      const content = await window.cairn.readSource(node.path);
-      setSavedContent(content);
-      setBuffer(content);
-      setDocKey(node.path);
-      setCursor({ line: 1, col: 1 });
-      if (flashLine !== undefined) {
-        flashNonce.current += 1;
-        setFlash({ line: flashLine, nonce: flashNonce.current });
+      const pending = pendingSaveBeforeNavigate({ activeNode, docKey, buffer, savedContent });
+      if (pending) {
+        try {
+          await window.cairn.writeSource(pending.path, pending.content);
+          setSavedContent(pending.content);
+          // The just-saved file diverges from the index until a reindex.
+          setIndexState((prev) => (prev === "indexed" || prev === "stale" ? "stale" : prev));
+        } catch (err) {
+          // Save failed: do NOT navigate-and-discard. Keep the user on the dirty buffer.
+          setError(errorMessage(err));
+          return;
+        }
       }
-    } catch (err) {
-      setDocKey(null);
-      setLoadError(errorMessage(err));
+      setActiveNode(node);
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const content = await window.cairn.readSource(node.path);
+        setSavedContent(content);
+        setBuffer(content);
+        setDocKey(node.path);
+        setCursor({ line: 1, col: 1 });
+        if (flashLine !== undefined) {
+          flashNonce.current += 1;
+          setFlash({ line: flashLine, nonce: flashNonce.current });
+        }
+      } catch (err) {
+        setDocKey(null);
+        setLoadError(errorMessage(err));
+      } finally {
+        setLoading(false);
+      }
     } finally {
-      setLoading(false);
+      navigatingRef.current = false;
     }
-  }, []);
+  }, [activeNode, docKey, buffer, savedContent]);
 
   const openNode = useCallback(
     (node: TreeNode) => {
