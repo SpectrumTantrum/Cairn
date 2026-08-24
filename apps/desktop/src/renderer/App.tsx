@@ -27,7 +27,9 @@ import { SettingsDialog } from "./components/shell/SettingsDialog";
 import { TreeDialogs, type TreeDialog } from "./components/shell/TreeDialogs";
 import { CommandPalette, type Command } from "./components/shell/CommandPalette";
 import { useResizable } from "./components/shell/useResizable";
+import { TitleBar } from "./components/shell/TitleBar";
 import { RIGHT_WIDTH, VAULT_WIDTH, readRightTab, writeRightTab } from "./settings";
+import { windowChromeKindFromNavigator, type WindowChromeKind } from "../shared/window-chrome.js";
 
 /** ⌘K on macOS, Ctrl+K elsewhere — used for the palette hint + open chord (issue #13). */
 const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
@@ -201,6 +203,12 @@ export function App() {
   const [searching, setSearching] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  // Themed window chrome — kind is also known synchronously from the platform so
+  // the titlebar paints before the first IPC round-trip.
+  const [chromeKind, setChromeKind] = useState<WindowChromeKind>(() =>
+    windowChromeKindFromNavigator(typeof navigator !== "undefined" ? navigator.platform : ""),
+  );
+  const [windowMaximized, setWindowMaximized] = useState(false);
 
   const vaultRail = useResizable({ spec: VAULT_WIDTH, edge: "left" });
   const rightRail = useResizable({ spec: RIGHT_WIDTH, edge: "right" });
@@ -214,6 +222,15 @@ export function App() {
     void refreshProviders();
     void refreshThreads();
     void window.cairn.studioTemplates().then(setStudioTemplates).catch(() => setStudioTemplates([]));
+    void window.cairn
+      .windowChrome()
+      .then((snap) => {
+        setChromeKind(snap.kind);
+        setWindowMaximized(snap.maximized);
+      })
+      .catch(() => {
+        // Titlebar still renders from the navigator-based kind fallback.
+      });
   }, []);
 
   useEffect(() => {
@@ -1035,6 +1052,16 @@ export function App() {
 
   return (
     <div className="shell">
+      <TitleBar
+        kind={chromeKind}
+        maximized={windowMaximized}
+        onMinimize={() => void window.cairn.minimizeWindow()}
+        onToggleMaximize={() => {
+          void window.cairn.toggleMaximizeWindow().then(setWindowMaximized);
+        }}
+        onClose={() => void window.cairn.closeWindow()}
+      />
+      <div className="shell-body">
       <div className="pane vault-rail" style={{ width: vaultRail.width }}>
         <VaultRail
           vaultName={vaultPath ? vaultName(vaultPath) : null}
@@ -1151,6 +1178,7 @@ export function App() {
           </div>
         </>
       ) : null}
+      </div>
 
       {treeDialog ? (
         <TreeDialogs

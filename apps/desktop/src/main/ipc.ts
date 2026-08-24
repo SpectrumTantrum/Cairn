@@ -1,4 +1,5 @@
-import { app, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
+import { windowChromeKind, type WindowChromeSnapshot } from "../shared/window-chrome.js";
 import { join } from "node:path";
 import { CloudProvider, getModelProvider, PROVIDER_PRESETS, studioTemplateMetas } from "@cairn/engine";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
@@ -495,5 +496,32 @@ export function registerIpcHandlers(): void {
     } catch {
       return { up: false, models: [] };
     }
+  });
+
+  // ---- Window chrome (themed titlebar) --------------------------------------
+  // These act on the sending window only. No vault/user-error wrapping — a
+  // missing window is a no-op, not a toast.
+  ipcMain.handle("window:chrome", async (event): Promise<WindowChromeSnapshot> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return {
+      kind: windowChromeKind(process.platform),
+      maximized: win?.isMaximized() ?? false,
+    };
+  });
+
+  ipcMain.handle("window:minimize", async (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
+
+  ipcMain.handle("window:toggleMaximize", async (event): Promise<boolean> => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return false;
+    if (win.isMaximized()) win.unmaximize();
+    else win.maximize();
+    return win.isMaximized();
+  });
+
+  ipcMain.handle("window:close", async (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.close();
   });
 }

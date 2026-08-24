@@ -1,8 +1,9 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, Menu, nativeTheme, shell } from "electron";
 import { appendFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerIpcHandlers } from "./ipc";
+import { browserWindowChromeOptions, TITLEBAR_COLOR, windowChromeKind } from "../shared/window-chrome.js";
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
@@ -25,15 +26,43 @@ function bootMarker(stage: string): void {
   }
 }
 
+/** Dark-theme the OS chrome we still keep (dialogs, overlay buttons). */
+function applyNativeDarkTheme(): void {
+  nativeTheme.themeSource = "dark";
+}
+
+/**
+ * macOS: keep a standard application menu in the *screen* menu bar (Edit roles
+ * for copy/paste). Linux/Windows: drop Electron's default File/Edit/View/Window
+ * bar — that bar is native and cannot take Cairn's tokens; the renderer titlebar
+ * replaces it.
+ */
+function installApplicationMenu(): void {
+  if (process.platform === "darwin") {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: "appMenu" },
+        { role: "editMenu" },
+        { role: "viewMenu" },
+        { role: "windowMenu" },
+      ]),
+    );
+    return;
+  }
+  Menu.setApplicationMenu(null);
+}
+
 function createWindow(): void {
+  const chrome = browserWindowChromeOptions(windowChromeKind(process.platform));
   const mainWindow = new BrowserWindow({
     width: 1180,
     height: 780,
     minWidth: 960,
     minHeight: 640,
     title: "Cairn",
-    backgroundColor: "#1a1b1e",
+    backgroundColor: TITLEBAR_COLOR,
     show: false,
+    ...chrome,
     webPreferences: {
       preload: join(currentDir, "../preload/index.mjs"),
       contextIsolation: true,
@@ -70,6 +99,8 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  applyNativeDarkTheme();
+  installApplicationMenu();
   registerIpcHandlers();
   createWindow();
   bootMarker("app-ready window-created");
