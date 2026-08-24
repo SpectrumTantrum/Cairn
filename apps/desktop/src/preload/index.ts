@@ -16,6 +16,7 @@ import type {
   TreeNode,
   TreeSortMode,
 } from "../shared/types.js";
+import type { WindowChromeSnapshot } from "../shared/window-chrome.js";
 
 export type {
   AgentApplyResult,
@@ -105,6 +106,11 @@ export interface CairnApi {
   /** Full thread with its turns, or null if it no longer exists. */
   loadThread(id: string): Promise<ThreadRecord | null>;
   deleteThread(id: string): Promise<void>;
+  /** Themed window chrome: kind (traffic-lights / overlay / custom) + maximized. */
+  windowChrome(): Promise<WindowChromeSnapshot>;
+  minimizeWindow(): Promise<void>;
+  toggleMaximizeWindow(): Promise<boolean>;
+  closeWindow(): Promise<void>;
 }
 
 // Allow-list of the only channels the renderer may subscribe to. Keeps the
@@ -152,6 +158,10 @@ const api: CairnApi = {
   saveThread: (input) => ipcRenderer.invoke("threads:save", input),
   loadThread: (id) => ipcRenderer.invoke("threads:load", id),
   deleteThread: (id) => ipcRenderer.invoke("threads:delete", id),
+  windowChrome: () => ipcRenderer.invoke("window:chrome"),
+  minimizeWindow: () => ipcRenderer.invoke("window:minimize"),
+  toggleMaximizeWindow: () => ipcRenderer.invoke("window:toggleMaximize"),
+  closeWindow: () => ipcRenderer.invoke("window:close"),
 };
 
 contextBridge.exposeInMainWorld("cairn", api);

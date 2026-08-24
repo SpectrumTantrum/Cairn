@@ -95,9 +95,72 @@ button {
 
 .shell {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+}
+
+.shell-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Themed titlebar — same surface as the vault/right rails. The whole bar is a
+   drag region except interactive controls (caption buttons). */
+.titlebar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 10px;
+  background: var(--pane-vault);
+  border-bottom: 1px solid var(--divider);
+  color: var(--text-muted);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.titlebar-traffic-lights {
+  padding-left: 78px;
+}
+.titlebar-overlay {
+  padding-right: 138px;
+}
+.titlebar-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.titlebar-custom .titlebar-title {
+  flex: 1;
+}
+.titlebar-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  -webkit-app-region: no-drag;
+}
+.titlebar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+}
+.titlebar-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+.titlebar-btn-close:hover {
+  background: var(--rm-bg);
+  color: var(--danger);
 }
 
 .pane {
