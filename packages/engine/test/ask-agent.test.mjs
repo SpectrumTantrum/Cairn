@@ -200,3 +200,107 @@ test("grep tool matches indexed chunk text", async () => {
     index.close();
   }
 });
+
+test("find citation refs match deduped sources after overlapping tool calls", async () => {
+  const index = new InMemoryIndex();
+  const ctx = { index, readNote: async () => "", defaultMode: "lexical" };
+  try {
+    seed(index);
+    const state = { sources: [], opened: [] };
+    await runAskSearchTool("grep", { pattern: "cooking" }, ctx, state);
+    assert.equal(state.sources.length, 1);
+
+    const out = await runAskSearchTool("find", { query: "spaced repetition", k: 4 }, ctx, state);
+    const parsed = JSON.parse(out);
+    assert.equal(state.sources.length, 2);
+    const topicHit = parsed.results.find((r) => r.file === "notes/topic.md");
+    assert.equal(topicHit.ref, 2);
+
+    const dupState = {
+      sources: [
+        {
+          file: "notes/topic.md",
+          line: 1,
+          heading: "Topic",
+          score: 1,
+          cosine: 1,
+          snippet: "existing",
+          text: "existing",
+          arms: "seed",
+        },
+      ],
+      opened: [],
+    };
+    const dupOut = await runAskSearchTool("find", { query: "spaced repetition", k: 4 }, ctx, dupState);
+    const dupParsed = JSON.parse(dupOut);
+    assert.equal(dupState.sources.length, 1);
+    assert.equal(dupParsed.results.find((r) => r.file === "notes/topic.md").ref, 1);
+  } finally {
+    index.close();
+  }
+});
+
+test("list applies scope when listNotes is provided", async () => {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  try {
+    seed(index);
+    const listNotes = async () => ["notes/topic.md", "notes/other.md", "notes/excluded.md"];
+    const out = await runAskSearchTool(
+      "list",
+      {},
+      {
+        index,
+        readNote: async () => "",
+        listNotes,
+        scope: ["notes/topic.md", "notes/other.md"],
+      },
+      state,
+    );
+    const parsed = JSON.parse(out);
+    assert.deepEqual(parsed.paths.sort(), ["notes/other.md", "notes/topic.md"]);
+  } finally {
+    index.close();
+  }
+});
+
+test("list prefix with trailing slash matches folder notes", async () => {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  try {
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 2,
+      chunks: [
+        {
+          id: 1,
+          file: "notes/courses/a.md",
+          ordinal: 0,
+          line: 1,
+          heading: "",
+          text: "a",
+          hash: "h1",
+        },
+        {
+          id: 2,
+          file: "notes/top.md",
+          ordinal: 0,
+          line: 1,
+          heading: "",
+          text: "b",
+          hash: "h2",
+        },
+      ],
+    });
+    const out = await runAskSearchTool(
+      "list",
+      { prefix: "notes/" },
+      { index, readNote: async () => "", defaultMode: "lexical" },
+      state,
+    );
+    const parsed = JSON.parse(out);
+    assert.deepEqual(parsed.paths.sort(), ["notes/courses/a.md", "notes/top.md"]);
+  } finally {
+    index.close();
+  }
+});
