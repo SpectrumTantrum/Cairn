@@ -8,14 +8,15 @@ The original **`spikes/rag-quality`** 61-question corpus is kept as a **negative
 
 ## Product gate order
 
-1. **`eval:leak` (this slice)** — `overlapCoverage` on the fixture: confirm paraphrase items are still leaky enough to invalidate naive “embedder wins” claims.
-2. **Clean vault scoring (later)** — gold keyed by `(file, heading_path)` on production chunking, scored through `search()` without lexical confounds.
+1. **`eval:leak`** — `overlapCoverage` on the rag-quality fixture: confirm paraphrase items are still leaky enough to invalidate naive “embedder wins” claims.
+2. **`eval:lexical`** — clean vault under `eval/vault/`; gold keyed by **`(file, heading)`**; scores production `search(..., { mode: "lexical" })` (FTS5 only, no Ollama).
+3. **`eval:hybrid` (planned)** — same gold shape on full hybrid retrieval when Ollama (or a fake provider in CI) is available.
 
-## Gold shape (target)
+## Gold shape
 
-Production eval gold should reference **`(file, heading)`** (heading path within the note), not `expected_chunk_id`. The leak-check still uses the spike’s numeric ids only to locate gold chunk text in the fixture.
+Production eval gold references **`(file, heading)`** (heading title within the note), not `expected_chunk_id`. Any indexed chunk with that file and heading counts as relevant. The leak-check still uses the spike’s numeric ids only to locate gold chunk text in the fixture.
 
-## Leak rule (paraphrase only)
+## Leak rule (paraphrase only, `eval:leak`)
 
 Stemmed, stopword-stripped **query→gold token overlap** (`overlapCoverage` from `spikes/rag-quality-v2`):
 
@@ -27,15 +28,31 @@ Stemmed, stopword-stripped **query→gold token overlap** (`overlapCoverage` fro
 
 These floors describe the **fixture’s** lexical leakiness—not a retrieval quality target. Do **not** use the overall eval median as a “HIGH overlap” bar for bucketing (live BEIR replay used ~median **0.400**, mean **0.424** for overlap bucketing).
 
+## Paraphrase overlap ceiling (`eval:lexical`)
+
+New paraphrase queries in `queries.json` must stay **below** overlap **0.35** vs gold chunk text (same `overlapCoverage` helper). `run-lexical.mjs` fails fast if a paraphrase is still HIGH-overlap—opposite sign from the leak gate, but the same metric.
+
+## Lexical smoke bar (`eval:lexical`)
+
+`npm run eval:lexical` exits **0** when:
+
+- The harness indexes the eval vault in **lexical-only** mode and runs production lexical search without crashing.
+- Paraphrase overlap checks pass.
+- **At least one** `exact-term` query achieves **success@3** (gold `(file, heading)` in the top 3).
+
+This is a minimal wiring smoke bar, not a retrieval quality SLO. The table also prints success/recall/MRR/nDCG at **k=3** and **k=8** (BEIR-style helpers from `spikes/rag-quality-v2`). Items tagged **`fts-miss`** are included in the table but are expected to fail under lexical search—they document cases hybrid search should recover later.
+
 ## Commands
 
 From `packages/engine/`:
 
 ```bash
-npm run eval:leak    # negative-control leak gate (no Ollama)
-# npm run eval:lexical   # planned — lexical table on production search()
-# npm run eval:hybrid    # planned — full hybrid retrieval gate
+npm run eval:leak      # negative-control leak gate (no Ollama)
+npm run eval:lexical   # clean vault, production lexical search table (no Ollama)
+# npm run eval:hybrid  # planned — full hybrid retrieval gate (Ollama or test provider)
 ```
+
+**CI** (`.github/workflows/ci.yml`) runs `npm run eval:leak` after `test:smoke` on macOS and Ubuntu. `eval:lexical` is local/optional for this slice until we confirm it stays fast and deterministic in CI.
 
 ## Layout
 
@@ -43,8 +60,7 @@ npm run eval:leak    # negative-control leak gate (no Ollama)
 packages/engine/eval/
   README.md           # this file
   leak-check.mjs      # overlapCoverage negative control (rag-quality fixture)
+  run-lexical.mjs     # production lexical search metrics on eval/vault
+  queries.json        # gold { file, heading } per query
+  vault/              # small clean Markdown corpus (notes/*.md)
 ```
-
-## First engineering slice
-
-This PR lands **README + `leak-check.mjs` + `eval:leak`**. **CI** (`.github/workflows/ci.yml`) runs `npm run eval:leak` immediately after `test:smoke` on macOS and Ubuntu (no Ollama).
