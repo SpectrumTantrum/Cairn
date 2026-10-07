@@ -1,0 +1,46 @@
+{
+  "queries": [
+    {
+      "id": "cache-exact",
+      "category": "exact-term",
+      "question": "cache invalidation naming things",
+      "gold": { "file": "notes/two-hard-problems.md", "heading": "Two hard problems" }
+    },
+    {
+      "id": "photosynthesis-exact",
+      "category": "exact-term",
+      "question": "photosynthesis chlorophyll glucose",
+      "gold": { "file": "notes/photosynthesis.md", "heading": "Photosynthesis" }
+    },
+    {
+      "id": "api-keys-exact",
+      "category": "exact-term",
+      "question": "rotate API keys ninety days",
+      "gold": { "file": "notes/secret-rotation.md", "heading": "Secret rotation" }
+    },
+    {
+      "id": "karlton-paraphrase",
+      "category": "paraphrase",
+      "question": "Which famous duo of programming chores does the CS aphorism highlight?",
+      "gold": { "file": "notes/two-hard-problems.md", "heading": "Two hard problems" }
+    },
+    {
+      "id": "plants-paraphrase",
+      "category": "paraphrase",
+      "question": "What do autotrophs run to fix carbon using photons?",
+      "gold": { "file": "notes/photosynthesis.md", "heading": "Photosynthesis" }
+    },
+    {
+      "id": "westphalia-exact",
+      "category": "exact-term",
+      "question": "Peace of Westphalia 1648 sovereignty",
+      "gold": { "file": "notes/treaty-of-westphalia.md", "heading": "Treaty of Westphalia" }
+    },
+    {
+      "id": "westphalia-fts-miss",
+      "category": "fts-miss",
+      "question": "Which congress formalized cuius regio after the long German religious wars?",
+      "gold": { "file": "notes/treaty-of-westphalia.md", "heading": "Treaty of Westphalia" }
+    }
+  ]
+}
