@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, ChevronDown, Cloud, HardDrive, Sparkles } from "lucide-react";
 import type {
-  ChatSendResult,
+  DesktopChatSendResult,
   EscalateTarget,
   ProviderMeta,
   SearchHit,
@@ -15,7 +15,7 @@ import { CitationCard } from "./CitationCard";
 export type ChatTurn =
   | { role: "user"; text: string }
   | { role: "assistant"; streaming: true; text: string }
-  | { role: "assistant"; streaming: false; result: ChatSendResult }
+  | { role: "assistant"; streaming: false; result: DesktopChatSendResult }
   | AgentThreadTurn
   | { role: "error"; text: string };
 
@@ -43,6 +43,8 @@ interface ChatTabProps {
   onAgentApply(runId: string, proposalId: string): void;
   onAgentReject(runId: string, proposalId: string): void;
   onAgentRevert(runId: string): void;
+  /** When true, Ask uses the agentic tool loop (working label + richer citation pills). */
+  agenticAskEnabled: boolean;
 }
 
 export function ChatTab(props: ChatTabProps) {
@@ -90,7 +92,16 @@ export function ChatTab(props: ChatTabProps) {
           return <AssistantTurn key={i} result={turn.result} onCite={onCite} />;
         })}
         {showWorking ? (
-          <StreamingTurn text="" label={mode === "agent" ? "Proposing edits…" : "Grounding in your notes…"} />
+          <StreamingTurn
+            text=""
+            label={
+              mode === "agent"
+                ? "Proposing edits…"
+                : props.agenticAskEnabled
+                  ? "Searching your notes with tools…"
+                  : "Grounding in your notes…"
+            }
+          />
         ) : null}
       </div>
       <Composer
@@ -150,7 +161,13 @@ function ErrorTurn({ text }: { text: string }) {
   );
 }
 
-function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: SearchHit): void }) {
+function AssistantTurn({
+  result,
+  onCite,
+}: {
+  result: DesktopChatSendResult;
+  onCite(s: SearchHit): void;
+}) {
   return (
     <div className="chat-assistant">
       <span className={`chat-avatar${result.escalated ? " cloud" : ""}`}>
@@ -176,6 +193,7 @@ function AssistantTurn({ result, onCite }: { result: ChatSendResult; onCite(s: S
                 hit={s}
                 variant="pill"
                 index={i + 1}
+                showSnippet={result.agenticAsk ? !!s.snippet : undefined}
                 onOpen={onCite}
               />
             ))}
@@ -206,7 +224,7 @@ function LocalMeta({ model }: { model: string }) {
  * usage / cost the API returned (never fabricated), and a "what was sent" disclosure so
  * the exact system prompt + retrieved excerpts + question are always inspectable.
  */
-function EscalatedMeta({ result }: { result: ChatSendResult }) {
+function EscalatedMeta({ result }: { result: DesktopChatSendResult }) {
   const [openSent, setOpenSent] = useState(false);
   const u = result.usage;
   const usageBits: string[] = [];

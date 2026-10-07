@@ -40,12 +40,17 @@ export type {
   TreeSortMode,
 };
 
+export interface DesktopFeatures {
+  agenticAskEnvDefault: boolean;
+}
+
 export interface CairnApi {
+  desktopFeatures(): Promise<DesktopFeatures>;
   selectVault(): Promise<string | null>;
   indexVault(opts: { lexical: boolean }): Promise<IndexStats>;
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string, opts?: { model?: string; scope?: string[] }): Promise<AskResult>;
-  /** Agentic Ask (read-only tool loop). Not wired into Chat UI yet — engine scaffolding IPC. */
+  /** Agentic Ask (read-only tool loop). Used when the agentic Ask feature flag is enabled. */
   askAgentVault(
     question: string,
     opts?: { model?: string; scope?: string[]; retrievalSeed?: boolean },
@@ -127,6 +132,7 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 }
 
 const api: CairnApi = {
+  desktopFeatures: () => ipcRenderer.invoke("app:desktopFeatures"),
   selectVault: () => ipcRenderer.invoke("vault:select"),
   indexVault: (opts) => ipcRenderer.invoke("vault:index", opts),
   searchVault: (query) => ipcRenderer.invoke("vault:search", query),
