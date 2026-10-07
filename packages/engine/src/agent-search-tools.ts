@@ -119,14 +119,35 @@ function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
+/** Folder prefix for `list`: POSIX path without trailing slashes. */
+function normalizeListPrefix(prefix: string): string {
+  const norm = normalizePath(prefix.trim());
+  return norm.replace(/\/+$/, "");
+}
+
+function sourceKey(hit: Pick<SearchHit, "file" | "line" | "heading">): string {
+  return `${hit.file}:${hit.line}:${hit.heading}`;
+}
+
+function sourceRef(state: AskSearchToolState, hit: Pick<SearchHit, "file" | "line" | "heading">): number {
+  const idx = state.sources.findIndex((s) => sourceKey(s) === sourceKey(hit));
+  return idx >= 0 ? idx + 1 : 0;
+}
+
+function filterPathsByScope(paths: string[], scope?: readonly string[]): string[] {
+  if (scope === undefined || scope.length === 0) return paths;
+  const allowed = new Set(scope.map((p) => normalizePath(p)));
+  return paths.filter((p) => allowed.has(normalizePath(p)));
+}
+
 function indexedFiles(index: Index, scope?: readonly string[]): string[] {
   const files = index.listFiles(scope);
   return [...files].sort((a, b) => a.localeCompare(b));
 }
 
 function mergeSource(state: AskSearchToolState, hit: SearchHit): void {
-  const key = `${hit.file}:${hit.line}:${hit.heading}`;
-  if (state.sources.some((s) => `${s.file}:${s.line}:${s.heading}` === key)) return;
+  const key = sourceKey(hit);
+  if (state.sources.some((s) => sourceKey(s) === key)) return;
   state.sources.push(hit);
 }
 
@@ -148,15 +169,16 @@ export async function runAskSearchTool(
   const grepLimit = ctx.grepLimit ?? GREP_LIMIT_DEFAULT;
 
   if (name === "list") {
-    const prefix = asString(args.prefix)?.trim() ?? "";
+    const prefixRaw = asString(args.prefix)?.trim() ?? "";
+    const prefixNorm = prefixRaw ? normalizeListPrefix(prefixRaw) : "";
     let paths: string[];
     if (ctx.listNotes) {
-      paths = await ctx.listNotes(prefix || undefined);
+      paths = await ctx.listNotes(prefixNorm || undefined);
+      paths = filterPathsByScope(paths, ctx.scope);
     } else {
       paths = indexedFiles(ctx.index, ctx.scope);
-      if (prefix) {
-        const norm = normalizePath(prefix);
-        paths = paths.filter((p) => p === norm || p.startsWith(`${norm}/`));
+      if (prefixNorm) {
+        paths = paths.filter((p) => p === prefixNorm || p.startsWith(`${prefixNorm}/`));
       }
     }
     paths = paths.filter((p) => /\.(md|markdown)$/i.test(p));
@@ -175,8 +197,8 @@ export async function runAskSearchTool(
       scope: ctx.scope,
     });
     for (const h of hits) mergeSource(state, h);
-    const results = hits.map((h, i) => ({
-      ref: state.sources.length - hits.length + i + 1,
+    const results = hits.map((h) => ({
+      ref: sourceRef(state, h),
       file: h.file,
       line: h.line,
       heading: h.heading || undefined,

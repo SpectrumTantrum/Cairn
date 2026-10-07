@@ -330,9 +330,14 @@ export class VaultSession {
 
     const listNotes = async (prefix?: string) => {
       const abs = discoverMarkdownFiles(vaultPath);
-      const rel = abs.map((p) => relative(vaultPath, p).split(sep).join("/"));
+      let rel = abs.map((p) => relative(vaultPath, p).split(sep).join("/"));
+      const scope = opts.scope;
+      if (scope !== undefined && scope.length > 0) {
+        const allowed = new Set(scope.map((p) => p.replace(/\\/g, "/")));
+        rel = rel.filter((p) => allowed.has(p));
+      }
       if (!prefix?.trim()) return rel;
-      const norm = prefix.replace(/\\/g, "/").replace(/^\.\//, "");
+      const norm = prefix.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
       return rel.filter((p) => p === norm || p.startsWith(`${norm}/`));
     };
 
