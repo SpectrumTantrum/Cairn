@@ -9,6 +9,7 @@ import {
   runAgent,
   runAskAgent,
   search,
+  type AskAgentProgress,
   type AskAgentResult,
   type AskResult,
   type ChatSendResult,
@@ -319,7 +320,12 @@ export class VaultSession {
    */
   async askAgent(
     question: string,
-    opts: { model?: string; scope?: string[]; retrievalSeed?: boolean } = {},
+    opts: {
+      model?: string;
+      scope?: string[];
+      retrievalSeed?: boolean;
+      onProgress?: (event: AskAgentProgress) => void;
+    } = {},
   ): Promise<AskAgentResult> {
     const vaultPath = this.requireVault();
     this.assertIndexed(vaultPath);
@@ -350,6 +356,7 @@ export class VaultSession {
         retrievalSeed: opts.retrievalSeed ?? false,
         readNote: async (rel) => this.readSource(rel),
         listNotes,
+        onProgress: opts.onProgress,
       }),
     );
   }

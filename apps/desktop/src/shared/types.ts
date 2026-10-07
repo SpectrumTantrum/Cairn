@@ -1,4 +1,4 @@
-import type { ChatSendResult as EngineChatSendResult } from "@cairn/engine";
+import type { AskAgentProgress, ChatSendResult as EngineChatSendResult } from "@cairn/engine";
 
 export type { AskResult, ChatSendResult, ChatUsage, EditProposal, DiffLine, DiffPreview, IndexStats, SearchHit } from "@cairn/engine";
 
@@ -35,4 +35,10 @@ export interface ChatSendPayload {
 export interface ChatTokenEvent {
   requestId: number;
   token: string;
+}
+
+/** Agentic Ask progress pushed from main → renderer during `vault:askAgent`. */
+export interface AskAgentProgressEvent {
+  requestId: number;
+  progress: AskAgentProgress;
 }

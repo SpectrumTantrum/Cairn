@@ -52,6 +52,22 @@ test("lineForMarkdownHeading resolves ATX headings", () => {
   assert.equal(lineForMarkdownHeading(md, "Missing"), null);
 });
 
+test("citationsFromAskAgent preserves heading-only open anchors for land-at-heading", () => {
+  const result = {
+    answer: "See [1].",
+    sources: [],
+    opened: [{ path: "notes/a.md", heading: "Topic" }],
+    seedHits: [],
+    steps: 1,
+    stopReason: "done",
+    grounded: true,
+  };
+  const cites = citationsFromAskAgent(result);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "notes/a.md");
+  assert.equal(cites[0].heading, "Topic");
+});
+
 test("resolveCitationLine prefers heading over line 1", () => {
   const md = "# Intro\n\n## Topic\n\nBody\n";
   assert.equal(resolveCitationLine(md, { line: 1, heading: "Topic" }), 3);

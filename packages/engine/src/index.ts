@@ -28,8 +28,13 @@ export {
   DEFAULT_ASK_AGENT_WALL_MS,
   DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS,
 } from "./ask-agent.js";
-export type { AskAgentOptions, AskAgentResult, RetrievalSeedOption } from "./ask-agent.js";
-export { ASK_SEARCH_TOOLS, ASK_SEARCH_TOOL_NAMES, runAskSearchTool } from "./agent-search-tools.js";
+export type { AskAgentOptions, AskAgentResult, AskAgentProgress, RetrievalSeedOption } from "./ask-agent.js";
+export {
+  ASK_SEARCH_TOOLS,
+  ASK_SEARCH_TOOL_NAMES,
+  labelAskSearchToolCall,
+  runAskSearchTool,
+} from "./agent-search-tools.js";
 export type { OpenAnchor, AskSearchToolContext, AskSearchToolState } from "./agent-search-tools.js";
 export { STUDIO_TEMPLATES, getStudioTemplate, studioTemplateMetas } from "./studio-templates.js";
 export type { StudioTemplate, StudioTemplateMeta, StudioPrompt } from "./studio-templates.js";

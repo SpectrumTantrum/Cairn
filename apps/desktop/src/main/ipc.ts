@@ -172,7 +172,7 @@ export function registerIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle("vault:askAgent", async (_event, payload: unknown) => {
+  ipcMain.handle("vault:askAgent", async (event, payload: unknown) => {
     return handleUserErrors(() => {
       const p = asRecord(payload);
       const question = typeof p.question === "string" ? p.question : undefined;
@@ -181,7 +181,16 @@ export function registerIpcHandlers(): void {
       }
       const model = typeof p.model === "string" ? p.model : undefined;
       const retrievalSeed = p.retrievalSeed === true;
-      return session.askAgent(question, { model, scope: asScope(p.scope), retrievalSeed });
+      const requestId = typeof p.requestId === "number" ? p.requestId : 0;
+      const sender = event.sender;
+      return session.askAgent(question, {
+        model,
+        scope: asScope(p.scope),
+        retrievalSeed,
+        onProgress: (progress) => {
+          if (!sender.isDestroyed()) sender.send("askAgent:progress", { requestId, progress });
+        },
+      });
     });
   });
 

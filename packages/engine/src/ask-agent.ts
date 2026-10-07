@@ -14,11 +14,17 @@ import {
 import type { AgentMessage } from "./model-provider.js";
 import {
   ASK_SEARCH_TOOLS,
+  labelAskSearchToolCall,
   runAskSearchTool,
   type AskSearchToolContext,
   type AskSearchToolState,
   type OpenAnchor,
 } from "./agent-search-tools.js";
+
+/** Incremental progress for long agentic Ask runs (tool steps / status). */
+export type AskAgentProgress =
+  | { kind: "status"; message: string }
+  | { kind: "tool"; step: number; name: string; label: string };
 
 /** Default hard step cap for read-only Ask agent loops (lower than write Agent ADR-0008). */
 export const DEFAULT_ASK_AGENT_STEP_CAP = 16;
@@ -58,6 +64,8 @@ export interface AskAgentOptions {
    * Default `false` — the model should list/find/grep/read instead of relying on a RAG bag.
    */
   retrievalSeed?: RetrievalSeedOption;
+  /** Fired during the loop so UIs can show tool-step progress instead of a silent spinner. */
+  onProgress?: (event: AskAgentProgress) => void;
 }
 
 export interface AskAgentResult {
@@ -158,6 +166,11 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   let steps = 0;
   let answer = "";
   let stopReason: AskAgentResult["stopReason"] = "done";
+  const progress = (event: AskAgentProgress): void => {
+    opts.onProgress?.(event);
+  };
+
+  progress({ kind: "status", message: "Starting agentic search…" });
 
   for (;;) {
     if (steps >= stepCap) {
@@ -174,6 +187,12 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     }
     const remainingWallMs = wallMs - (Date.now() - startedAt);
     const firstTurn = steps === 0;
+    progress({
+      kind: "status",
+      message: firstTurn
+        ? "Waiting for the model to call search tools…"
+        : `Thinking (step ${steps + 1})…`,
+    });
     const turnBudget = Math.min(
       OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
       firstTurn ? DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS : OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
@@ -199,6 +218,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     steps++;
 
     if (turn.toolCalls.length === 0) {
+      progress({ kind: "status", message: "Composing answer…" });
       const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
       if (firstTurn && noGroundingYet) {
         stopReason = "no-tool-use";
@@ -215,6 +235,8 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
 
     for (const call of turn.toolCalls) {
+      const label = labelAskSearchToolCall(call.name, call.arguments);
+      progress({ kind: "tool", step: steps, name: call.name, label });
       const content = await runAskSearchTool(call.name, call.arguments, toolCtx, toolState);
       messages.push({
         role: "tool",
