@@ -20,6 +20,11 @@ From the repo root:
 npm install
 ```
 
+That install selects the current platform's optional natives from the root
+lockfile: `sqlite-vec-*` (including lexical indexes, which still load the vec
+extension), plus the Rollup and esbuild binaries `electron-vite` needs. The
+lockfile has to list every platform, not only the OS that last ran `npm install`.
+
 The desktop app depends on the built engine package. The desktop scripts run
 `packages/engine`'s build first so a fresh checkout does not rely on stale local
 `dist/` output.

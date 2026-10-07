@@ -12,6 +12,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "check:lockfile": "node scripts/check-lockfile-optional-deps.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "engine:build": "npm run build --workspace @cairn/engine",
