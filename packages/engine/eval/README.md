@@ -47,4 +47,4 @@ packages/engine/eval/
 
 ## First engineering slice
 
-This PR lands **README + `leak-check.mjs` + `eval:leak`**. CI should run `npm run eval:leak` after `test:smoke` once wired; that hook is a follow-up if not present yet.
+This PR lands **README + `leak-check.mjs` + `eval:leak`**. **CI** (`.github/workflows/ci.yml`) runs `npm run eval:leak` immediately after `test:smoke` on macOS and Ubuntu (no Ollama).

@@ -45,5 +45,8 @@ jobs:
       - name: Engine gates (test:smoke)
         run: cd packages/engine && npm run test:smoke
 
+      - name: Engine eval (eval:leak)
+        run: cd packages/engine && npm run eval:leak
+
       - name: Desktop tests
         run: cd apps/desktop && npm test
