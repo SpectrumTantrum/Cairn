@@ -172,6 +172,19 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle("vault:askAgent", async (_event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const question = typeof p.question === "string" ? p.question : undefined;
+      if (question === undefined) {
+        throw new Error("Ask needs a question.");
+      }
+      const model = typeof p.model === "string" ? p.model : undefined;
+      const retrievalSeed = p.retrievalSeed === true;
+      return session.askAgent(question, { model, scope: asScope(p.scope), retrievalSeed });
+    });
+  });
+
   // Multi-turn streaming chat. Tokens are forwarded to the requesting renderer via
   // `chat:token` events tagged with the caller's requestId (so the renderer can drop
   // stale tokens from a superseded request); the invoke resolves with the full result.

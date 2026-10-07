@@ -22,6 +22,10 @@ export type {
 export { chat, chatStream, resolveChatModel } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
+export { runAskAgent, DEFAULT_ASK_AGENT_STEP_CAP } from "./ask-agent.js";
+export type { AskAgentOptions, AskAgentResult, RetrievalSeedOption } from "./ask-agent.js";
+export { ASK_SEARCH_TOOLS, ASK_SEARCH_TOOL_NAMES, runAskSearchTool } from "./agent-search-tools.js";
+export type { OpenAnchor, AskSearchToolContext, AskSearchToolState } from "./agent-search-tools.js";
 export { STUDIO_TEMPLATES, getStudioTemplate, studioTemplateMetas } from "./studio-templates.js";
 export type { StudioTemplate, StudioTemplateMeta, StudioPrompt } from "./studio-templates.js";
 export { generateStudioNote } from "./studio-generate.js";
