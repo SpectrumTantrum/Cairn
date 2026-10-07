@@ -26,6 +26,7 @@ export const OLLAMA_CHAT_STREAM_TIMEOUT_MS = 600_000;
 export const OLLAMA_CHAT_TOOLS_TIMEOUT_MS = 600_000;
 
 const ollamaAgentByTimeout = new Map<number, object>();
+let undiciFetch: typeof fetch | null = null;
 
 async function ollamaDispatcher(timeoutMs: number): Promise<object | undefined> {
   const cached = ollamaAgentByTimeout.get(timeoutMs);
@@ -49,6 +50,25 @@ async function ollamaDispatcher(timeoutMs: number): Promise<object | undefined> 
     return agent;
   } catch {
     return undefined;
+  }
+}
+
+/** Node/Electron main should use undici `fetch` so `dispatcher` + `AbortSignal.timeout` apply. */
+async function ollamaFetchImpl(): Promise<typeof fetch> {
+  if (undiciFetch) return undiciFetch;
+  try {
+    const undici = (await import("undici")) as { fetch: typeof fetch };
+    const inElectron = typeof process !== "undefined" && Boolean(process.versions?.electron);
+    // node --test patches globalThis.fetch; honor that outside Electron.
+    if (!inElectron && globalThis.fetch !== undici.fetch) {
+      undiciFetch = globalThis.fetch;
+    } else {
+      undiciFetch = undici.fetch;
+    }
+    return undiciFetch;
+  } catch {
+    undiciFetch = fetch;
+    return undiciFetch;
   }
 }
 
@@ -99,8 +119,9 @@ async function ollamaFetch(url: string, init: RequestInit | undefined, timeoutMs
   const signal = AbortSignal.timeout(timeoutMs);
   const opts: Record<string, unknown> = { ...(init ?? {}), signal };
   if (dispatcher !== undefined) opts.dispatcher = dispatcher;
+  const fetchFn = await ollamaFetchImpl();
   try {
-    return await fetch(url, opts as RequestInit);
+    return await fetchFn(url, opts as RequestInit);
   } catch (err) {
     if (isTimeoutError(err)) throw new OllamaTimeoutError(label, timeoutMs, err);
     throw err;
@@ -137,6 +158,11 @@ export interface ToolCall {
 export interface ChatWithToolsOptions {
   /** Overrides `OLLAMA_CHAT_TOOLS_TIMEOUT_MS` for this turn (e.g. remaining wall-clock budget). */
   timeoutMs?: number;
+  /**
+   * When true, ask Ollama OpenAI-compat to require a tool call this turn (`tool_choice: "required"`).
+   * Use on the first agentic Ask turn so Qwen3 cannot emit a long thinking-only reply with no tools.
+   */
+  requireToolCall?: boolean;
 }
 
 /**
@@ -433,13 +459,19 @@ export class OllamaClient implements ModelProvider {
       function: { name: t.name, description: t.description, parameters: t.parameters },
     }));
 
-    const openAiBody = {
+    const openAiBody: Record<string, unknown> = {
       model,
       stream: false,
       temperature: 0,
       messages: agentMessagesToOpenAI(messages),
       tools: ollamaTools,
+      // Qwen3 + tools + thinking ON can burn max tokens with empty tool_calls (ollama #10976).
+      reasoning_effort: "none",
+      think: false,
     };
+    if (options?.requireToolCall) {
+      openAiBody.tool_choice = "required";
+    }
 
     const openAi = await ollamaFetch(
       `${this.baseUrl}/v1/chat/completions`,
@@ -543,4 +575,10 @@ export function setModelProvider(provider: ModelProvider): void {
 
 export function resetModelProvider(): void {
   defaultProvider = null;
+}
+
+/** Clears cached undici agents/fetch (tests that mock `globalThis.fetch` need this between cases). */
+export function resetOllamaHttpClient(): void {
+  undiciFetch = null;
+  ollamaAgentByTimeout.clear();
 }

@@ -750,12 +750,12 @@ export function App() {
       }
       if (raw.stopReason === "no-tool-use") {
         result.reason =
-          "The model finished without calling search tools — agentic Ask needs a tool-capable model (try qwen3:8b) or classic Ask.";
+          "The model did not call search tools in time — agentic Ask needs qwen3:8b (or classic Ask). qwen3:4b usually times out here.";
         result.covered = false;
       }
       if (raw.stopReason === "timeout") {
         result.reason =
-          "Agentic Ask hit its time budget — retry when quieter, use a faster model, or turn off agentic Ask.";
+          "Agentic Ask hit its time budget — retry when quieter, use qwen3:8b, or turn off agentic Ask.";
       }
       setThread((prev) => [...prev, { role: "assistant", streaming: false, result }]);
       if (sources.length > 0) setLastSources(sources);

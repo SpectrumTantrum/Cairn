@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 
 let setModelProvider;
 let resetModelProvider;
+let resetOllamaHttpClient;
 let FakeModelProvider;
 let getModelProvider;
 
@@ -11,12 +12,14 @@ before(async () => {
   const testing = await import("../dist/testing.js");
   setModelProvider = engine.setModelProvider;
   resetModelProvider = engine.resetModelProvider;
+  resetOllamaHttpClient = engine.resetOllamaHttpClient;
   getModelProvider = engine.getModelProvider;
   FakeModelProvider = testing.FakeModelProvider;
 });
 
 after(() => {
   resetModelProvider();
+  resetOllamaHttpClient();
 });
 
 test("FakeModelProvider reports reachability from opts", async () => {
@@ -75,6 +78,7 @@ test("OllamaClient.chatWithTools prefers OpenAI-compat /v1/chat/completions", as
   };
   try {
     const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
     engine.setModelProvider(new engine.OllamaClient("http://ollama.test"));
     const turn = await engine.getModelProvider().chatWithTools(
       "qwen3:4b",
@@ -95,6 +99,8 @@ test("OllamaClient.chatWithTools prefers OpenAI-compat /v1/chat/completions", as
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "http://ollama.test/v1/chat/completions");
     assert.equal(calls[0].body.temperature, 0);
+    assert.equal(calls[0].body.reasoning_effort, "none");
+    assert.equal(calls[0].body.think, false);
     assert.equal(turn.toolCalls.length, 1);
     assert.equal(turn.toolCalls[0].name, "find");
     assert.equal(turn.toolCalls[0].arguments.query, "spaced");
@@ -103,6 +109,38 @@ test("OllamaClient.chatWithTools prefers OpenAI-compat /v1/chat/completions", as
     globalThis.fetch = originalFetch;
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("OllamaClient.chatWithTools can require a tool call on the first turn", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { role: "assistant", content: "", tool_calls: [] } }],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    engine.setModelProvider(new engine.OllamaClient("http://ollama.test"));
+    await engine.getModelProvider().chatWithTools(
+      "qwen3:8b",
+      [{ role: "user", content: "q" }],
+      [{ name: "find", description: "search", parameters: { type: "object", properties: {} } }],
+      { requireToolCall: true },
+    );
+    assert.equal(calls[0].body.tool_choice, "required");
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
   }
 });
 

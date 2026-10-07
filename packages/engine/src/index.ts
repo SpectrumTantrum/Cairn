@@ -50,6 +50,7 @@ export {
   getModelProvider,
   setModelProvider,
   resetModelProvider,
+  resetOllamaHttpClient,
   OllamaClient,
   OllamaTimeoutError,
   OLLAMA_TAGS_TIMEOUT_MS,
