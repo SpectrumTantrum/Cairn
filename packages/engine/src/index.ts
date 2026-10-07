@@ -22,7 +22,7 @@ export type {
 export { chat, chatStream, resolveChatModel } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
-export { runAskAgent, DEFAULT_ASK_AGENT_STEP_CAP } from "./ask-agent.js";
+export { runAskAgent, DEFAULT_ASK_AGENT_STEP_CAP, DEFAULT_ASK_AGENT_WALL_MS } from "./ask-agent.js";
 export type { AskAgentOptions, AskAgentResult, RetrievalSeedOption } from "./ask-agent.js";
 export { ASK_SEARCH_TOOLS, ASK_SEARCH_TOOL_NAMES, runAskSearchTool } from "./agent-search-tools.js";
 export type { OpenAnchor, AskSearchToolContext, AskSearchToolState } from "./agent-search-tools.js";
@@ -41,7 +41,18 @@ export {
 export type { WikiLink, WikiResolveResult, VaultDoc, Backlink } from "./wikilinks.js";
 export { openIndex, SqliteIndex } from "./vault-index.js";
 export type { Index, ChunkRow, DenseHit, RebuildChunkInput, RebuildIndexInput } from "./vault-index.js";
-export { getModelProvider, setModelProvider, resetModelProvider, OllamaClient } from "./model-provider.js";
+export {
+  getModelProvider,
+  setModelProvider,
+  resetModelProvider,
+  OllamaClient,
+  OllamaTimeoutError,
+  OLLAMA_TAGS_TIMEOUT_MS,
+  OLLAMA_EMBED_TIMEOUT_MS,
+  OLLAMA_CHAT_TIMEOUT_MS,
+  OLLAMA_CHAT_STREAM_TIMEOUT_MS,
+  OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+} from "./model-provider.js";
 export type {
   ModelProvider,
   ChatMessage,

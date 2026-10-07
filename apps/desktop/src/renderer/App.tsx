@@ -748,6 +748,10 @@ export function App() {
       if (raw.stopReason === "no-tool-support") {
         result.reason = "This model does not support tool-calling, which agentic Ask needs.";
       }
+      if (raw.stopReason === "timeout") {
+        result.reason =
+          "Agentic Ask hit its time budget — retry when quieter, use a faster model, or turn off agentic Ask.";
+      }
       setThread((prev) => [...prev, { role: "assistant", streaming: false, result }]);
       if (sources.length > 0) setLastSources(sources);
       setExcludedSources(new Set());

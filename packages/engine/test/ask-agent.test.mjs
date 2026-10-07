@@ -304,3 +304,34 @@ test("list prefix with trailing slash matches folder notes", async () => {
     index.close();
   }
 });
+
+test("runAskAgent stops with timeout when wallMs elapses before the model answers", async () => {
+  let called = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async () => {
+        called++;
+        return { content: "should not run", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "anything",
+      mode: "lexical",
+      readNote: makeReader({}),
+      wallMs: 0,
+      stepCap: 16,
+    });
+    assert.equal(result.stopReason, "timeout");
+    assert.equal(called, 0);
+    assert.equal(result.steps, 0);
+    assert.match(result.answer, /timed out/i);
+  } finally {
+    index.close();
+  }
+});

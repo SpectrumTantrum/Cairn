@@ -75,3 +75,21 @@ test("unknown errors are truncated", () => {
   assert.equal(message.length, 220);
   assert.equal(message.endsWith("..."), true);
 });
+
+test("undici HeadersTimeoutError cause maps to an explicit Ollama timeout message", () => {
+  const cause = new Error("Headers Timeout Error");
+  cause.name = "HeadersTimeoutError";
+  cause.code = "UND_ERR_HEADERS_TIMEOUT";
+  const error = new Error("fetch failed");
+  error.cause = cause;
+  const message = toUserError(error).message;
+  assert.match(message, /timed out/i);
+  assert.equal(message.includes("re-index"), false);
+});
+
+test("OllamaTimeoutError text passes through verbatim", () => {
+  const error = new Error(
+    "Local Ollama request timed out after 600s (chat-with-tools). The model may be too slow under load for this path — retry when the machine is quieter, use a faster model, or turn off agentic Ask.",
+  );
+  assert.equal(toUserError(error).message, error.message);
+});

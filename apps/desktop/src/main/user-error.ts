@@ -2,6 +2,7 @@
 // Kept out of ipc.ts so the classification can be tested without Electron.
 
 const USER_ERROR_PREFIXES = [
+  "Local Ollama request timed out",
   "Choose",
   "Index",
   "No source",
@@ -81,6 +82,12 @@ function isNativeModuleMismatch(error: unknown, message: string): boolean {
   );
 }
 
+const OLLAMA_TIMEOUT_MESSAGE =
+  "Local Ollama request timed out. The model may be too slow under load for this path — retry when the machine is quieter, use a faster model, or turn off agentic Ask.";
+
+const OLLAMA_TIMEOUT_RE =
+  /timed out|HeadersTimeoutError|BodyTimeoutError|UND_ERR_HEADERS_TIMEOUT|UND_ERR_BODY_TIMEOUT|Headers Timeout Error|Body Timeout Error/i;
+
 export function toUserError(error: unknown): Error {
   const message = errorMessage(error);
   if (
@@ -88,6 +95,9 @@ export function toUserError(error: unknown): Error {
     USER_ERROR_PATTERNS.some((re) => re.test(message))
   ) {
     return new Error(message);
+  }
+  if (OLLAMA_TIMEOUT_RE.test(message)) {
+    return new Error(OLLAMA_TIMEOUT_MESSAGE);
   }
   if (OLLAMA_RE.test(message)) {
     return new Error(OLLAMA_MESSAGE);
