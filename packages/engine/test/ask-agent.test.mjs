@@ -57,6 +57,37 @@ before(async () => {
 
 after(() => resetModelProvider());
 
+test("runAskAgent emits onProgress for status and tool steps", async () => {
+  const events = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_m, _msg, _t, turn) => {
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "cooking" } }] };
+        }
+        return { content: "ok", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    await runAskAgent({
+      index,
+      question: "food?",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+      onProgress: (e) => events.push(e),
+    });
+    assert.ok(events.some((e) => e.kind === "status"));
+    assert.ok(events.some((e) => e.kind === "tool" && e.name === "grep"));
+  } finally {
+    index.close();
+  }
+});
+
 test("runAskAgent drives list → find → read and returns tool-gathered sources", async () => {
   const files = { "notes/topic.md": "# Topic\n\nBody about spaced repetition.\n" };
   setModelProvider(

@@ -4,6 +4,7 @@ import type {
   AgentApplyResult,
   AgentStartResult,
   ChatSendPayload,
+  AskAgentProgressEvent,
   ChatTokenEvent,
   OllamaStatus,
   ProviderInput,
@@ -24,6 +25,7 @@ export type {
   AskResult,
   ChatSendPayload,
   ChatSendResult,
+  AskAgentProgressEvent,
   ChatTokenEvent,
   IndexStats,
   OllamaStatus,
@@ -53,8 +55,10 @@ export interface CairnApi {
   /** Agentic Ask (read-only tool loop). Used when the agentic Ask feature flag is enabled. */
   askAgentVault(
     question: string,
-    opts?: { model?: string; scope?: string[]; retrievalSeed?: boolean },
+    opts?: { model?: string; scope?: string[]; retrievalSeed?: boolean; requestId?: number },
   ): Promise<AskAgentResult>;
+  /** Subscribe to agentic Ask tool-step progress. Returns an unsubscribe fn. */
+  onAskAgentProgress(listener: (event: AskAgentProgressEvent) => void): () => void;
   /** Multi-turn streaming chat. Tokens arrive via `onChatToken`; resolves with the full result. */
   chatSend(payload: ChatSendPayload): Promise<ChatSendResult>;
   /** Reset the active thread (new-thread ⟲). */
@@ -120,7 +124,7 @@ export interface CairnApi {
 
 // Allow-list of the only channels the renderer may subscribe to. Keeps the
 // event bridge from becoming a generic `ipcRenderer.on` escape hatch.
-const SUBSCRIBABLE = new Set(["chat:token"]);
+const SUBSCRIBABLE = new Set(["chat:token", "askAgent:progress"]);
 
 function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
   if (!SUBSCRIBABLE.has(channel)) {
@@ -141,6 +145,7 @@ const api: CairnApi = {
   chatSend: (payload) => ipcRenderer.invoke("chat:send", payload),
   resetChat: () => ipcRenderer.invoke("chat:reset"),
   onChatToken: (listener) => subscribe<ChatTokenEvent>("chat:token", listener),
+  onAskAgentProgress: (listener) => subscribe<AskAgentProgressEvent>("askAgent:progress", listener),
   listTree: (sort) => ipcRenderer.invoke("vault:listTree", sort),
   readSource: (file) => ipcRenderer.invoke("source:read", file),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),

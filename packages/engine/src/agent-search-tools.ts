@@ -292,3 +292,35 @@ export async function runAskSearchTool(
 
   return `ERROR: unknown tool "${name}".`;
 }
+
+/** Human-readable one-liner for agentic Ask progress UI. */
+export function labelAskSearchToolCall(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case "list": {
+      const prefix = asString(args.prefix)?.trim();
+      return prefix ? `Listed notes under ${prefix}` : "Listed notes in the vault";
+    }
+    case "find": {
+      const query = asString(args.query)?.trim() || "…";
+      return `Searched for “${query}”`;
+    }
+    case "grep": {
+      const pattern = asString(args.pattern)?.trim() || "…";
+      return `Grepped for “${pattern}”`;
+    }
+    case "read": {
+      const path = asString(args.path)?.trim() || "note";
+      return `Read ${path}`;
+    }
+    case "open": {
+      const path = asString(args.path)?.trim() || "note";
+      const heading = asString(args.heading)?.trim();
+      const line = args.line === undefined ? undefined : asInt(args.line);
+      if (heading) return `Cited ${path} › ${heading}`;
+      if (line !== null && line !== undefined && line > 0) return `Cited ${path}:${line}`;
+      return `Cited ${path}`;
+    }
+    default:
+      return name;
+  }
+}

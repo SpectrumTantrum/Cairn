@@ -21,6 +21,7 @@ import { EditorPane } from "./components/shell/EditorPane";
 import type { IndexState } from "./components/shell/EditorPane";
 import { RightRail } from "./components/shell/RightRail";
 import type { RightTab } from "./components/shell/RightRail";
+import type { AskAgentProgress } from "@cairn/engine";
 import type { ChatTurn } from "./components/shell/ChatTab";
 import type { AgentMode } from "./components/shell/Composer";
 import type { UiProposal } from "./components/shell/AgentTurn";
@@ -85,6 +86,27 @@ function appendToken(thread: ChatTurn[], token: string): ChatTurn[] {
   if (!last || last.role !== "assistant" || !last.streaming) return thread;
   const next = thread.slice(0, -1);
   next.push({ role: "assistant", streaming: true, text: last.text + token });
+  return next;
+}
+
+/** Append agentic Ask progress to the in-flight streaming assistant turn. */
+function applyAgenticProgress(thread: ChatTurn[], progress: AskAgentProgress): ChatTurn[] {
+  const last = thread[thread.length - 1];
+  if (!last || last.role !== "assistant" || !last.streaming) return thread;
+  const agentic = last.agentic ?? { steps: [], status: "Searching your notes with tools…" };
+  if (progress.kind === "status") {
+    const next = thread.slice(0, -1);
+    next.push({ ...last, agentic: { ...agentic, status: progress.message } });
+    return next;
+  }
+  const next = thread.slice(0, -1);
+  next.push({
+    ...last,
+    agentic: {
+      steps: [...agentic.steps, progress.label],
+      status: "Running next step…",
+    },
+  });
   return next;
 }
 
@@ -245,6 +267,14 @@ export function App() {
     const off = window.cairn.onChatToken(({ requestId, token }) => {
       if (requestId !== activeRequestId.current) return;
       setThread((prev) => appendToken(prev, token));
+    });
+    return off;
+  }, []);
+
+  useEffect(() => {
+    const off = window.cairn.onAskAgentProgress(({ requestId, progress }) => {
+      if (requestId !== activeRequestId.current) return;
+      setThread((prev) => applyAgenticProgress(prev, progress));
     });
     return off;
   }, []);
@@ -720,13 +750,23 @@ export function App() {
   async function runAgenticAskChat(question: string): Promise<void> {
     const requestId = ++requestIdRef.current;
     activeRequestId.current = requestId;
-    setThread((prev) => [...prev, { role: "user", text: question }]);
+    setThread((prev) => [
+      ...prev,
+      { role: "user", text: question },
+      {
+        role: "assistant",
+        streaming: true,
+        text: "",
+        agentic: { steps: [], status: "Searching your notes with tools…" },
+      },
+    ]);
     setChatInput("");
     setAsking(true);
     setError(null);
 
     try {
       const raw = await window.cairn.askAgentVault(question, {
+        requestId,
         model: selectedModel ?? undefined,
         scope: scopeActive ? includedFiles : undefined,
       });
@@ -757,13 +797,13 @@ export function App() {
         result.reason =
           "Agentic Ask hit its time budget — retry when quieter, use qwen3:8b, or turn off agentic Ask.";
       }
-      setThread((prev) => [...prev, { role: "assistant", streaming: false, result }]);
+      setThread((prev) => settleStreaming(prev, { role: "assistant", streaming: false, result }));
       if (sources.length > 0) setLastSources(sources);
       setExcludedSources(new Set());
     } catch (err) {
       if (activeRequestId.current !== requestId) return;
       const message = errorMessage(err);
-      setThread((prev) => [...prev, { role: "error", text: message }]);
+      setThread((prev) => settleStreaming(prev, { role: "error", text: message }));
     } finally {
       if (activeRequestId.current === requestId) setAsking(false);
     }

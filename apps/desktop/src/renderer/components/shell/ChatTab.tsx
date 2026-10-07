@@ -12,9 +12,15 @@ import { AgentTurn } from "./AgentTurn";
 import type { AgentThreadTurn } from "./AgentTurn";
 import { CitationCard } from "./CitationCard";
 
+/** Live tool-step list while agentic Ask runs (classic Ask leaves this unset). */
+export type AgenticAskStreamState = {
+  steps: string[];
+  status: string;
+};
+
 export type ChatTurn =
   | { role: "user"; text: string }
-  | { role: "assistant"; streaming: true; text: string }
+  | { role: "assistant"; streaming: true; text: string; agentic?: AgenticAskStreamState }
   | { role: "assistant"; streaming: false; result: DesktopChatSendResult }
   | AgentThreadTurn
   | { role: "error"; text: string };
@@ -87,7 +93,7 @@ export function ChatTab(props: ChatTabProps) {
             );
           }
           if (turn.streaming) {
-            return <StreamingTurn key={i} text={turn.text} />;
+            return <StreamingTurn key={i} text={turn.text} agentic={turn.agentic} />;
           }
           return <AssistantTurn key={i} result={turn.result} onCite={onCite} />;
         })}
@@ -128,17 +134,40 @@ export function ChatTab(props: ChatTabProps) {
   );
 }
 
-/** The in-flight assistant turn: shows the thinking pulse until the first token lands. */
-function StreamingTurn({ text, label }: { text: string; label?: string }) {
+/** The in-flight assistant turn: classic stream text, or agentic tool-step progress. */
+function StreamingTurn({
+  text,
+  label,
+  agentic,
+}: {
+  text: string;
+  label?: string;
+  agentic?: AgenticAskStreamState;
+}) {
+  const showAgentic = agentic !== undefined;
+  const status = agentic?.status ?? label ?? "Grounding in your notes…";
   return (
     <div className="chat-assistant">
       <span className="chat-avatar">
         <Sparkles size={14} />
       </span>
       <div className="chat-assistant-body">
-        {text.length === 0 ? (
+        {showAgentic ? (
+          <>
+            {agentic.steps.length > 0 ? (
+              <ol className="agentic-progress-steps">
+                {agentic.steps.map((step, idx) => (
+                  <li key={idx}>{step}</li>
+                ))}
+              </ol>
+            ) : null}
+            <span className="chat-thinking">
+              <span className="dot-pulse" /> {status}
+            </span>
+          </>
+        ) : text.length === 0 ? (
           <span className="chat-thinking">
-            <span className="dot-pulse" /> {label ?? "Grounding in your notes…"}
+            <span className="dot-pulse" /> {status}
           </span>
         ) : (
           <div className="assistant-text streaming">{text}</div>
