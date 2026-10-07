@@ -80,6 +80,16 @@ const cairnHighlight = HighlightStyle.define([
 const setFlash = StateEffect.define<number | null>();
 const flashDeco = Decoration.line({ class: "cm-flash-line" });
 
+function applyCitationFlash(view: EditorView, lineNo: number): void {
+  const clamped = Math.max(1, Math.min(lineNo, view.state.doc.lines));
+  const docLine = view.state.doc.line(clamped);
+  view.dispatch({
+    selection: { anchor: docLine.from },
+    effects: [setFlash.of(lineNo), EditorView.scrollIntoView(docLine.from, { y: "center" })],
+  });
+  view.focus();
+}
+
 const flashField = StateField.define<DecorationSet>({
   create() {
     return Decoration.none;
@@ -169,19 +179,24 @@ export function MarkdownEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docKey]);
 
-  // Apply a citation flash: scroll the line into view, highlight it, then clear.
+  // Apply a citation flash: move caret, scroll the line into view, highlight, then clear.
   useEffect(() => {
     const view = viewRef.current;
     if (!view || flash === null) return;
-    const lineNo = Math.max(1, Math.min(flash.line, view.state.doc.lines));
-    const line = view.state.doc.line(lineNo);
-    view.dispatch({
-      effects: [setFlash.of(flash.line), EditorView.scrollIntoView(line.from, { y: "center" })],
-    });
+    const lineNo = flash.line;
+    const run = () => {
+      if (viewRef.current) applyCitationFlash(viewRef.current, lineNo);
+    };
+    run();
+    // Layout may not be ready on first paint after docKey swap (loading → editor).
+    const raf = requestAnimationFrame(() => requestAnimationFrame(run));
     const timer = window.setTimeout(() => {
       viewRef.current?.dispatch({ effects: setFlash.of(null) });
     }, 1400);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
     // Re-run when either the target changes or the nonce bumps (same-line re-cite).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flash?.line, flash?.nonce, docKey]);

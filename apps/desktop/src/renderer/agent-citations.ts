@@ -13,16 +13,18 @@ function pickSourceForOpen(
   line?: number,
   heading?: string,
 ): SearchHit | undefined {
-  const withHeading =
-    heading?.trim()
-      ? sources.find((s) => s.file === path && s.heading === heading)
-      : undefined;
-  if (withHeading) return withHeading;
+  const sameFile = (s: SearchHit) => s.file === path;
+  if (heading?.trim()) {
+    const withHeading = sources.find((s) => sameFile(s) && s.heading === heading);
+    if (withHeading) return withHeading;
+    // Heading-only open anchors must not inherit read()/open() stubs at line 1.
+    if (line === undefined || line <= 0) return undefined;
+  }
   if (line !== undefined && line > 0) {
-    const atLine = sources.find((s) => s.file === path && s.line === line);
+    const atLine = sources.find((s) => sameFile(s) && s.line === line);
     if (atLine) return atLine;
   }
-  return sources.find((s) => s.file === path);
+  return sources.find(sameFile);
 }
 
 function displaySnippet(hit: SearchHit): string {
@@ -86,14 +88,22 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
   return out;
 }
 
+function normalizeHeadingTitle(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\s+#+\s*$/, "")
+    .trim()
+    .toLowerCase();
+}
+
 /** 1-based line of a Markdown ATX heading (exact title match, case-insensitive). */
 export function lineForMarkdownHeading(content: string, heading: string): number | null {
-  const target = heading.trim().toLowerCase();
+  const target = normalizeHeadingTitle(heading);
   if (!target) return null;
-  const lines = content.split("\n");
+  const lines = content.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
-    const m = /^(#{1,6})\s+(.+)$/.exec(lines[i]);
-    if (m && m[2].trim().toLowerCase() === target) return i + 1;
+    const m = /^(#{1,6})\s+(.+)$/.exec(lines[i].trimEnd());
+    if (m && normalizeHeadingTitle(m[2]) === target) return i + 1;
   }
   return null;
 }
