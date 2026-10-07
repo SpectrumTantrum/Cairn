@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { basename, typeChip, citationTitle } = await import("../out-test/cite-format.js");
+const { basename, typeChip, citationTitle, vaultPathsEqual } = await import("../out-test/cite-format.js");
 
 test("basename returns the final path segment", () => {
   assert.equal(basename("notes/sub/file.md"), "file.md");
@@ -39,4 +39,9 @@ test("typeChip uppercases unknown extensions", () => {
 test("citationTitle formats the open-target hover string", () => {
   assert.equal(citationTitle("notes/a.md", 42), "Open notes/a.md at line 42");
   assert.equal(citationTitle("b.md", 1), "Open b.md at line 1");
+});
+
+test("vaultPathsEqual matches paths case-insensitively", () => {
+  assert.equal(vaultPathsEqual("MixedCase/ReadMe.md", "mixedcase/ReadMe.md"), true);
+  assert.equal(vaultPathsEqual("notes/a.md", "notes/b.md"), false);
 });

@@ -14,6 +14,7 @@ import type {
   TreeSortMode,
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
+import { vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -696,22 +697,29 @@ export function App() {
     [refreshTree, docKey, activeNode, closeTab],
   );
 
+  /** Resolve a cited line/heading against note text (heading wins over a stale line 1). */
+  const resolveOpenLine = useCallback(
+    async (source: SearchHit): Promise<number> => {
+      try {
+        const content =
+          docKey !== null && vaultPathsEqual(docKey, source.file)
+            ? buffer
+            : await window.cairn.readSource(source.file);
+        return resolveCitationLine(content, source);
+      } catch {
+        return source.line > 0 ? source.line : 1;
+      }
+    },
+    [docKey, buffer],
+  );
+
   /** Citation click-through: open the cited file in the center pane and flash the line (or heading). */
   const openCitation = useCallback(
     (source: SearchHit) => {
       void (async () => {
-        let line = source.line;
-        try {
-          if (source.heading?.trim()) {
-            const content =
-              docKey === source.file ? buffer : await window.cairn.readSource(source.file);
-            line = resolveCitationLine(content, source);
-          }
-        } catch {
-          line = source.line > 0 ? source.line : 1;
-        }
+        const line = await resolveOpenLine(source);
         if (!rightRailOpen) setRightRailOpen(true);
-        if (docKey === source.file) {
+        if (docKey !== null && vaultPathsEqual(docKey, source.file)) {
           flashNonce.current += 1;
           setFlash({ line, nonce: flashNonce.current });
         } else {
@@ -719,7 +727,7 @@ export function App() {
         }
       })();
     },
-    [docKey, buffer, openMarkdown, rightRailOpen],
+    [docKey, resolveOpenLine, openMarkdown, rightRailOpen],
   );
 
   function submitChat(): void {
@@ -1042,18 +1050,21 @@ export function App() {
   /** Open a search result in the editor and flash its line (same path as citation pills). */
   const openSearchResult = useCallback(
     (hit: SearchHit) => {
-      if (docKey === hit.file) {
-        flashNonce.current += 1;
-        setFlash({ line: hit.line, nonce: flashNonce.current });
-      } else {
-        const isMd = hit.file.toLowerCase().endsWith(".md");
-        void openMarkdown(
-          { name: basename(hit.file), path: hit.file, type: isMd ? "markdown" : "other" },
-          hit.line,
-        );
-      }
+      void (async () => {
+        const line = await resolveOpenLine(hit);
+        if (docKey !== null && vaultPathsEqual(docKey, hit.file)) {
+          flashNonce.current += 1;
+          setFlash({ line, nonce: flashNonce.current });
+        } else {
+          const isMd = hit.file.toLowerCase().endsWith(".md");
+          void openMarkdown(
+            { name: basename(hit.file), path: hit.file, type: isMd ? "markdown" : "other" },
+            line,
+          );
+        }
+      })();
     },
-    [docKey, openMarkdown],
+    [docKey, resolveOpenLine, openMarkdown],
   );
 
   const composerReason = useMemo(

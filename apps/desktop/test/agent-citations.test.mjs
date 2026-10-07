@@ -72,3 +72,44 @@ test("resolveCitationLine prefers heading over line 1", () => {
   const md = "# Intro\n\n## Topic\n\nBody\n";
   assert.equal(resolveCitationLine(md, { line: 1, heading: "Topic" }), 3);
 });
+
+test("lineForMarkdownHeading handles CRLF and closing hashes", () => {
+  const md = "# Intro\r\n\r\n## Topic ##\r\n\r\nBody\r\n";
+  assert.equal(lineForMarkdownHeading(md, "Topic"), 3);
+});
+
+test("citationsFromAskAgent matches find hits for heading-only opens (not read() line 1)", () => {
+  const result = {
+    answer: "See [1].",
+    sources: [
+      {
+        file: "ReadMe.md",
+        line: 1,
+        heading: "",
+        score: NaN,
+        cosine: NaN,
+        snippet: "whole file",
+        text: "whole file",
+        arms: "read",
+      },
+      {
+        file: "ReadMe.md",
+        line: 13,
+        heading: "Section 2",
+        score: 1,
+        cosine: NaN,
+        snippet: "section two",
+        text: "section two body",
+        arms: "find",
+      },
+    ],
+    opened: [{ path: "ReadMe.md", heading: "Section 2" }],
+    seedHits: [],
+    steps: 2,
+    stopReason: "done",
+    grounded: true,
+  };
+  const cites = citationsFromAskAgent(result);
+  assert.equal(cites[0].line, 13);
+  assert.equal(cites[0].heading, "Section 2");
+});

@@ -24,3 +24,8 @@ export function typeChip(path: string): string {
 export function citationTitle(file: string, line: number): string {
   return `Open ${file} at line ${line}`;
 }
+
+/** Vault-relative paths that refer to the same note (case-insensitive, for cite ↔ editor match). */
+export function vaultPathsEqual(a: string, b: string): boolean {
+  return a === b || a.toLowerCase() === b.toLowerCase();
+}
