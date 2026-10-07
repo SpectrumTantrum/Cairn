@@ -8,9 +8,13 @@ on:
 
 jobs:
   build-and-test:
-    # macOS matches the dev platform and the native modules (better-sqlite3,
-    # sqlite-vec) that @cairn/engine depends on.
-    runs-on: macos-latest
+    # macOS is the dev platform. ubuntu-latest installs the Linux optional
+    # natives (sqlite-vec, Rollup, esbuild) that a macOS-only lockfile omits.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -25,6 +29,9 @@ jobs:
             package-lock.json
             packages/engine/package-lock.json
             apps/desktop/package-lock.json
+
+      - name: Check platform optional dependencies
+        run: npm run check:lockfile
 
       - name: Install dependencies
         run: npm ci
