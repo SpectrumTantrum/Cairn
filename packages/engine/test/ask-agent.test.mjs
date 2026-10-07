@@ -359,6 +359,34 @@ test("runAskAgent passes a bounded timeoutMs on the first tool turn", async () =
   }
 });
 
+test("runAskAgent maps first-turn Ollama timeout to no-tool-use when nothing was gathered", async () => {
+  const { OllamaTimeoutError } = await import("../dist/index.js");
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async () => {
+        throw new OllamaTimeoutError("chat-with-tools", 180_000);
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "anything",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(result.stopReason, "no-tool-use");
+    assert.equal(result.steps, 1);
+    assert.match(result.answer, /timed out waiting for the model to call search tools/i);
+  } finally {
+    index.close();
+  }
+});
+
 test("runAskAgent stops with timeout when wallMs elapses before the model answers", async () => {
   let called = 0;
   setModelProvider(

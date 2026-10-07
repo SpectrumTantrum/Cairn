@@ -6,7 +6,11 @@ import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel } from "./chat.js";
-import { getModelProvider, OLLAMA_CHAT_TOOLS_TIMEOUT_MS } from "./model-provider.js";
+import {
+  getModelProvider,
+  OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+  OllamaTimeoutError,
+} from "./model-provider.js";
 import type { AgentMessage } from "./model-provider.js";
 import {
   ASK_SEARCH_TOOLS,
@@ -175,9 +179,23 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       firstTurn ? DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS : OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
       Math.max(1, remainingWallMs),
     );
-    const turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS, {
-      timeoutMs: turnBudget,
-    });
+    let turn;
+    try {
+      turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS, {
+        timeoutMs: turnBudget,
+        requireToolCall: firstTurn,
+      });
+    } catch (err) {
+      const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
+      if (firstTurn && noGroundingYet && err instanceof OllamaTimeoutError) {
+        steps++;
+        stopReason = "no-tool-use";
+        answer =
+          "Agentic Ask timed out waiting for the model to call search tools (often qwen3:4b or Qwen3 thinking+tools on older Ollama). Try qwen3:8b, upgrade Ollama, use classic Ask, or retry when the machine is quieter.";
+        break;
+      }
+      throw err;
+    }
     steps++;
 
     if (turn.toolCalls.length === 0) {
@@ -186,7 +204,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
         stopReason = "no-tool-use";
         answer =
           turn.content.trim() ||
-          "Agentic Ask needs at least one search tool call before answering. This model replied without using tools — try a larger Qwen3 (e.g. qwen3:8b), use classic Ask, or retry when Ollama is less busy.";
+          "Agentic Ask needs at least one search tool call before answering. This model replied without using tools — try qwen3:8b (not 4b), use classic Ask, or upgrade Ollama if Qwen3 thinking blocked tools.";
       } else {
         answer = turn.content;
         stopReason = "done";
