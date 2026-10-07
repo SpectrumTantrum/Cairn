@@ -22,7 +22,12 @@ export type {
 export { chat, chatStream, resolveChatModel } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
-export { runAskAgent, DEFAULT_ASK_AGENT_STEP_CAP, DEFAULT_ASK_AGENT_WALL_MS } from "./ask-agent.js";
+export {
+  runAskAgent,
+  DEFAULT_ASK_AGENT_STEP_CAP,
+  DEFAULT_ASK_AGENT_WALL_MS,
+  DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS,
+} from "./ask-agent.js";
 export type { AskAgentOptions, AskAgentResult, RetrievalSeedOption } from "./ask-agent.js";
 export { ASK_SEARCH_TOOLS, ASK_SEARCH_TOOL_NAMES, runAskSearchTool } from "./agent-search-tools.js";
 export type { OpenAnchor, AskSearchToolContext, AskSearchToolState } from "./agent-search-tools.js";
@@ -52,6 +57,7 @@ export {
   OLLAMA_CHAT_TIMEOUT_MS,
   OLLAMA_CHAT_STREAM_TIMEOUT_MS,
   OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+  agentMessagesToOpenAI,
 } from "./model-provider.js";
 export type {
   ModelProvider,
@@ -62,5 +68,6 @@ export type {
   ToolSchema,
   ToolCall,
   ToolTurn,
+  ChatWithToolsOptions,
 } from "./model-provider.js";
 export { ollamaUp, listModels } from "./embed.js";

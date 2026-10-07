@@ -101,8 +101,10 @@ export function SettingsDialog({
             </label>
             <p className="field-note">
               Routes Ask through a bounded read-only tool loop (list, find, grep, read, open) instead of
-              classic one-shot retrieval. Default off. Set{" "}
-              <code>CAIRN_AGENTIC_ASK=1</code> before launch to enable by default until you change this
+              classic one-shot retrieval. Default off. Works best with a tool-capable local chat model (e.g.{" "}
+              <code>qwen3:8b</code>); small models like <code>qwen3:4b</code> may time out or skip tools —
+              use classic Ask if citations do not appear. Set <code>CAIRN_AGENTIC_ASK=1</code> before launch
+              to enable by default until you change this
               setting{agenticAskEnvDefault ? " (active for this session via env)." : "."}
             </p>
           </section>

@@ -2,6 +2,7 @@ import type {
   AgentMessage,
   ChatMessage,
   ChatStreamCallbacks,
+  ChatWithToolsOptions,
   ModelProvider,
   ToolSchema,
   ToolTurn,
@@ -35,6 +36,7 @@ export interface FakeModelProviderOpts {
     messages: AgentMessage[],
     tools: ToolSchema[],
     turn: number,
+    options?: ChatWithToolsOptions,
   ) => Promise<ToolTurn>;
 }
 
@@ -59,8 +61,8 @@ export class FakeModelProvider implements ModelProvider {
     this.chatStreamFn = opts.chatStream;
     this.chatWithToolsFn = opts.chatWithTools;
     if (this.chatWithToolsFn) {
-      this.chatWithTools = (model, messages, tools) =>
-        this.chatWithToolsFn!(model, messages, tools, ++this.toolTurn);
+      this.chatWithTools = (model, messages, tools, options) =>
+        this.chatWithToolsFn!(model, messages, tools, ++this.toolTurn, options);
     }
   }
 

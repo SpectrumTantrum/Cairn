@@ -127,8 +127,16 @@ export interface ToolSchema {
 
 /** One tool call the model emitted. `arguments` is RAW model output — validate before use. */
 export interface ToolCall {
+  /** OpenAI-compat `tool_call_id` — required when replaying multi-turn tool history. */
+  id?: string;
   name: string;
   arguments: Record<string, unknown>;
+}
+
+/** Per-turn overrides for `chatWithTools` (timeouts, budgets). */
+export interface ChatWithToolsOptions {
+  /** Overrides `OLLAMA_CHAT_TOOLS_TIMEOUT_MS` for this turn (e.g. remaining wall-clock budget). */
+  timeoutMs?: number;
 }
 
 /**
@@ -141,6 +149,8 @@ export interface AgentMessage {
   content: string;
   toolCalls?: ToolCall[];
   toolName?: string;
+  /** Matches the assistant `tool_calls[].id` this tool result answers (OpenAI-compat history). */
+  toolCallId?: string;
 }
 
 /** Result of one tool-enabled model turn: prose plus any tool calls it wants run. */
@@ -206,7 +216,69 @@ export interface ModelProvider {
     model: string,
     messages: AgentMessage[],
     tools: ToolSchema[],
+    options?: ChatWithToolsOptions,
   ): Promise<ToolTurn>;
+}
+
+function parseToolCallArguments(raw: unknown): Record<string, unknown> {
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+    } catch {
+      return {};
+    }
+  }
+  return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+}
+
+function normalizeOllamaToolCalls(
+  rawCalls: { id?: string; type?: string; function?: { name?: string; arguments?: unknown } }[],
+): ToolCall[] {
+  const toolCalls: ToolCall[] = [];
+  for (let i = 0; i < rawCalls.length; i++) {
+    const rc = rawCalls[i];
+    const name = rc.function?.name;
+    if (typeof name !== "string" || name === "") continue;
+    toolCalls.push({
+      id: typeof rc.id === "string" && rc.id ? rc.id : `call_${i}`,
+      name,
+      arguments: parseToolCallArguments(rc.function?.arguments),
+    });
+  }
+  return toolCalls;
+}
+
+/** Map Cairn agent history to OpenAI-compat messages (Ollama `/v1/chat/completions`). */
+export function agentMessagesToOpenAI(messages: AgentMessage[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (const m of messages) {
+    if (m.role === "tool") {
+      out.push({
+        role: "tool",
+        tool_call_id: m.toolCallId ?? m.toolName ?? "call_0",
+        content: m.content,
+      });
+      continue;
+    }
+    if (m.role === "assistant" && m.toolCalls?.length) {
+      out.push({
+        role: "assistant",
+        content: m.content || null,
+        tool_calls: m.toolCalls.map((c, i) => ({
+          id: c.id ?? `call_${i}`,
+          type: "function",
+          function: {
+            name: c.name,
+            arguments: JSON.stringify(c.arguments ?? {}),
+          },
+        })),
+      });
+      continue;
+    }
+    out.push({ role: m.role, content: m.content });
+  }
+  return out;
 }
 
 export class OllamaClient implements ModelProvider {
@@ -352,23 +424,70 @@ export class OllamaClient implements ModelProvider {
     model: string,
     messages: AgentMessage[],
     tools: ToolSchema[],
+    options?: ChatWithToolsOptions,
   ): Promise<ToolTurn> {
     // Non-streaming on purpose (ADR-0008 §5: Ollama #15497 stream+tools bug).
-    const body = {
+    const timeoutMs = options?.timeoutMs ?? OLLAMA_CHAT_TOOLS_TIMEOUT_MS;
+    const ollamaTools = tools.map((t) => ({
+      type: "function",
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+
+    const openAiBody = {
+      model,
+      stream: false,
+      temperature: 0,
+      messages: agentMessagesToOpenAI(messages),
+      tools: ollamaTools,
+    };
+
+    const openAi = await ollamaFetch(
+      `${this.baseUrl}/v1/chat/completions`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(openAiBody),
+      },
+      timeoutMs,
+      "chat-with-tools",
+    );
+    if (openAi.ok) {
+      const j = (await openAi.json()) as {
+        choices?: {
+          message?: {
+            content?: string | null;
+            tool_calls?: { id?: string; type?: string; function?: { name?: string; arguments?: unknown } }[];
+          };
+        }[];
+      };
+      const msg = j.choices?.[0]?.message;
+      const toolCalls = normalizeOllamaToolCalls(msg?.tool_calls ?? []);
+      return { content: msg?.content ?? "", toolCalls };
+    }
+
+    // Older Ollama builds without OpenAI-compat — fall back to native `/api/chat`.
+    if (openAi.status !== 404) {
+      const t = await openAi.text().catch(() => "");
+      throw new Error(`HTTP ${openAi.status} from /v1/chat/completions (tools): ${t.slice(0, 200)}`);
+    }
+
+    const nativeBody: Record<string, unknown> = {
       model,
       stream: false,
       think: false,
-      tools: tools.map((t) => ({
-        type: "function",
-        function: { name: t.name, description: t.description, parameters: t.parameters },
-      })),
+      tools: ollamaTools,
       messages: messages.map((m) => {
         if (m.role === "assistant" && m.toolCalls?.length) {
           return {
             role: "assistant",
             content: m.content,
-            tool_calls: m.toolCalls.map((c) => ({
-              function: { name: c.name, arguments: c.arguments },
+            tool_calls: m.toolCalls.map((c, i) => ({
+              type: "function",
+              function: {
+                index: i,
+                name: c.name,
+                arguments: c.arguments,
+              },
             })),
           };
         }
@@ -379,16 +498,23 @@ export class OllamaClient implements ModelProvider {
       }),
     };
 
-    const r = await ollamaFetch(
-      `${this.baseUrl}/api/chat`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
-      "chat-with-tools",
-    );
+    const postNative = async (body: Record<string, unknown>) =>
+      ollamaFetch(
+        `${this.baseUrl}/api/chat`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        timeoutMs,
+        "chat-with-tools",
+      );
+
+    let r = await postNative(nativeBody);
+    if (!r.ok && nativeBody.think !== undefined) {
+      delete nativeBody.think;
+      r = await postNative(nativeBody);
+    }
     if (!r.ok) {
       const t = await r.text().catch(() => "");
       throw new Error(`HTTP ${r.status} from /api/chat (tools): ${t.slice(0, 200)}`);
@@ -396,28 +522,10 @@ export class OllamaClient implements ModelProvider {
     const j = (await r.json()) as {
       message?: {
         content?: string;
-        tool_calls?: { function?: { name?: string; arguments?: unknown } }[];
+        tool_calls?: { id?: string; function?: { name?: string; arguments?: unknown } }[];
       };
     };
-    const rawCalls = j.message?.tool_calls ?? [];
-    const toolCalls: ToolCall[] = [];
-    for (const rc of rawCalls) {
-      const name = rc.function?.name;
-      if (typeof name !== "string" || name === "") continue;
-      // Ollama returns arguments as an object; tolerate a JSON string too.
-      let args = rc.function?.arguments;
-      if (typeof args === "string") {
-        try {
-          args = JSON.parse(args);
-        } catch {
-          args = {};
-        }
-      }
-      toolCalls.push({
-        name,
-        arguments: args && typeof args === "object" ? (args as Record<string, unknown>) : {},
-      });
-    }
+    const toolCalls = normalizeOllamaToolCalls(j.message?.tool_calls ?? []);
     return { content: j.message?.content ?? "", toolCalls };
   }
 }

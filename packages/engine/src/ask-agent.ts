@@ -6,7 +6,7 @@ import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel } from "./chat.js";
-import { getModelProvider } from "./model-provider.js";
+import { getModelProvider, OLLAMA_CHAT_TOOLS_TIMEOUT_MS } from "./model-provider.js";
 import type { AgentMessage } from "./model-provider.js";
 import {
   ASK_SEARCH_TOOLS,
@@ -26,6 +26,12 @@ export const DEFAULT_ASK_AGENT_STEP_CAP = 16;
  * burn multiple minutes before undici's old 5-min headersTimeout would have fired.
  */
 export const DEFAULT_ASK_AGENT_WALL_MS = 480_000;
+
+/**
+ * First tool-calling turn budget — fail faster than the 600s undici ceiling when a small
+ * model ignores tools and burns the full generation budget (common on qwen3 under load).
+ */
+export const DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS = 180_000;
 
 export type RetrievalSeedOption = boolean | { k?: number; mode?: Mode };
 
@@ -59,7 +65,7 @@ export interface AskAgentResult {
   /** Seed hits when retrievalSeed was enabled (not counted as "opened" by default). */
   seedHits: SearchHit[];
   steps: number;
-  stopReason: "done" | "step-cap" | "timeout" | "no-tool-support";
+  stopReason: "done" | "step-cap" | "timeout" | "no-tool-support" | "no-tool-use";
   grounded: boolean;
   model?: string;
 }
@@ -74,6 +80,7 @@ const ASK_AGENT_SYSTEM = [
   "- read(path): read a note's full current contents.",
   "- open(path, line?, heading?): record a UI jump target when you cite a specific location.",
   "Workflow: use list/find/grep to discover relevant notes, read them, then answer.",
+  "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
   "Cite sources inline with bracketed numbers matching the SOURCES list when one is provided, or as [path:line] when you opened notes yourself.",
   'If the vault does not contain the answer after searching, reply exactly: "Your notes don\'t cover this."',
   "When finished, stop calling tools and give a concise, direct answer.",
@@ -161,12 +168,29 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       }
       break;
     }
-    const turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS);
+    const remainingWallMs = wallMs - (Date.now() - startedAt);
+    const firstTurn = steps === 0;
+    const turnBudget = Math.min(
+      OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+      firstTurn ? DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS : OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+      Math.max(1, remainingWallMs),
+    );
+    const turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS, {
+      timeoutMs: turnBudget,
+    });
     steps++;
 
     if (turn.toolCalls.length === 0) {
-      answer = turn.content;
-      stopReason = "done";
+      const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
+      if (firstTurn && noGroundingYet) {
+        stopReason = "no-tool-use";
+        answer =
+          turn.content.trim() ||
+          "Agentic Ask needs at least one search tool call before answering. This model replied without using tools — try a larger Qwen3 (e.g. qwen3:8b), use classic Ask, or retry when Ollama is less busy.";
+      } else {
+        answer = turn.content;
+        stopReason = "done";
+      }
       break;
     }
 
@@ -174,7 +198,12 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
 
     for (const call of turn.toolCalls) {
       const content = await runAskSearchTool(call.name, call.arguments, toolCtx, toolState);
-      messages.push({ role: "tool", toolName: call.name, content });
+      messages.push({
+        role: "tool",
+        toolName: call.name,
+        toolCallId: call.id,
+        content,
+      });
     }
   }
 

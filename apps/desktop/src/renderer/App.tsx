@@ -748,6 +748,11 @@ export function App() {
       if (raw.stopReason === "no-tool-support") {
         result.reason = "This model does not support tool-calling, which agentic Ask needs.";
       }
+      if (raw.stopReason === "no-tool-use") {
+        result.reason =
+          "The model finished without calling search tools — agentic Ask needs a tool-capable model (try qwen3:8b) or classic Ask.";
+        result.covered = false;
+      }
       if (raw.stopReason === "timeout") {
         result.reason =
           "Agentic Ask hit its time budget — retry when quieter, use a faster model, or turn off agentic Ask.";

@@ -26,8 +26,12 @@ import type { RetrievalSeedOption } from "./ask-agent.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel } from "./chat.js";
 import { getModelProvider } from "./model-provider.js";
-import type { AgentMessage, ToolSchema } from "./model-provider.js";
+import type { AgentMessage, ToolCall, ToolSchema } from "./model-provider.js";
 import { diffLines, type DiffPreview } from "./diff.js";
+
+function toolResultMessage(call: ToolCall, content: string): AgentMessage {
+  return { role: "tool", toolName: call.name, toolCallId: call.id, content };
+}
 
 /** Default hard step cap (ADR-0008 §0). Manifest-configurable upstream, never a magic constant here. */
 export const DEFAULT_AGENT_STEP_CAP = 25;
@@ -201,17 +205,17 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
       if (call.name === "read_note") {
         const path = asString(call.arguments.path);
         if (!path) {
-          messages.push({ role: "tool", toolName: "read_note", content: "ERROR: read_note requires a string 'path'." });
+          messages.push(toolResultMessage(call, "ERROR: read_note requires a string 'path'."));
           continue;
         }
         try {
           const content = await opts.readNote(path);
           const clipped =
             content.length > MAX_READ_CHARS ? `${content.slice(0, MAX_READ_CHARS)}\n…(truncated)` : content;
-          messages.push({ role: "tool", toolName: "read_note", content: clipped });
+          messages.push(toolResultMessage(call, clipped));
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
-          messages.push({ role: "tool", toolName: "read_note", content: `ERROR: ${message}` });
+          messages.push(toolResultMessage(call, `ERROR: ${message}`));
         }
         continue;
       }
@@ -220,11 +224,9 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         const path = asString(call.arguments.path);
         const newContent = asString(call.arguments.newContent);
         if (!path || newContent === null) {
-          messages.push({
-            role: "tool",
-            toolName: "propose_edit",
-            content: "ERROR: propose_edit requires string 'path' and string 'newContent'.",
-          });
+          messages.push(
+            toolResultMessage(call, "ERROR: propose_edit requires string 'path' and string 'newContent'."),
+          );
           continue;
         }
         let base: string | null = null;
@@ -243,15 +245,16 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
         };
         proposals.push(proposal);
         opts.onProposal?.(proposal);
-        messages.push({
-          role: "tool",
-          toolName: "propose_edit",
-          content: `Proposal recorded for ${path} (+${proposal.preview.added} / -${proposal.preview.removed} lines). It is NOT written — the user will approve or reject it. Continue or finish.`,
-        });
+        messages.push(
+          toolResultMessage(
+            call,
+            `Proposal recorded for ${path} (+${proposal.preview.added} / -${proposal.preview.removed} lines). It is NOT written — the user will approve or reject it. Continue or finish.`,
+          ),
+        );
         continue;
       }
 
-      messages.push({ role: "tool", toolName: call.name, content: `ERROR: unknown tool "${call.name}".` });
+      messages.push(toolResultMessage(call, `ERROR: unknown tool "${call.name}".`));
     }
   }
 

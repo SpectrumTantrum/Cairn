@@ -305,6 +305,60 @@ test("list prefix with trailing slash matches folder notes", async () => {
   }
 });
 
+test("runAskAgent fails fast when the first turn returns no tool calls", async () => {
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async () => ({ content: "I know the answer.", toolCalls: [] }),
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "anything",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(result.stopReason, "no-tool-use");
+    assert.equal(result.steps, 1);
+    assert.match(result.answer, /I know the answer/);
+    assert.equal(result.sources.length, 0);
+  } finally {
+    index.close();
+  }
+});
+
+test("runAskAgent passes a bounded timeoutMs on the first tool turn", async () => {
+  let sawTimeout;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_m, _msg, _t, _turn, options) => {
+        sawTimeout = options?.timeoutMs;
+        return { content: "ok", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    await runAskAgent({
+      index,
+      question: "x",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+      wallMs: 60_000,
+    });
+    assert.equal(sawTimeout, 60_000);
+  } finally {
+    index.close();
+  }
+});
+
 test("runAskAgent stops with timeout when wallMs elapses before the model answers", async () => {
   let called = 0;
   setModelProvider(
