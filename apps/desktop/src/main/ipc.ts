@@ -9,6 +9,7 @@ import {
   type SecretCrypto,
 } from "./provider-store.js";
 import { ThreadStore } from "./thread-store.js";
+import { toUserError } from "./user-error.js";
 
 const session = createVaultSession();
 
@@ -39,56 +40,6 @@ function threads(): ThreadStore {
     });
   }
   return threadStore;
-}
-
-const USER_ERROR_PREFIXES = [
-  "Choose",
-  "Index",
-  "No source",
-  "No content",
-  "Refusing",
-  "Cloud",
-  "Secure key storage",
-  "Stored API key",
-  "That cloud provider",
-  "Pick a cloud provider",
-  "The requested vault",
-  "The selected vault",
-  "The source file",
-  "Ask needs",
-  "Agent needs",
-  "Agent mode needs",
-  "This agent run",
-  "That proposed edit",
-  "Revert is unsafe",
-  "Studio needs",
-  "The requested Studio",
-  "Unknown Studio template",
-];
-
-// Deliberately-surfaced user messages whose safe text is NOT at the start — a value is
-// interpolated as the prefix (e.g. a Studio template title). Matched by regex so they are
-// allow-listed by intent, not merely returned by the generic fallback branch below.
-const USER_ERROR_PATTERNS = [
-  // studio-generate.ts: `The "<title>" generator is not available yet.`
-  /^The ".+" generator is not available yet\.$/,
-];
-
-function toUserError(error: unknown): Error {
-  const message = error instanceof Error ? error.message : String(error);
-  if (
-    USER_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix)) ||
-    USER_ERROR_PATTERNS.some((re) => re.test(message))
-  ) {
-    return new Error(message);
-  }
-  if (/ollama|fetch failed|ECONNREFUSED|embedder|chat model|\/api\/(embed|chat|tags)|HTTP \d+/i.test(message)) {
-    return new Error("Local Ollama request failed. Check that Ollama is running and the required models are installed.");
-  }
-  if (/sqlite|SQLITE|vec_chunks|better-sqlite3/i.test(message)) {
-    return new Error("The local index could not be read. Try re-indexing this vault.");
-  }
-  return new Error(message.length > 220 ? `${message.slice(0, 217)}...` : message);
 }
 
 async function handleUserErrors<T>(fn: () => T | Promise<T>): Promise<T> {

@@ -45,6 +45,12 @@ npm run desktop:preview
 
 Equivalent package-local commands also work from `apps/desktop/`.
 
+`desktop:dev` and `desktop:preview` rebuild `better-sqlite3` for the installed
+Electron ABI before launch, then restore the system Node ABI when that process
+exits. A stock `npm run desktop:dev` loads the module; the manual
+`scripts/rebuild-engine-native.mjs electron` command is only a recovery step
+if a previous run was killed mid-restore.
+
 ## Package a macOS `.app`
 
 Packaging uses [electron-builder](https://www.electron.build/) (MIT). It is
@@ -69,8 +75,9 @@ produces `dmg` + `zip` artifacts. Output goes to `apps/desktop/release/`
 
 `@cairn/engine` depends on two native pieces that must match the runtime's ABI:
 
-- **better-sqlite3** — a compiled Node addon. The packaged app runs on Electron's
-  ABI, not system Node's, so it must be rebuilt for Electron before packaging.
+- **better-sqlite3** — a compiled Node addon. Electron (dev, preview, and the
+  packaged app) uses a different ABI than system Node, so the addon is rebuilt
+  for Electron before those commands and restored afterward.
 - **sqlite-vec** — ships a prebuilt loadable extension (`vec0.dylib`). It is
   ABI-independent, but `db.loadExtension()` is a native SQLite call that bypasses
   Electron's asar filesystem shim, so the `.dylib` must be **unpacked** from
@@ -79,23 +86,29 @@ produces `dmg` + `zip` artifacts. Output goes to `apps/desktop/release/`
 
 Because `better-sqlite3` is hoisted into `packages/engine/node_modules` and is
 **shared** between the engine's Node test gates / `cairn` CLI (system Node ABI)
-and the packaged app (Electron ABI), a single install can only hold one ABI at a
-time. The packaging scripts handle this deterministically:
+and Electron, a single install can only hold one ABI at a time. The desktop
+scripts switch it explicitly:
 
-- `prepackage` rebuilds `better-sqlite3` for the installed Electron's ABI
-  (`scripts/rebuild-engine-native.mjs electron`), then electron-builder packs it
-  (`npmRebuild: false` — electron-builder's built-in rebuild is disabled because
-  its per-ABI `bin/` cache skipped non-deterministically in this layout).
-- `postpackage` restores `better-sqlite3` to the **system Node ABI**
-  (`scripts/rebuild-engine-native.mjs node`) so `packages/engine` tests and the
-  CLI keep working afterward. The packaged `.app` already contains its own
-  Electron-ABI copy, so restoring the source is safe.
+- `predev` / `prepreview` rebuild `better-sqlite3` for the installed Electron
+  ABI (`scripts/rebuild-engine-native.mjs electron`) after the engine build.
+  `npm run desktop:dev` and `npm run desktop:preview` pick that up; no manual
+  rebuild.
+- `postdev` / `postpreview` restore the system Node ABI. Ctrl-C does not run
+  npm `post*` hooks, so `scripts/run-desktop.mjs` restores when the Electron
+  process exits as well. A second restore is a no-op when Node can already
+  load the module.
+- `prepackage` / `prepackage:dist` rebuild for Electron, then electron-builder
+  packs that binary (`npmRebuild: false` — electron-builder's built-in rebuild
+  is disabled because its per-ABI `bin/` cache skipped non-deterministically
+  in this layout).
+- `postpackage` / `postpackage:dist` restore the system Node ABI. The packaged
+  app already contains its own Electron-ABI copy, so restoring the source tree
+  is safe.
 
-If you ever run engine Node tests and get an `ERR_DLOPEN_FAILED` /
-`NODE_MODULE_VERSION` mismatch, the shared install is in the Electron-ABI state —
-run `npm run rebuild:engine-node`-equivalent restore: from `apps/desktop/`,
-`node scripts/rebuild-engine-native.mjs node` (or just `npm --prefix
-../../packages/engine rebuild better-sqlite3`).
+If engine Node tests still report `ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION`,
+the shared install was left on the Electron ABI (the dev process was killed
+during restore). From `apps/desktop/`, run
+`node scripts/rebuild-engine-native.mjs node`.
 
 ### Unsigned / not notarized (known limitation)
 
