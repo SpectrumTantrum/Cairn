@@ -11,6 +11,9 @@ const RIGHT_TAB_LABELS: Record<RightTab, string> = {
 interface SettingsDialogProps {
   rightTab: RightTab;
   onRightTabChange(tab: RightTab): void;
+  agenticAsk: boolean;
+  onAgenticAskChange(enabled: boolean): void;
+  agenticAskEnvDefault: boolean;
   onResetLayout(): void;
   onOpenProviders(): void;
   onClose(): void;
@@ -28,6 +31,9 @@ interface SettingsDialogProps {
 export function SettingsDialog({
   rightTab,
   onRightTabChange,
+  agenticAsk,
+  onAgenticAskChange,
+  agenticAskEnvDefault,
   onResetLayout,
   onOpenProviders,
   onClose,
@@ -81,6 +87,24 @@ export function SettingsDialog({
                 Reset layout
               </button>
             </div>
+          </section>
+
+          <section className="settings-section">
+            <h3 className="settings-section-title">Ask / Chat</h3>
+            <label className="field">
+              <span>Agentic Ask (experimental)</span>
+              <input
+                type="checkbox"
+                checked={agenticAsk}
+                onChange={(e) => onAgenticAskChange(e.target.checked)}
+              />
+            </label>
+            <p className="field-note">
+              Routes Ask through a bounded read-only tool loop (list, find, grep, read, open) instead of
+              classic one-shot retrieval. Default off. Set{" "}
+              <code>CAIRN_AGENTIC_ASK=1</code> before launch to enable by default until you change this
+              setting{agenticAskEnvDefault ? " (active for this session via env)." : "."}
+            </p>
           </section>
 
           <section className="settings-section">

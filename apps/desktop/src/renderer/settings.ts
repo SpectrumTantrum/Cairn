@@ -23,6 +23,8 @@ export const SETTINGS_KEYS = {
   rightTab: "cairn.rightTab",
   vaultWidth: "cairn.vaultWidth",
   rightWidth: "cairn.rightWidth",
+  /** When true, Ask/Chat uses the agentic read-only tool loop instead of classic grounded chat. */
+  agenticAsk: "cairn.agenticAsk",
 } as const;
 
 /** A resizable pane's persisted-width contract: key + default + clamp bounds. */
@@ -58,4 +60,29 @@ export function readPaneWidth(store: SettingsStore, spec: PaneWidthSpec): number
 
 export function writePaneWidth(store: SettingsStore, spec: PaneWidthSpec, width: number): void {
   store.setItem(spec.key, String(Math.round(width)));
+}
+
+function parseBool(raw: string | null): boolean | null {
+  if (raw === "1" || raw === "true") return true;
+  if (raw === "0" || raw === "false") return false;
+  return null;
+}
+
+/** Persisted UI toggle for agentic Ask (default off). */
+export function readAgenticAskPref(store: SettingsStore): boolean {
+  return parseBool(store.getItem(SETTINGS_KEYS.agenticAsk)) === true;
+}
+
+export function writeAgenticAskPref(store: SettingsStore, enabled: boolean): void {
+  store.setItem(SETTINGS_KEYS.agenticAsk, enabled ? "1" : "0");
+}
+
+/**
+ * Effective agentic Ask routing: env default (`CAIRN_AGENTIC_ASK=1`) OR the settings toggle.
+ * Env does not disable an explicit user preference when env is unset.
+ */
+export function isAgenticAskEnabled(store: SettingsStore, envDefault = false): boolean {
+  const pref = parseBool(store.getItem(SETTINGS_KEYS.agenticAsk));
+  if (pref !== null) return pref;
+  return envDefault;
 }

@@ -11,8 +11,11 @@ const {
   RIGHT_WIDTH,
   SETTINGS_KEYS,
   VAULT_WIDTH,
+  isAgenticAskEnabled,
+  readAgenticAskPref,
   readPaneWidth,
   readRightTab,
+  writeAgenticAskPref,
   writePaneWidth,
   writeRightTab,
 } = await import("../out-test/settings.js");
@@ -73,4 +76,23 @@ test("writePaneWidth rounds and round-trips", () => {
   writePaneWidth(store, VAULT_WIDTH, 246.7);
   assert.equal(store.getItem(VAULT_WIDTH.key), "247");
   assert.equal(readPaneWidth(store, VAULT_WIDTH), 247);
+});
+
+// ---- agentic Ask flag -----------------------------------------------------
+
+test("agentic Ask defaults off without env or preference", () => {
+  assert.equal(isAgenticAskEnabled(fakeStore(), false), false);
+  assert.equal(readAgenticAskPref(fakeStore()), false);
+});
+
+test("agentic Ask env default applies when no user preference is stored", () => {
+  assert.equal(isAgenticAskEnabled(fakeStore(), true), true);
+});
+
+test("writeAgenticAskPref overrides env default", () => {
+  const store = fakeStore();
+  writeAgenticAskPref(store, true);
+  assert.equal(isAgenticAskEnabled(store, false), true);
+  writeAgenticAskPref(store, false);
+  assert.equal(isAgenticAskEnabled(store, true), false);
 });

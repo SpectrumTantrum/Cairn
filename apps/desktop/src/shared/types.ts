@@ -1,4 +1,9 @@
+import type { ChatSendResult as EngineChatSendResult } from "@cairn/engine";
+
 export type { AskResult, ChatSendResult, ChatUsage, EditProposal, DiffLine, DiffPreview, IndexStats, SearchHit } from "@cairn/engine";
+
+/** Chat turn result plus desktop-only metadata for agentic Ask citations. */
+export type DesktopChatSendResult = EngineChatSendResult & { agenticAsk?: boolean };
 export type { ProviderKind, ProviderPreset } from "@cairn/engine";
 export type { StudioTemplateMeta } from "@cairn/engine";
 export type { TreeNode, TreeSortMode, AgentStartResult, AgentApplyResult } from "../main/vault-session.js";

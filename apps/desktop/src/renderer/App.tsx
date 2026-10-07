@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Cloud, X } from "lucide-react";
 import type {
+  DesktopChatSendResult,
   EscalateTarget,
   IndexStats,
   OllamaStatus,
@@ -12,6 +13,7 @@ import type {
   TreeNode,
   TreeSortMode,
 } from "../shared/types.js";
+import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -27,7 +29,14 @@ import { SettingsDialog } from "./components/shell/SettingsDialog";
 import { TreeDialogs, type TreeDialog } from "./components/shell/TreeDialogs";
 import { CommandPalette, type Command } from "./components/shell/CommandPalette";
 import { useResizable } from "./components/shell/useResizable";
-import { RIGHT_WIDTH, VAULT_WIDTH, readRightTab, writeRightTab } from "./settings";
+import {
+  RIGHT_WIDTH,
+  VAULT_WIDTH,
+  isAgenticAskEnabled,
+  readRightTab,
+  writeAgenticAskPref,
+  writeRightTab,
+} from "./settings";
 
 /** ⌘K on macOS, Ctrl+K elsewhere — used for the palette hint + open chord (issue #13). */
 const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
@@ -154,6 +163,12 @@ export function App() {
   // = the general UI-preferences settings (issue #24, SettingsDialog). One overlay at a time.
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [prefsOpen, setPrefsOpen] = useState(false);
+  const [agenticAskEnvDefault, setAgenticAskEnvDefault] = useState(false);
+  const [agenticAskRev, setAgenticAskRev] = useState(0);
+  const agenticAskEnabled = useMemo(
+    () => isAgenticAskEnabled(window.localStorage, agenticAskEnvDefault),
+    [agenticAskEnvDefault, agenticAskRev],
+  );
   // Armed escalation for the NEXT turn (null = stays local on Ollama).
   const [escalateTarget, setEscalateTarget] = useState<EscalateTarget | null>(null);
   // First-use confirm gate: once a provider is confirmed (or the session-wide skip is
@@ -214,6 +229,10 @@ export function App() {
     void refreshProviders();
     void refreshThreads();
     void window.cairn.studioTemplates().then(setStudioTemplates).catch(() => setStudioTemplates([]));
+    void window.cairn.desktopFeatures().then((f) => {
+      setAgenticAskEnvDefault(f.agenticAskEnvDefault);
+      setAgenticAskRev((v) => v + 1);
+    });
   }, []);
 
   useEffect(() => {
@@ -647,18 +666,30 @@ export function App() {
     [refreshTree, docKey, activeNode, closeTab],
   );
 
-  /** Citation click-through: open the cited file in the center pane and flash the line. */
+  /** Citation click-through: open the cited file in the center pane and flash the line (or heading). */
   const openCitation = useCallback(
     (source: SearchHit) => {
-      if (!rightRailOpen) setRightRailOpen(true);
-      if (docKey === source.file) {
-        flashNonce.current += 1;
-        setFlash({ line: source.line, nonce: flashNonce.current });
-      } else {
-        void openMarkdown({ name: basename(source.file), path: source.file, type: "markdown" }, source.line);
-      }
+      void (async () => {
+        let line = source.line;
+        try {
+          if (source.heading?.trim()) {
+            const content =
+              docKey === source.file ? buffer : await window.cairn.readSource(source.file);
+            line = resolveCitationLine(content, source);
+          }
+        } catch {
+          line = source.line > 0 ? source.line : 1;
+        }
+        if (!rightRailOpen) setRightRailOpen(true);
+        if (docKey === source.file) {
+          flashNonce.current += 1;
+          setFlash({ line, nonce: flashNonce.current });
+        } else {
+          void openMarkdown({ name: basename(source.file), path: source.file, type: "markdown" }, line);
+        }
+      })();
     },
-    [docKey, openMarkdown, rightRailOpen],
+    [docKey, buffer, openMarkdown, rightRailOpen],
   );
 
   function submitChat(): void {
@@ -686,7 +717,54 @@ export function App() {
     void runChat(pending.question, pending.target);
   }
 
+  async function runAgenticAskChat(question: string): Promise<void> {
+    const requestId = ++requestIdRef.current;
+    activeRequestId.current = requestId;
+    setThread((prev) => [...prev, { role: "user", text: question }]);
+    setChatInput("");
+    setAsking(true);
+    setError(null);
+
+    try {
+      const raw = await window.cairn.askAgentVault(question, {
+        model: selectedModel ?? undefined,
+        scope: scopeActive ? includedFiles : undefined,
+      });
+      if (activeRequestId.current !== requestId) return;
+      const sources = citationsFromAskAgent(raw);
+      const uncovered = raw.answer.includes("don't cover");
+      const result: DesktopChatSendResult = {
+        answer: raw.answer,
+        sources,
+        mode: "lexical",
+        grounded: raw.grounded,
+        covered: raw.grounded && !uncovered && raw.stopReason !== "no-tool-support",
+        agenticAsk: true,
+      };
+      if (raw.model) result.model = raw.model;
+      if (raw.stopReason === "step-cap") {
+        result.reason = "Agent stopped at the step limit — answer may be incomplete.";
+      }
+      if (raw.stopReason === "no-tool-support") {
+        result.reason = "This model does not support tool-calling, which agentic Ask needs.";
+      }
+      setThread((prev) => [...prev, { role: "assistant", streaming: false, result }]);
+      if (sources.length > 0) setLastSources(sources);
+      setExcludedSources(new Set());
+    } catch (err) {
+      if (activeRequestId.current !== requestId) return;
+      const message = errorMessage(err);
+      setThread((prev) => [...prev, { role: "error", text: message }]);
+    } finally {
+      if (activeRequestId.current === requestId) setAsking(false);
+    }
+  }
+
   async function runChat(question: string, escalate?: EscalateTarget): Promise<void> {
+    if (mode === "ask" && agenticAskEnabled && !escalate) {
+      return runAgenticAskChat(question);
+    }
+
     const requestId = ++requestIdRef.current;
     activeRequestId.current = requestId;
     setThread((prev) => [
@@ -1142,6 +1220,7 @@ export function App() {
               onAgentApply={onAgentApply}
               onAgentReject={onAgentReject}
               onAgentRevert={onAgentRevert}
+              agenticAskEnabled={agenticAskEnabled}
               sources={lastSources}
               excludedSources={excludedSources}
               onToggleSource={toggleSource}
@@ -1169,6 +1248,12 @@ export function App() {
         <SettingsDialog
           rightTab={rightTab}
           onRightTabChange={setRightTab}
+          agenticAsk={agenticAskEnabled}
+          agenticAskEnvDefault={agenticAskEnvDefault}
+          onAgenticAskChange={(enabled) => {
+            writeAgenticAskPref(window.localStorage, enabled);
+            setAgenticAskRev((v) => v + 1);
+          }}
           onResetLayout={() => {
             vaultRail.reset();
             rightRail.reset();

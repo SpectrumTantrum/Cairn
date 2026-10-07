@@ -450,6 +450,11 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle("app:desktopFeatures", () => ({
+    /** When `CAIRN_AGENTIC_ASK=1`, agentic Ask is on unless the user toggles it off in Settings. */
+    agenticAskEnvDefault: process.env.CAIRN_AGENTIC_ASK === "1",
+  }));
+
   ipcMain.handle("ollama:check", async () => {
     try {
       const provider = getModelProvider();
