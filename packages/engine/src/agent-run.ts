@@ -22,6 +22,7 @@
 import { createHash } from "node:crypto";
 import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
+import type { RetrievalSeedOption } from "./ask-agent.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel } from "./chat.js";
 import { getModelProvider } from "./model-provider.js";
@@ -58,6 +59,11 @@ export interface AgentRunOptions {
   k?: number;
   mode?: Mode;
   scope?: string[];
+  /**
+   * Hybrid/lexical retrieval injected as SOURCES on the first turn. Default `true` (legacy Agent
+   * behaviour). Set `false` when the model should rely on read_note / search tools instead.
+   */
+  retrievalSeed?: RetrievalSeedOption;
   /** Fired as each proposal is collected (for streaming cards to the UI). The loop still never applies. */
   onProposal?: (proposal: EditProposal) => void;
 }
@@ -134,7 +140,15 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
   const stepCap = opts.stepCap ?? DEFAULT_AGENT_STEP_CAP;
   const k = opts.k ?? 6;
 
-  const { hits } = await search(opts.index, opts.goal, { k, mode: opts.mode, scope: opts.scope });
+  const useSeed = opts.retrievalSeed !== false;
+  const seedConfig = typeof opts.retrievalSeed === "object" ? opts.retrievalSeed : {};
+  const { hits } = useSeed
+    ? await search(opts.index, opts.goal, {
+        k: seedConfig.k ?? k,
+        mode: seedConfig.mode ?? opts.mode,
+        scope: opts.scope,
+      })
+    : { hits: [] as SearchHit[] };
 
   if (!provider.chatWithTools) {
     return {
@@ -153,12 +167,13 @@ export async function runAgent(opts: AgentRunOptions): Promise<AgentRunResult> {
     .map((h, i) => `[${i + 1}] ${h.file}:${h.line}${h.heading ? ` > ${h.heading}` : ""}\n${h.text}`)
     .join("\n\n");
 
+  const userContent = useSeed
+    ? `SOURCES:\n${sourcesBlock || "(no notes retrieved for this goal — use read_note to gather context)"}\n\nTASK: ${opts.goal}`
+    : `TASK: ${opts.goal}\n\nNo retrieval seed was injected — use read_note to read notes before proposing edits.`;
+
   const messages: AgentMessage[] = [
     { role: "system", content: AGENT_SYSTEM },
-    {
-      role: "user",
-      content: `SOURCES:\n${sourcesBlock || "(no notes retrieved for this goal — use read_note to gather context)"}\n\nTASK: ${opts.goal}`,
-    },
+    { role: "user", content: userContent },
   ];
 
   const proposals: EditProposal[] = [];

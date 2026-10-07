@@ -64,6 +64,16 @@ export interface Index {
   /** FTS5 keyword arm; same `scope` semantics as {@link denseArm}. */
   ftsArm(match: string, pool: number, scope?: readonly string[]): { id: number; rank: number }[];
 
+  /** Distinct vault-relative Markdown paths present in the index (sorted). */
+  listFiles(scope?: readonly string[]): string[];
+
+  /** Case-insensitive substring matches over indexed chunk text (agentic grep). */
+  grepChunks(
+    needle: string,
+    limit: number,
+    scope?: readonly string[],
+  ): { file: string; line: number; heading: string; text: string }[];
+
   close(): void;
 }
 
@@ -255,6 +265,42 @@ export class SqliteIndex implements Index {
     }
   }
 
+  listFiles(scope?: readonly string[]): string[] {
+    const scoped = scope !== undefined && scope.length > 0;
+    const sql = scoped
+      ? `SELECT DISTINCT file FROM chunks WHERE file IN (SELECT value FROM json_each(?)) ORDER BY file`
+      : `SELECT DISTINCT file FROM chunks ORDER BY file`;
+    const stmt = this.db.prepare(sql);
+    const rows = (scoped ? stmt.all(JSON.stringify(scope)) : stmt.all()) as { file: string }[];
+    return rows.map((r) => r.file);
+  }
+
+  grepChunks(
+    needle: string,
+    limit: number,
+    scope?: readonly string[],
+  ): { file: string; line: number; heading: string; text: string }[] {
+    if (!needle) return [];
+    const scoped = scope !== undefined && scope.length > 0;
+    const cap = Math.max(1, limit | 0);
+    const sql = scoped
+      ? `SELECT file, line, heading, text FROM chunks
+           WHERE instr(lower(text), lower(?)) > 0
+             AND file IN (SELECT value FROM json_each(?))
+           LIMIT ${cap}`
+      : `SELECT file, line, heading, text FROM chunks
+           WHERE instr(lower(text), lower(?)) > 0
+           LIMIT ${cap}`;
+    const stmt = this.db.prepare(sql);
+    const rows = (scoped ? stmt.all(needle, JSON.stringify(scope)) : stmt.all(needle)) as {
+      file: string;
+      line: number;
+      heading: string;
+      text: string;
+    }[];
+    return rows;
+  }
+
   close(): void {
     this.db.close();
   }
@@ -378,6 +424,33 @@ export class InMemoryIndex implements Index {
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, pool).map((s, idx) => ({ id: s.id, rank: idx + 1 }));
+  }
+
+  listFiles(scope?: readonly string[]): string[] {
+    const inScope = scopeFilter(scope);
+    const set = new Set<string>();
+    for (const chunk of this.chunks.values()) {
+      if (inScope(chunk.file)) set.add(chunk.file);
+    }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  grepChunks(
+    needle: string,
+    limit: number,
+    scope?: readonly string[],
+  ): { file: string; line: number; heading: string; text: string }[] {
+    if (!needle) return [];
+    const inScope = scopeFilter(scope);
+    const n = needle.toLowerCase();
+    const out: { file: string; line: number; heading: string; text: string }[] = [];
+    for (const chunk of this.chunks.values()) {
+      if (!inScope(chunk.file)) continue;
+      if (!chunk.text.toLowerCase().includes(n)) continue;
+      out.push({ file: chunk.file, line: chunk.line, heading: chunk.heading, text: chunk.text });
+      if (out.length >= limit) break;
+    }
+    return out;
   }
 
   close(): void {

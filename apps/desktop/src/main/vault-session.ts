@@ -2,11 +2,14 @@ import {
   ask,
   ChatThread,
   diffLines,
+  discoverMarkdownFiles,
   generateStudioNote,
   indexVault,
   openIndex,
   runAgent,
+  runAskAgent,
   search,
+  type AskAgentResult,
   type AskResult,
   type ChatSendResult,
   type EditProposal,
@@ -307,6 +310,42 @@ export class VaultSession {
 
     return this.withIndex(vaultPath, (index) =>
       ask(index, trimmed, { mode: "auto", model: opts.model, scope: opts.scope }),
+    );
+  }
+
+  /**
+   * Agentic Ask (read-only tool loop: list / find / grep / read / open). Hybrid retrieval is
+   * opt-in via `retrievalSeed` — default path is tool-driven search, not an always-on RAG bag.
+   */
+  async askAgent(
+    question: string,
+    opts: { model?: string; scope?: string[]; retrievalSeed?: boolean } = {},
+  ): Promise<AskAgentResult> {
+    const vaultPath = this.requireVault();
+    this.assertIndexed(vaultPath);
+    const trimmed = question.trim();
+    if (!trimmed) {
+      throw new Error("Ask needs a question.");
+    }
+
+    const listNotes = async (prefix?: string) => {
+      const abs = discoverMarkdownFiles(vaultPath);
+      const rel = abs.map((p) => relative(vaultPath, p).split(sep).join("/"));
+      if (!prefix?.trim()) return rel;
+      const norm = prefix.replace(/\\/g, "/").replace(/^\.\//, "");
+      return rel.filter((p) => p === norm || p.startsWith(`${norm}/`));
+    };
+
+    return this.withIndex(vaultPath, (index) =>
+      runAskAgent({
+        index,
+        question: trimmed,
+        model: opts.model,
+        scope: opts.scope,
+        retrievalSeed: opts.retrievalSeed ?? false,
+        readNote: async (rel) => this.readSource(rel),
+        listNotes,
+      }),
     );
   }
 

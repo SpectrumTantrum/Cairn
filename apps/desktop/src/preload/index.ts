@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import type { AskResult, ChatSendResult, IndexStats, ProviderPreset, SearchHit } from "@cairn/engine";
+import type { AskAgentResult, AskResult, ChatSendResult, IndexStats, ProviderPreset, SearchHit } from "@cairn/engine";
 import type {
   AgentApplyResult,
   AgentStartResult,
@@ -20,6 +20,7 @@ import type {
 export type {
   AgentApplyResult,
   AgentStartResult,
+  AskAgentResult,
   AskResult,
   ChatSendPayload,
   ChatSendResult,
@@ -44,6 +45,11 @@ export interface CairnApi {
   indexVault(opts: { lexical: boolean }): Promise<IndexStats>;
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string, opts?: { model?: string; scope?: string[] }): Promise<AskResult>;
+  /** Agentic Ask (read-only tool loop). Not wired into Chat UI yet — engine scaffolding IPC. */
+  askAgentVault(
+    question: string,
+    opts?: { model?: string; scope?: string[]; retrievalSeed?: boolean },
+  ): Promise<AskAgentResult>;
   /** Multi-turn streaming chat. Tokens arrive via `onChatToken`; resolves with the full result. */
   chatSend(payload: ChatSendPayload): Promise<ChatSendResult>;
   /** Reset the active thread (new-thread ⟲). */
@@ -125,6 +131,7 @@ const api: CairnApi = {
   indexVault: (opts) => ipcRenderer.invoke("vault:index", opts),
   searchVault: (query) => ipcRenderer.invoke("vault:search", query),
   askVault: (question, opts) => ipcRenderer.invoke("vault:ask", { question, ...opts }),
+  askAgentVault: (question, opts) => ipcRenderer.invoke("vault:askAgent", { question, ...opts }),
   chatSend: (payload) => ipcRenderer.invoke("chat:send", payload),
   resetChat: () => ipcRenderer.invoke("chat:reset"),
   onChatToken: (listener) => subscribe<ChatTokenEvent>("chat:token", listener),
