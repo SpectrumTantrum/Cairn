@@ -1,6 +1,112 @@
 // Local model transport seam (ADR-0002): Ollama today, BYOK cloud adapters later.
 // HTTP only — no Electron/DOM. Callers use getModelProvider() or inject via setModelProvider() in tests.
 
+
+// ---- Ollama HTTP budgets ----------------------------------------------------
+// Node/Electron `fetch` is undici. Undici defaults `headersTimeout`/`bodyTimeout` to
+// 300_000 ms (5 min). Non-streaming `/api/chat` (used by `chatWithTools`) does not
+// send response headers until generation finishes, so a slow local model under load
+// hits HeadersTimeoutError and surfaces as opaque "fetch failed" → "Local Ollama
+// request failed". Streaming classic Ask resets body timeouts on each token, so it
+// survives the same load. Raise the undici ceilings and pair them with AbortSignal
+// so agentic Ask can finish OR fail with an explicit timeout message.
+
+/** Per-request budget for listModels / tags. */
+export const OLLAMA_TAGS_TIMEOUT_MS = 30_000;
+/** Per-request budget for embeddings. */
+export const OLLAMA_EMBED_TIMEOUT_MS = 120_000;
+/** Per-request budget for non-streaming chat (classic one-shot `ask`). */
+export const OLLAMA_CHAT_TIMEOUT_MS = 600_000;
+/** Per-request budget for streaming chat (classic `chat:send`). */
+export const OLLAMA_CHAT_STREAM_TIMEOUT_MS = 600_000;
+/**
+ * Per-request budget for one non-streaming tool-calling turn (`chatWithTools`).
+ * Must exceed undici's 300s default — agentic Ask and Agent mode use this path.
+ */
+export const OLLAMA_CHAT_TOOLS_TIMEOUT_MS = 600_000;
+
+const ollamaAgentByTimeout = new Map<number, object>();
+
+async function ollamaDispatcher(timeoutMs: number): Promise<object | undefined> {
+  const cached = ollamaAgentByTimeout.get(timeoutMs);
+  if (cached) return cached;
+  try {
+    // undici ships with Node; keep the import dynamic so the engine stays runnable
+    // even if a bundler cannot statically resolve the package.
+    const undici = (await import("undici")) as {
+      Agent: new (opts: {
+        headersTimeout?: number;
+        bodyTimeout?: number;
+        connect?: { timeout?: number };
+      }) => object;
+    };
+    const agent = new undici.Agent({
+      headersTimeout: timeoutMs,
+      bodyTimeout: timeoutMs,
+      connect: { timeout: 30_000 },
+    });
+    ollamaAgentByTimeout.set(timeoutMs, agent);
+    return agent;
+  } catch {
+    return undefined;
+  }
+}
+
+function isTimeoutError(err: unknown): boolean {
+  const seen = new Set<unknown>();
+  let cur: unknown = err;
+  while (cur && typeof cur === "object" && !seen.has(cur)) {
+    seen.add(cur);
+    const e = cur as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown };
+    const name = typeof e.name === "string" ? e.name : "";
+    const code = typeof e.code === "string" ? e.code : "";
+    const message = typeof e.message === "string" ? e.message : "";
+    if (
+      name === "HeadersTimeoutError" ||
+      name === "BodyTimeoutError" ||
+      name === "AbortError" ||
+      name === "TimeoutError" ||
+      code === "UND_ERR_HEADERS_TIMEOUT" ||
+      code === "UND_ERR_BODY_TIMEOUT" ||
+      code === "ABORT_ERR" ||
+      /headers timeout|body timeout|aborted due to timeout|The operation was aborted/i.test(message)
+    ) {
+      return true;
+    }
+    cur = e.cause;
+  }
+  return false;
+}
+
+/** Thrown when an Ollama HTTP call exceeds its budget (allow-listed by desktop user-error). */
+export class OllamaTimeoutError extends Error {
+  readonly timeoutMs: number;
+  readonly label: string;
+  constructor(label: string, timeoutMs: number, cause?: unknown) {
+    const secs = Math.round(timeoutMs / 1000);
+    super(
+      `Local Ollama request timed out after ${secs}s (${label}). The model may be too slow under load for this path — retry when the machine is quieter, use a faster model, or turn off agentic Ask.`,
+    );
+    this.name = "OllamaTimeoutError";
+    this.timeoutMs = timeoutMs;
+    this.label = label;
+    if (cause !== undefined) (this as Error & { cause?: unknown }).cause = cause;
+  }
+}
+
+async function ollamaFetch(url: string, init: RequestInit | undefined, timeoutMs: number, label: string): Promise<Response> {
+  const dispatcher = await ollamaDispatcher(timeoutMs);
+  const signal = AbortSignal.timeout(timeoutMs);
+  const opts: Record<string, unknown> = { ...(init ?? {}), signal };
+  if (dispatcher !== undefined) opts.dispatcher = dispatcher;
+  try {
+    return await fetch(url, opts as RequestInit);
+  } catch (err) {
+    if (isTimeoutError(err)) throw new OllamaTimeoutError(label, timeoutMs, err);
+    throw err;
+  }
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -107,7 +213,7 @@ export class OllamaClient implements ModelProvider {
   constructor(private readonly baseUrl = process.env.OLLAMA_HOST || "http://localhost:11434") {}
 
   async listModels(): Promise<string[]> {
-    const r = await fetch(`${this.baseUrl}/api/tags`);
+    const r = await ollamaFetch(`${this.baseUrl}/api/tags`, undefined, OLLAMA_TAGS_TIMEOUT_MS, "tags");
     if (!r.ok) throw new Error(`HTTP ${r.status} from ${this.baseUrl}/api/tags`);
     const j = (await r.json()) as { models?: { name: string }[] };
     return (j.models ?? []).map((m) => m.name);
@@ -123,11 +229,16 @@ export class OllamaClient implements ModelProvider {
   }
 
   async embed(model: string, input: string[]): Promise<number[][]> {
-    const r = await fetch(`${this.baseUrl}/api/embed`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ model, input }),
-    });
+    const r = await ollamaFetch(
+      `${this.baseUrl}/api/embed`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model, input }),
+      },
+      OLLAMA_EMBED_TIMEOUT_MS,
+      "embed",
+    );
     if (!r.ok) {
       const body = await r.text().catch(() => "");
       throw new Error(`HTTP ${r.status} from /api/embed: ${body.slice(0, 200)}`);
@@ -142,11 +253,16 @@ export class OllamaClient implements ModelProvider {
     if (think === false) body.think = false;
 
     const post = () =>
-      fetch(`${this.baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      ollamaFetch(
+        `${this.baseUrl}/api/chat`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        OLLAMA_CHAT_TIMEOUT_MS,
+        "chat",
+      );
 
     let r = await post();
     if (!r.ok && body.think !== undefined) {
@@ -171,11 +287,16 @@ export class OllamaClient implements ModelProvider {
     if (think === false) body.think = false;
 
     const post = () =>
-      fetch(`${this.baseUrl}/api/chat`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      ollamaFetch(
+        `${this.baseUrl}/api/chat`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        OLLAMA_CHAT_STREAM_TIMEOUT_MS,
+        "chat-stream",
+      );
 
     let r = await post();
     if (!r.ok && body.think !== undefined) {
@@ -258,11 +379,16 @@ export class OllamaClient implements ModelProvider {
       }),
     };
 
-    const r = await fetch(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const r = await ollamaFetch(
+      `${this.baseUrl}/api/chat`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+      "chat-with-tools",
+    );
     if (!r.ok) {
       const t = await r.text().catch(() => "");
       throw new Error(`HTTP ${r.status} from /api/chat (tools): ${t.slice(0, 200)}`);

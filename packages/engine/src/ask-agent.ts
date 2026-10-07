@@ -19,6 +19,14 @@ import {
 /** Default hard step cap for read-only Ask agent loops (lower than write Agent ADR-0008). */
 export const DEFAULT_ASK_AGENT_STEP_CAP = 16;
 
+/**
+ * Default wall-clock budget for one agentic Ask run (all tool turns combined).
+ * Separates "one slow Ollama turn" (per-request OLLAMA_CHAT_TOOLS_TIMEOUT_MS) from
+ * "the whole loop has been grinding too long" — under CPU thrash a 4B tool loop can
+ * burn multiple minutes before undici's old 5-min headersTimeout would have fired.
+ */
+export const DEFAULT_ASK_AGENT_WALL_MS = 480_000;
+
 export type RetrievalSeedOption = boolean | { k?: number; mode?: Mode };
 
 export interface AskAgentOptions {
@@ -30,6 +38,8 @@ export interface AskAgentOptions {
   listNotes?: (prefix?: string) => Promise<string[]>;
   model?: string;
   stepCap?: number;
+  /** Wall-clock budget for the whole loop (ms). Default DEFAULT_ASK_AGENT_WALL_MS. */
+  wallMs?: number;
   mode?: Mode;
   scope?: string[];
   k?: number;
@@ -49,7 +59,7 @@ export interface AskAgentResult {
   /** Seed hits when retrievalSeed was enabled (not counted as "opened" by default). */
   seedHits: SearchHit[];
   steps: number;
-  stopReason: "done" | "step-cap" | "no-tool-support";
+  stopReason: "done" | "step-cap" | "timeout" | "no-tool-support";
   grounded: boolean;
   model?: string;
 }
@@ -86,6 +96,8 @@ function buildUserTurn(question: string, seedBlock: string | null): string {
 export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult> {
   const provider = getModelProvider();
   const stepCap = opts.stepCap ?? DEFAULT_ASK_AGENT_STEP_CAP;
+  const wallMs = opts.wallMs ?? DEFAULT_ASK_AGENT_WALL_MS;
+  const startedAt = Date.now();
   const defaultK = opts.k ?? 8;
 
   let seedHits: SearchHit[] = [];
@@ -139,6 +151,14 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   for (;;) {
     if (steps >= stepCap) {
       stopReason = "step-cap";
+      break;
+    }
+    if (Date.now() - startedAt >= wallMs) {
+      stopReason = "timeout";
+      if (!answer) {
+        answer =
+          "Agentic Ask timed out before finishing. Retry when the machine is quieter, use a faster model, or turn off agentic Ask.";
+      }
       break;
     }
     const turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS);
