@@ -88,7 +88,7 @@ node packages/engine/dist/cli.js ask "why did we choose X over Y?" --in /path/to
 ## Principles
 
 - **Local-first.** No telemetry. Network calls go only to model endpoints you configure: Ollama on localhost, or a cloud endpoint you add.
-- **Cited.** Search results name the note as `file:line › heading`. Clicking a citation opens the cited note, at the matched heading when Ask located the passage. Otherwise the chip says 'file' and opens the top of the note.
+- **Cited.** Search results name the note as `file:line › heading`. With agentic Ask on, clicking a citation opens the cited note, at the matched heading when Ask located the passage. Otherwise the chip says 'file' and opens the top of the note.
 - **Permissive-license-only.** MIT / Apache-2.0 / BSD / MPL dependencies only. AGPL/GPL dependencies are excluded.
 
 ## License
