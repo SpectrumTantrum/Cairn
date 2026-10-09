@@ -548,6 +548,13 @@ button {
   color: var(--text-muted);
   font-style: italic;
 }
+/* Inline [path:line] chips sit in the prose; the citation row below stays block pills. */
+.assistant-text .citation-card.citation-card-pill {
+  display: inline-flex;
+  vertical-align: baseline;
+  margin: 0 0.15em;
+  max-width: 100%;
+}
 .assistant-reason {
   font-size: var(--fs-meta);
   color: var(--text-faint);

@@ -6,7 +6,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { basename, typeChip, citationTitle, vaultPathsEqual } = await import("../out-test/cite-format.js");
+const { basename, typeChip, citationLineLabel, citationTitle, vaultPathsEqual } = await import(
+  "../out-test/cite-format.js"
+);
 
 test("basename returns the final path segment", () => {
   assert.equal(basename("notes/sub/file.md"), "file.md");
@@ -39,6 +41,14 @@ test("typeChip uppercases unknown extensions", () => {
 test("citationTitle formats the open-target hover string", () => {
   assert.equal(citationTitle("notes/a.md", 42), "Open notes/a.md at line 42");
   assert.equal(citationTitle("b.md", 1), "Open b.md at line 1");
+});
+
+test("unresolved whole-file cites are labeled file, not line 1", () => {
+  assert.equal(citationLineLabel(0), "file");
+  assert.equal(citationLineLabel(21), "21");
+  assert.equal(citationLineLabel(1), "1");
+  assert.equal(citationTitle("notes/project-heron.md", 0), "Open notes/project-heron.md (file)");
+  assert.equal(citationTitle("notes/project-heron.md", 0).includes("line 1"), false);
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

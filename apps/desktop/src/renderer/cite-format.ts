@@ -20,9 +20,21 @@ export function typeChip(path: string): string {
   return ext.toUpperCase();
 }
 
-/** Hover title for a citation open target: "Open <path> at line <n>". */
+/**
+ * Line stored on a citation that could not be matched to a passage.
+ * The chip and tooltip say "file"; opening the note still lands at the top.
+ */
+export const FILE_CITE_LINE = 0;
+
+/** Chip suffix: a real line number, or "file" when the passage could not be matched. */
+export function citationLineLabel(line: number): string {
+  return line > 0 ? String(line) : "file";
+}
+
+/** Hover title for a citation open target: "Open <path> at line <n>", or "(file)". */
 export function citationTitle(file: string, line: number): string {
-  return `Open ${file} at line ${line}`;
+  if (line > 0) return `Open ${file} at line ${line}`;
+  return `Open ${file} (file)`;
 }
 
 /** Vault-relative paths that refer to the same note (case-insensitive, for cite ↔ editor match). */
