@@ -4,9 +4,14 @@
 // A whole-file `read()` is stored at line 1 with a snippet of the file start. The cited
 // fact is often later in that text. Locate the answer's passage in the file and point
 // the chip at the enclosing heading (or the matched line) so the tooltip and the click
-// target are the same line.
+// target are the same line. A read that still cannot be matched is labeled "file"
+// (line FILE_CITE_LINE) and dropped when the same note already has a resolved chip.
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
+import { FILE_CITE_LINE } from "./cite-format.js";
+
+/** Answer prose split around inline `[path:line]` cites. */
+export type InlineAnswerSegment = { kind: "text"; text: string } | { kind: "cite"; hit: SearchHit };
 
 /** Shared-word run long enough to be a passage, not a heading title or a short overlap. */
 const MIN_PASSAGE_WORDS = 4;
@@ -167,18 +172,54 @@ function readBody(hit: SearchHit, sources: SearchHit[]): string {
  * move that chip to the passage's heading line and show the passage as the snippet.
  * Find/grep/open hits are left alone so a real heading search still wins.
  */
+/** Unmatched whole-file read: no passage line to show. Heading-bearing chips stay. */
+function asUnresolvedWholeFile(hit: SearchHit): SearchHit {
+  if (hit.heading?.trim()) return hit;
+  return { ...hit, line: FILE_CITE_LINE };
+}
+
 function retargetWholeFileRead(hit: SearchHit, answer: string, sources: SearchHit[]): SearchHit {
   if (hit.arms !== "read") return hit;
   const content = readBody(hit, sources);
-  if (!content.trim() || !answer.trim()) return hit;
+  if (!content.trim() || !answer.trim()) return asUnresolvedWholeFile(hit);
   const located = locateCitedPassage(answer, content);
-  if (!located) return hit;
+  if (!located) return asUnresolvedWholeFile(hit);
   return {
     ...hit,
     line: located.line,
     heading: located.heading,
     snippet: located.snippet,
   };
+}
+
+function isUnresolvedWholeFileChip(hit: SearchHit): boolean {
+  return hit.arms === "read" && hit.line <= 0 && !hit.heading?.trim();
+}
+
+function vaultFileKey(file: string): string {
+  return normVaultPath(file);
+}
+
+/**
+ * One note can produce both a heading/passage chip and the original whole-file read.
+ * Keep the resolved chip. Collapse leftover unmatched reads to a single "file" chip.
+ */
+function dropUnresolvedWholeFileShadows(hits: SearchHit[]): SearchHit[] {
+  const filesWithResolved = new Set<string>();
+  for (const hit of hits) {
+    if (!isUnresolvedWholeFileChip(hit)) filesWithResolved.add(vaultFileKey(hit.file));
+  }
+  const kept: SearchHit[] = [];
+  const seenUnresolved = new Set<string>();
+  for (const hit of hits) {
+    if (isUnresolvedWholeFileChip(hit)) {
+      const key = vaultFileKey(hit.file);
+      if (filesWithResolved.has(key) || seenUnresolved.has(key)) continue;
+      seenUnresolved.add(key);
+    }
+    kept.push(hit);
+  }
+  return kept;
 }
 
 /**
@@ -232,7 +273,106 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
     out.push(hit);
   }
 
-  return out;
+  return dropUnresolvedWholeFileShadows(out);
+}
+
+const INLINE_PATH_CITE = /\[([^\[\]\n]+?):(\d+)\]/g;
+
+/** `[path:line]` — a path has a slash or extension. Bracket numbers like `[1]` are prose. */
+function isInlineCitePath(raw: string): boolean {
+  const path = raw.trim();
+  if (!path || /\s/.test(path)) return false;
+  return path.includes(".") || path.includes("/") || path.includes("\\");
+}
+
+function normVaultPath(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
+}
+
+function pathBasename(path: string): string {
+  const norm = normVaultPath(path);
+  const slash = norm.lastIndexOf("/");
+  return slash === -1 ? norm : norm.slice(slash + 1);
+}
+
+function hitsForInlinePath(sources: readonly SearchHit[], citedPath: string): SearchHit[] {
+  const want = normVaultPath(citedPath);
+  const full = sources.filter((s) => normVaultPath(s.file) === want);
+  if (full.length > 0) return full;
+  const base = pathBasename(citedPath);
+  if (!base) return [];
+  const byBase = sources.filter((s) => pathBasename(s.file) === base);
+  const files = new Set(byBase.map((s) => normVaultPath(s.file)));
+  return files.size === 1 ? byBase : [];
+}
+
+/** Ignore the model's line number. Prefer a heading or passage chip over a file-level read. */
+function preferResolvedHit(hits: readonly SearchHit[], citedLine: number): SearchHit | undefined {
+  if (hits.length === 0) return undefined;
+  const resolved = hits.filter((h) => h.line > 0 || !!h.heading?.trim());
+  const pool = resolved.length > 0 ? resolved : hits;
+  if (pool.length === 1) return pool[0];
+  const atCitedLine = pool.find((h) => citedLine > 1 && h.line === citedLine);
+  if (atCitedLine) return atCitedLine;
+  const headed = pool.find((h) => !!h.heading?.trim() && h.line > 0);
+  if (headed) return headed;
+  return pool.find((h) => h.line > 0) ?? pool[0];
+}
+
+function pushText(segments: InlineAnswerSegment[], text: string): void {
+  if (!text) return;
+  const last = segments[segments.length - 1];
+  if (last?.kind === "text") last.text += text;
+  else segments.push({ kind: "text", text });
+}
+
+/**
+ * Turn `[path:line]` markers into citation chips for a source the agent actually cited.
+ * The bracket's line is not trusted — the chip is the already-resolved hit for that file.
+ * Markers that match no cited source are removed, and the gap collapses to one space.
+ * `[1]`-style bracket numbers are left as prose.
+ */
+export function splitInlineCites(answer: string, sources: readonly SearchHit[]): InlineAnswerSegment[] {
+  const segments: InlineAnswerSegment[] = [];
+  const re = new RegExp(INLINE_PATH_CITE.source, "g");
+  let cursor = 0;
+  let trimLeading = false;
+
+  for (const match of answer.matchAll(re)) {
+    const index = match.index ?? 0;
+    const rawPath = match[1] ?? "";
+    if (!isInlineCitePath(rawPath)) continue;
+    const token = match[0];
+    let before = answer.slice(cursor, index);
+    if (trimLeading) {
+      before = before.replace(/^[ \t]+/, "");
+      trimLeading = false;
+    }
+    const hit = preferResolvedHit(hitsForInlinePath(sources, rawPath), Number(match[2]));
+    if (hit) {
+      pushText(segments, before);
+      segments.push({ kind: "cite", hit });
+    } else {
+      const after = answer.slice(index + token.length);
+      const beforeSpace = /[ \t]$/.test(before);
+      const afterSpace = /^[ \t]/.test(after);
+      if (beforeSpace && afterSpace) {
+        before = before.replace(/[ \t]+$/, " ");
+        trimLeading = true;
+      } else if (beforeSpace && !afterSpace) {
+        before = before.replace(/[ \t]+$/, "");
+      } else if (!beforeSpace && afterSpace && before.length === 0 && segments.length === 0) {
+        trimLeading = true;
+      }
+      pushText(segments, before);
+    }
+    cursor = index + token.length;
+  }
+
+  let rest = answer.slice(cursor);
+  if (trimLeading) rest = rest.replace(/^[ \t]+/, "");
+  pushText(segments, rest);
+  return segments;
 }
 
 /** 1-based line of a Markdown ATX heading (exact title match, case-insensitive). */

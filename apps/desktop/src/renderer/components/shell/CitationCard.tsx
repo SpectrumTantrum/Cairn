@@ -1,5 +1,5 @@
 import type { SearchHit } from "../../../shared/types.js";
-import { basename, citationTitle } from "../../cite-format";
+import { basename, citationLineLabel, citationTitle } from "../../cite-format";
 
 interface CitationCardProps {
   hit: SearchHit;
@@ -32,7 +32,7 @@ export function CitationCard({ hit, variant, index, showSnippet, onOpen }: Citat
       {index !== undefined ? <span className="citation-index">{index}</span> : null}
       <span className="citation-loc">
         {basename(hit.file)}
-        <span className="citation-line">:{hit.line}</span>
+        <span className="citation-line">:{citationLineLabel(hit.line)}</span>
         {hit.heading ? <span className="citation-heading"> › {hit.heading}</span> : null}
       </span>
       {withSnippet && hit.snippet ? <span className="citation-snippet">{hit.snippet}</span> : null}

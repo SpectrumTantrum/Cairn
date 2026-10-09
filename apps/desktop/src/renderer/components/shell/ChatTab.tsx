@@ -10,6 +10,7 @@ import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
 import type { AgentThreadTurn } from "./AgentTurn";
+import { AnswerText } from "./AnswerText";
 import { CitationCard } from "./CitationCard";
 
 /** Live tool-step list while agentic Ask runs (classic Ask leaves this unset). */
@@ -208,9 +209,12 @@ function AssistantTurn({
         ) : result.covered && result.model ? (
           <LocalMeta model={result.model} />
         ) : null}
-        <div className={`assistant-text${result.covered ? "" : " unsupported"}`}>
-          {result.answer}
-        </div>
+        <AnswerText
+          className={`assistant-text${result.covered ? "" : " unsupported"}`}
+          answer={result.answer}
+          sources={result.sources}
+          onCite={onCite}
+        />
         {!result.covered && result.reason ? (
           <div className="assistant-reason">{result.reason}</div>
         ) : null}

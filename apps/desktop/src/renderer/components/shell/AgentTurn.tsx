@@ -1,5 +1,6 @@
 import { Check, Sparkles, Undo2, X } from "lucide-react";
 import type { DiffLine, EditProposal, SearchHit } from "../../../shared/types.js";
+import { AnswerText } from "./AnswerText";
 import { CitationCard } from "./CitationCard";
 
 /** A proposal plus its live approval status in the UI. */
@@ -39,7 +40,14 @@ export function AgentTurn({ turn, onApply, onReject, onRevert, onCite }: AgentTu
         <Sparkles size={14} />
       </span>
       <div className="chat-assistant-body">
-        {turn.answer ? <div className="assistant-text">{turn.answer}</div> : null}
+        {turn.answer ? (
+          <AnswerText
+            className="assistant-text"
+            answer={turn.answer}
+            sources={turn.sources}
+            onCite={onCite}
+          />
+        ) : null}
 
         {turn.stopReason === "no-tool-support" ? (
           <div className="assistant-reason">
