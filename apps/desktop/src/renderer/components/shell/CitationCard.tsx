@@ -1,4 +1,5 @@
 import type { SearchHit } from "../../../shared/types.js";
+import { citationLandingLine } from "../../agent-citations";
 import { basename, citationLineLabel, citationTitle } from "../../cite-format";
 
 interface CitationCardProps {
@@ -22,17 +23,20 @@ interface CitationCardProps {
  */
 export function CitationCard({ hit, variant, index, showSnippet, onOpen }: CitationCardProps) {
   const withSnippet = showSnippet ?? variant === "full";
+  // Label and tooltip use the heading line the click opens. hit.line can be a
+  // later fact line; the heading on the chip stays the click target.
+  const landing = citationLandingLine(hit);
   return (
     <button
       type="button"
       className={`citation-card citation-card-${variant}`}
-      title={citationTitle(hit.file, hit.line)}
+      title={citationTitle(hit.file, landing, hit.heading)}
       onClick={() => onOpen(hit)}
     >
       {index !== undefined ? <span className="citation-index">{index}</span> : null}
       <span className="citation-loc">
         {basename(hit.file)}
-        <span className="citation-line">:{citationLineLabel(hit.line)}</span>
+        <span className="citation-line">:{citationLineLabel(landing)}</span>
         {hit.heading ? <span className="citation-heading"> › {hit.heading}</span> : null}
       </span>
       {withSnippet && hit.snippet ? <span className="citation-snippet">{hit.snippet}</span> : null}

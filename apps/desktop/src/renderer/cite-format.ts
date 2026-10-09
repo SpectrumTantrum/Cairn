@@ -31,10 +31,17 @@ export function citationLineLabel(line: number): string {
   return line > 0 ? String(line) : "file";
 }
 
-/** Hover title for a citation open target: "Open <path> at line <n>", or "(file)". */
-export function citationTitle(file: string, line: number): string {
-  if (line > 0) return `Open ${file} at line ${line}`;
-  return `Open ${file} (file)`;
+/**
+ * Hover title for a citation open target.
+ * A located passage is "Open <path> at line <n> › <heading>" when a heading is known.
+ * The line is the click target (the heading line), not a later fact line.
+ * An unmatched note is "Open <path> (file)".
+ */
+export function citationTitle(file: string, line: number, heading = ""): string {
+  if (line <= 0) return `Open ${file} (file)`;
+  const title = heading.trim();
+  if (title) return `Open ${file} at line ${line} › ${title}`;
+  return `Open ${file} at line ${line}`;
 }
 
 /** Vault-relative paths that refer to the same note (case-insensitive, for cite ↔ editor match). */

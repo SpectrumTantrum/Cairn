@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const {
+  citationLandingLine,
   citationsFromAskAgent,
   lineForMarkdownHeading,
   resolveCitationLine,
@@ -41,11 +42,10 @@ test("citationsFromAskAgent prefers opened anchors with source snippets", () => 
     grounded: true,
   };
   const cites = citationsFromAskAgent(result);
-  assert.equal(cites.length, 2);
+  assert.equal(cites.length, 1);
   assert.equal(cites[0].file, "notes/a.md");
   assert.equal(cites[0].snippet, "key fact");
-  assert.equal(cites[1].file, "notes/b.md");
-  assert.match(cites[1].snippet, /read body/);
+  assert.equal(cites.some((c) => c.file === "notes/b.md"), false);
 });
 
 test("lineForMarkdownHeading resolves ATX headings", () => {
@@ -222,7 +222,7 @@ test("heading search still lands on Section 2 at line 13", () => {
 test("whole-file read with no passage match is labeled file and opens at the top", () => {
   const source = readHit("notes/clean.md", cleanNote);
   const result = {
-    answer: "Bananas telescope through purple widgets overnight.",
+    answer: "Bananas telescope through purple widgets overnight. See [notes/clean.md:1].",
     sources: [source],
     opened: [],
     ...agentShell,
@@ -330,7 +330,7 @@ test("collapses duplicate unresolved reads of one file into a single file chip",
   const read = readHit("notes/project-heron.md", cleanNote);
   const again = { ...read, snippet: "second copy of the file start" };
   const result = {
-    answer: "Bananas telescope through purple widgets overnight.",
+    answer: "Bananas telescope through purple widgets overnight. See [notes/project-heron.md:1].",
     sources: [read, again],
     opened: [],
     ...agentShell,
@@ -344,7 +344,7 @@ test("collapses duplicate unresolved reads of one file into a single file chip",
 
 test("a line-1 find hit stays line 1", () => {
   const result = {
-    answer: "See [1].",
+    answer: "opens at the top",
     sources: [
       {
         file: "notes/top.md",
@@ -487,7 +487,7 @@ test("clean vault cite of project-heron.md:12 keeps one Section B chip at line 2
   assert.equal(flattenCites(segments), `See {21:Section B}. ${CLEAN_FACT}`);
 });
 
-test("unmatched reads of meeting-notes, reading-list, and recipes are labeled file", () => {
+test("reads the answer does not cite or match get no chip", () => {
   const files = ["meeting-notes.md", "reading-list.md", "recipes.md"];
   const cites = citationsFromAskAgent({
     answer: "Bananas telescope through purple widgets overnight.",
@@ -497,16 +497,7 @@ test("unmatched reads of meeting-notes, reading-list, and recipes are labeled fi
     opened: [],
     ...agentShell,
   });
-  assert.equal(cites.length, 3);
-  for (const file of files) {
-    const hit = cites.find((c) => c.file === file);
-    assert.ok(hit);
-    assert.equal(hit.line, FILE_CITE_LINE);
-    assert.equal(hit.heading, "");
-    assert.equal(citationLineLabel(hit.line), "file");
-    assert.equal(citationTitle(hit.file, hit.line), `Open ${file} (file)`);
-    assert.equal(resolveCitationLine(`# ${file}\n\nBody\n`, hit), 1);
-  }
+  assert.equal(cites.length, 0);
 });
 
 test("ambiguous basename inline cites are stripped and full paths still match", () => {
@@ -634,7 +625,11 @@ test("find, grep Section B, then read cites project-heron at line 21 for a terse
   assert.equal(cites[0].heading, "Section B");
   assert.equal(cites[0].arms, "grep");
   assert.equal(citationLineLabel(cites[0].line), "21");
-  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open project-heron.md at line 21");
+  assert.equal(citationLandingLine(cites[0]), resolveCitationLine(heronForGrep, cites[0]));
+  assert.equal(
+    citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading),
+    "Open project-heron.md at line 21 › Section B",
+  );
   assert.equal(resolveCitationLine(heronForGrep, cites[0]), 21);
 });
 
@@ -648,14 +643,119 @@ test("find, grep Section B, then read keeps the line-21 chip for a paraphrase", 
   assert.equal(resolveCitationLine(heronForGrep, cites[0]), 21);
 });
 
-test("find then read with a short answer stays a file chip when nothing was grepped", async () => {
+test("find then read with a short answer shows no chip when nothing was grepped", async () => {
+  // Three words cannot pass the 4-word matcher, and the answer cites no path.
+  // Without a located grep hit there is nothing for a chip to point at.
   const state = await searchThenMaybeGrepThenRead(false);
   const cites = heronChips(TERSE_ANSWER, state);
+  assert.equal(cites.length, 0);
+});
+
+test("citation tooltip line equals the click target line", () => {
+  const note = linesToNote({
+    1: "# Project Heron",
+    21: "## Section B",
+    25: CLEAN_FACT,
+  });
+  const hit = {
+    file: "project-heron.md",
+    line: 25,
+    heading: "Section B",
+    score: NaN,
+    cosine: NaN,
+    snippet: CLEAN_FACT,
+    text: note,
+    arms: "grep",
+  };
+  const click = resolveCitationLine(note, hit);
+  const landing = citationLandingLine(hit);
+  assert.equal(click, 21);
+  assert.equal(landing, click);
+  assert.equal(citationLineLabel(landing), "21");
+  assert.equal(citationTitle(hit.file, landing, hit.heading), "Open project-heron.md at line 21 › Section B");
+});
+
+test("an unused search hit gets no chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: CLEAN_FACT,
+    sources: [
+      readHit("notes/clean.md", cleanNote),
+      {
+        file: "notes/recipes.md",
+        line: 8,
+        heading: "Soup",
+        score: 1,
+        cosine: NaN,
+        snippet: "Bake the bread slowly until the crust is set.",
+        text: "Bake the bread slowly until the crust is set.",
+        arms: "find",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.some((c) => c.file === "notes/recipes.md"), false);
   assert.equal(cites.length, 1);
-  assert.equal(cites[0].line, FILE_CITE_LINE);
-  assert.equal(cites[0].heading, "");
-  assert.equal(cites[0].arms, "read");
-  assert.equal(citationLineLabel(cites[0].line), "file");
-  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open project-heron.md (file)");
-  assert.equal(resolveCitationLine(heronForGrep, cites[0]), 1);
+  assert.equal(cites[0].file, "notes/clean.md");
+  assert.equal(cites[0].line, 21);
+  assert.equal(cites[0].heading, "Section B");
+});
+
+test("a cited source keeps its chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: "Nothing in the prose overlaps the snippet. See [notes/cited.md:4].",
+    sources: [
+      {
+        file: "notes/cited.md",
+        line: 4,
+        heading: "Elsewhere",
+        score: 1,
+        cosine: NaN,
+        snippet: "unrelated bananas",
+        text: "unrelated bananas",
+        arms: "find",
+      },
+      {
+        file: "notes/other.md",
+        line: 2,
+        heading: "Nope",
+        score: 1,
+        cosine: NaN,
+        snippet: "search hit the answer never used",
+        text: "search hit the answer never used",
+        arms: "find",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "notes/cited.md");
+  assert.equal(cites[0].line, 4);
+  assert.equal(cites[0].heading, "Elsewhere");
+});
+
+test("a grep hit the answer did not use gets no chip beside a matched note", () => {
+  const cites = citationsFromAskAgent({
+    answer: CLEAN_FACT,
+    sources: [
+      readHit("notes/clean.md", cleanNote),
+      {
+        file: "notes/recipes.md",
+        line: 12,
+        heading: "Soup",
+        score: NaN,
+        cosine: NaN,
+        snippet: "Simmer the stock",
+        text: "Simmer the stock until it reduces.",
+        arms: "grep",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.some((c) => c.file === "notes/recipes.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "notes/clean.md");
+  assert.equal(cites[0].line, 21);
 });
