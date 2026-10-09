@@ -11,7 +11,7 @@ import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
 import type { AgentThreadTurn } from "./AgentTurn";
-import { AnswerText } from "./AnswerText";
+import { AnswerMarkdown, AnswerText } from "./AnswerText";
 import { CitationCard } from "./CitationCard";
 
 /** Live tool-step list and start time while agentic Ask runs (classic Ask leaves this unset). */
@@ -171,7 +171,9 @@ function StreamingTurn({
             <span className="dot-pulse" /> {status}
           </span>
         ) : (
-          <div className="assistant-text streaming">{text}</div>
+          <div className="assistant-text streaming">
+            <AnswerMarkdown text={text} />
+          </div>
         )}
       </div>
     </div>
