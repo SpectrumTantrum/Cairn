@@ -384,7 +384,12 @@ test("runAskAgent passes a bounded timeoutMs on the first tool turn", async () =
       retrievalSeed: false,
       wallMs: 60_000,
     });
-    assert.equal(sawTimeout, 60_000);
+    // timeoutMs is the wall deadline minus elapsed time, so it can be a few ms under 60000.
+    assert.equal(typeof sawTimeout, "number");
+    assert.ok(
+      sawTimeout > 59_000 && sawTimeout <= 60_000,
+      `timeoutMs ${sawTimeout} outside (59000, 60000]`,
+    );
   } finally {
     index.close();
   }
