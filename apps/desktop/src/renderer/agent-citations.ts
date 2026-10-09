@@ -24,6 +24,9 @@
 //
 // Each PDF page is its own location. A page the answer matches is cited as
 // `file p.N`. A PDF that was read and matches no page is still cited, labeled "file".
+// That file chip quotes the one read page that contains the answer. When no
+// page does, or more than one page ties, the chip has no snippet. The title
+// page is not a default.
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
 import { FILE_CITE_LINE, isPdfPath } from "./cite-format.js";
@@ -504,12 +507,33 @@ function keepAnswerCitations(hits: SearchHit[], result: AskAgentResult): SearchH
   });
 }
 
+function pageBody(page: SearchHit): string {
+  return (page.text ?? "").trim() || (page.snippet ?? "").trim();
+}
+
+/**
+ * The read page whose text contains the answer, when exactly one page does.
+ * A tie, or no overlap, means the page cannot be determined.
+ */
+function pdfAnswerPage(answer: string, pages: readonly SearchHit[]): SearchHit | undefined {
+  const scored = pages.map((page) => ({
+    page,
+    score: answerContentIn(`${page.text ?? ""}\n${page.snippet ?? ""}`, answer).length,
+  }));
+  const best = scored.reduce((max, item) => Math.max(max, item.score), 0);
+  if (best === 0) return undefined;
+  const winners = scored.filter((item) => item.score === best);
+  return winners.length === 1 ? winners[0].page : undefined;
+}
+
 /**
  * A file the agent read and answered from always yields a chip. A matched
  * passage is already in `kept`. What remains is labeled "file".
  * A PDF read is always answered-from for this fallback. A note is answered-from
  * when the answer's content words occur in it. Another read that holds the
  * answer's fact suppresses a note whose overlap is only the shared token.
+ * A PDF file chip quotes the unique read page that contains the answer, or
+ * nothing when that page cannot be determined.
  */
 function citeAnsweredReads(kept: SearchHit[], result: AskAgentResult): SearchHit[] {
   const cited = new Set(kept.map((hit) => vaultFileKey(hit.file)));
@@ -529,6 +553,13 @@ function citeAnsweredReads(kept: SearchHit[], result: AskAgentResult): SearchHit
     }
     const fileHit: SearchHit = { ...source, line: FILE_CITE_LINE, heading: "" };
     delete fileHit.page;
+    if (pdf) {
+      const pages = reads.filter((hit) => vaultFileKey(hit.file) === key && (hit.page ?? 0) > 0);
+      const chosen = pdfAnswerPage(result.answer, pages);
+      const body = chosen ? pageBody(chosen) : "";
+      fileHit.snippet = body ? clipSnippet(body) : "";
+      fileHit.text = body;
+    }
     out.push(fileHit);
   }
   return out;
