@@ -638,15 +638,54 @@ button {
   color: var(--text-muted);
   font-size: 13px;
 }
-.agentic-progress-steps {
-  margin: 0 0 8px;
-  padding-left: 1.15rem;
+.agentic-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--r-card);
+  background: var(--surface-raised);
+  border: 1px solid var(--divider);
+}
+.agentic-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.agentic-progress-working {
+  color: var(--text-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+.agentic-progress-elapsed {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: var(--fs-meta);
   color: var(--text-muted);
-  font-size: 12px;
+}
+.agentic-progress-status {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.agentic-progress-steps {
+  margin: 0;
+  padding-left: 1.15rem;
+  font-size: 12.5px;
   line-height: 1.45;
 }
 .agentic-progress-steps li {
-  margin: 2px 0;
+  margin: 3px 0;
+}
+.agentic-progress-steps li.is-done {
+  color: var(--text-faint);
+}
+.agentic-progress-steps li.is-current {
+  color: var(--text-strong);
+  font-weight: 600;
 }
 .dot-pulse {
   width: 6px;

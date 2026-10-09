@@ -14,6 +14,7 @@ import type {
   TreeSortMode,
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
+import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
 import { vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
@@ -94,20 +95,9 @@ function appendToken(thread: ChatTurn[], token: string): ChatTurn[] {
 function applyAgenticProgress(thread: ChatTurn[], progress: AskAgentProgress): ChatTurn[] {
   const last = thread[thread.length - 1];
   if (!last || last.role !== "assistant" || !last.streaming) return thread;
-  const agentic = last.agentic ?? { steps: [], status: "Searching your notes with tools…" };
-  if (progress.kind === "status") {
-    const next = thread.slice(0, -1);
-    next.push({ ...last, agentic: { ...agentic, status: progress.message } });
-    return next;
-  }
+  const agentic = last.agentic ?? initialAgenticProgress(Date.now());
   const next = thread.slice(0, -1);
-  next.push({
-    ...last,
-    agentic: {
-      steps: [...agentic.steps, progress.label],
-      status: "Running next step…",
-    },
-  });
+  next.push({ ...last, agentic: reduceAgenticProgress(agentic, progress) });
   return next;
 }
 
@@ -765,7 +755,7 @@ export function App() {
         role: "assistant",
         streaming: true,
         text: "",
-        agentic: { steps: [], status: "Searching your notes with tools…" },
+        agentic: initialAgenticProgress(Date.now()),
       },
     ]);
     setChatInput("");
