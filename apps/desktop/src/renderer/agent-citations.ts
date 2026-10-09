@@ -6,6 +6,12 @@
 // the chip at the enclosing heading (or the matched line) so the tooltip and the click
 // target are the same line. A read that still cannot be matched is labeled "file"
 // (line FILE_CITE_LINE) and dropped when the same note already has a resolved chip.
+//
+// The chip row only keeps notes the final answer cites or matches. A cite is an
+// `open` anchor or an inline `[path:line]`. A match is the 4-word passage overlap
+// below. Search, grep, and read hits that fail both are omitted. A single grep hit
+// already located past line 1 still shows when the answer cites or matches nothing,
+// so #66's Section B chip stays on that line. The 4-word threshold is unchanged.
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
 import { FILE_CITE_LINE } from "./cite-format.js";
@@ -280,9 +286,81 @@ function collapseWholeFile(group: SearchHit[]): SearchHit {
   return preferred;
 }
 
+function corpusForFile(file: string, hits: readonly SearchHit[]): string {
+  const key = vaultFileKey(file);
+  const parts: string[] = [];
+  for (const hit of hits) {
+    if (vaultFileKey(hit.file) !== key) continue;
+    if (hit.text) parts.push(hit.text);
+    if (hit.snippet) parts.push(hit.snippet);
+  }
+  return parts.join("\n");
+}
+
+/** Files named by inline `[path:line]` cites in the answer. */
+function filesCitedInAnswer(answer: string, hits: readonly SearchHit[]): Set<string> {
+  const keys = new Set<string>();
+  const re = new RegExp(INLINE_PATH_CITE.source, "g");
+  for (const match of answer.matchAll(re)) {
+    const raw = match[1] ?? "";
+    if (!isInlineCitePath(raw)) continue;
+    const matched = hitsForInlinePath(hits, raw);
+    if (matched.length > 0) {
+      for (const hit of matched) keys.add(vaultFileKey(hit.file));
+    } else {
+      keys.add(normVaultPath(raw));
+    }
+  }
+  return keys;
+}
+
+/**
+ * Notes the answer cites (`open` or `[path:line]`) or matches via the 4-word
+ * passage overlap. Distinctive-token matching is intentionally not used.
+ */
+function filesAnswerUses(
+  answer: string,
+  opened: readonly { path: string }[],
+  hits: readonly SearchHit[],
+): Set<string> {
+  const cited = filesCitedInAnswer(answer, hits);
+  const used = new Set<string>();
+  const seen = new Set<string>();
+  for (const hit of hits) {
+    const key = vaultFileKey(hit.file);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (opened.some((anchor) => vaultFileKey(anchor.path) === key) || cited.has(key)) {
+      used.add(key);
+      continue;
+    }
+    const corpus = corpusForFile(key, hits);
+    if (corpus.trim() && longestSharedSpan(answer, corpus)) used.add(key);
+  }
+  return used;
+}
+
+/**
+ * Drop tool hits the answer did not cite or match. When nothing was cited or
+ * matched, one grep passage located past line 1 still remains (#66).
+ */
+function keepAnswerCitations(hits: SearchHit[], result: AskAgentResult): SearchHit[] {
+  const used = filesAnswerUses(result.answer, result.opened, [...result.sources, ...hits]);
+  const grepFiles = new Set<string>();
+  for (const source of result.sources) {
+    if (source.arms === "grep" && source.line > 1) grepFiles.add(vaultFileKey(source.file));
+  }
+  const onlyLocatedGrep = used.size === 0 && grepFiles.size === 1;
+  return hits.filter((hit) => {
+    const key = vaultFileKey(hit.file);
+    if (used.has(key)) return true;
+    return onlyLocatedGrep && grepFiles.has(key) && hit.line > 1;
+  });
+}
+
 /**
  * Citations for the agentic Ask UI: prefer `opened[]` anchors (what the agent cited),
- * enriched from `sources`, then append any remaining tool-gathered sources.
+ * enriched from `sources`, then keep only notes the answer cites or matches.
  */
 export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
   const { sources, opened, answer } = result;
@@ -334,7 +412,7 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
     out.push(hit);
   }
 
-  return dropUnresolvedWholeFileShadows(out);
+  return keepAnswerCitations(dropUnresolvedWholeFileShadows(out), result);
 }
 
 const INLINE_PATH_CITE = /\[([^\[\]\n]+?):(\d+)\]/g;
