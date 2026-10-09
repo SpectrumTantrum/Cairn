@@ -1,8 +1,9 @@
 /**
  * Live progress for an in-flight agentic Ask run.
  * Pure state (no React) so the elapsed clock and step list can be unit-tested.
- * Copy reports that the run is still going and how long it has taken. It does
- * not estimate remaining time or describe the run as faster.
+ * Copy reports that the run is still going and how long it has taken.
+ * The clock is elapsed time only: no estimate, countdown, ETA, percent-done,
+ * or progress bar, and no claim that the run is faster.
  */
 
 /** Shown for the whole run, including long quiet stretches between tool steps. */

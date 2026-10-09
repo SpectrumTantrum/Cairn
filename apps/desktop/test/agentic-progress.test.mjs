@@ -1,8 +1,10 @@
 // Pure-logic gate for the agentic Ask progress panel. The React rendering has no
 // node harness; this locks the elapsed clock, the live step list, and the
-// "still working" copy. That copy must not imply the run is faster.
+// "still working" copy. That copy must not imply the run is faster, and the
+// screen must not add an estimate, countdown, ETA, percent-done, or progress bar.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const {
@@ -106,6 +108,76 @@ test("reducer keeps startedAt and a composing status marks every step done", () 
   for (const word of SPEED_WORDS) {
     assert.equal(viewText(view).includes(word), false, word);
   }
+});
+
+const ESTIMATE_PATTERNS = [
+  /\bETA\b/i,
+  /countdown/i,
+  /percent/i,
+  /estimate/i,
+  /\bremaining\b/i,
+  /time left/i,
+  /<progress\b/i,
+  /progressbar/i,
+  /progress-bar/i,
+  /aria-valuenow/i,
+  /aria-valuemax/i,
+  /aria-valuemin/i,
+];
+
+function assertNoEstimate(text) {
+  for (const pattern of ESTIMATE_PATTERNS) {
+    assert.equal(pattern.test(text), false, String(pattern));
+  }
+}
+
+test("elapsed clock only: no estimate, countdown, ETA, percent, or progress bar", () => {
+  const started = 10_000;
+  let state = initialAgenticProgress(started);
+  state = reduceAgenticProgress(state, {
+    kind: "status",
+    message: "Waiting for the model to call search tools…",
+  });
+  state = reduceAgenticProgress(state, {
+    kind: "tool",
+    step: 1,
+    name: "grep",
+    label: "Grepped for Section B",
+  });
+  state = reduceAgenticProgress(state, { kind: "status", message: "Thinking (step 2)…" });
+  const view = buildProgressView(state, started + 134_000);
+
+  assert.deepEqual(Object.keys(view).sort(), [
+    "elapsedText",
+    "showStatus",
+    "status",
+    "steps",
+    "workingLabel",
+  ]);
+  assert.equal(view.elapsedText, "2:14 elapsed");
+  assert.match(view.elapsedText, /^\d+:\d{2} elapsed$/);
+  assertNoEstimate(
+    [view.workingLabel, view.elapsedText, view.status, ...view.steps.map((step) => step.label)].join("\n"),
+  );
+
+  const panelFile = readFileSync(
+    new URL("../src/renderer/components/shell/ChatTab.tsx", import.meta.url),
+    "utf8",
+  );
+  const panelStart = panelFile.indexOf("function AgenticProgressPanel");
+  const panelEnd = panelFile.indexOf("function ErrorTurn");
+  assert.ok(panelStart !== -1 && panelEnd > panelStart);
+  const panel = panelFile.slice(panelStart, panelEnd).replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.equal(panel.includes("%"), false);
+  assertNoEstimate(panel);
+
+  const css = readFileSync(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  const cssStart = css.indexOf(".agentic-progress {");
+  const cssEnd = css.indexOf(".dot-pulse {");
+  assert.ok(cssStart !== -1 && cssEnd > cssStart);
+  const progressCss = css.slice(cssStart, cssEnd);
+  assert.deepEqual(progressCss.match(/\d+(?:\.\d+)?%/g), ["100%"]);
+  assertNoEstimate(progressCss);
 });
 
 test("the latest step is current only while the status equals its label", () => {
