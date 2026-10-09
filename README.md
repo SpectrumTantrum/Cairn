@@ -51,7 +51,7 @@ npm run desktop:preview
 npm run engine:build
 ```
 
-Root scripts: `build`, `desktop:dev`, `desktop:typecheck`, `desktop:build`, `desktop:preview`, `engine:build`.
+Root scripts: `build`, `desktop:dev`, `desktop:typecheck`, `desktop:build`, `desktop:preview`, `engine:build`, `check:lockfile`, `typecheck`.
 
 Engine CLI, after `npm run build` or `npm run engine:build` (the `@cairn/engine` `build` script emits `packages/engine/dist/cli.js`):
 

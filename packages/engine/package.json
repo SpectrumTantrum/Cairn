@@ -1,7 +1,7 @@
 {
   "name": "@cairn/engine",
   "version": "0.1.0",
-  "description": "Cairn / Mneme — headless local-first indexing & retrieval engine. Index a folder of Markdown and run grounded, cited hybrid (dense + FTS5 + RRF) search over it. No telemetry, no cloud; embeddings via local Ollama.",
+  "description": "Headless indexing, search and Ask engine for Cairn",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
