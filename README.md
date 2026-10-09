@@ -8,6 +8,8 @@ This repo has the desktop app and the headless engine `@cairn/engine` ([ADR-0001
 
 With agentic Ask on, the desktop app shows each search and tool step live. Clicking a citation opens the note at the cited heading.
 
+An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
+
 ## Enable agentic Ask
 
 Agentic Ask is a desktop setting. The engine CLI `ask` command is classic Ask.
