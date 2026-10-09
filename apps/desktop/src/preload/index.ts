@@ -68,6 +68,13 @@ export interface CairnApi {
   /** List the vault tree; `sort` chooses file order (name / mtime / size), default name. */
   listTree(sort?: TreeSortMode): Promise<TreeNode[]>;
   readSource(file: string): Promise<string>;
+  /** Show a vault PDF in the in-app viewer. `page` is 1-based. Bounds are CSS pixels. */
+  openPdf(payload: {
+    file: string;
+    page?: number;
+    bounds: { x: number; y: number; width: number; height: number };
+  }): Promise<void>;
+  hidePdf(): Promise<void>;
   writeSource(file: string, content: string): Promise<void>;
   // ---- Vault mutations (issue #21) ----
   /** Create a new (empty) file at a vault-relative path. Any extension (ADR-0009). */
@@ -148,6 +155,8 @@ const api: CairnApi = {
   onAskAgentProgress: (listener) => subscribe<AskAgentProgressEvent>("askAgent:progress", listener),
   listTree: (sort) => ipcRenderer.invoke("vault:listTree", sort),
   readSource: (file) => ipcRenderer.invoke("source:read", file),
+  openPdf: (payload) => ipcRenderer.invoke("pdf:open", payload),
+  hidePdf: () => ipcRenderer.invoke("pdf:hide"),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),
   createFile: (path) => ipcRenderer.invoke("vault:createFile", { path }),
   createFolder: (path) => ipcRenderer.invoke("vault:createFolder", { path }),

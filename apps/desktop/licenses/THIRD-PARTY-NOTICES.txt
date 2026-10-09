@@ -1,0 +1,10 @@
+Third-party notices for Cairn desktop.
+
+pdfjs-dist 5.4.296
+  License: Apache-2.0
+  Source: https://github.com/mozilla/pdf.js/tree/v5.4.296
+  Files: licenses/pdfjs-dist/LICENSE and licenses/pdfjs-dist/NOTICE
+         (packaged under the app's resources/licenses/pdfjs-dist/)
+  Standard fonts shipped inside pdfjs-dist (used to read text PDFs):
+    licenses/pdfjs-dist/LICENSE_LIBERATION  (SIL Open Font License 1.1)
+    licenses/pdfjs-dist/LICENSE_FOXIT       (BSD-style PDFium Authors notice)

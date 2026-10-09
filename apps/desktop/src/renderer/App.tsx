@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { vaultPathsEqual } from "./cite-format";
+import { isPdfPath, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -163,6 +163,8 @@ export function App() {
   // current buffer is in flight. Rapid double-clicks are dropped until it resolves so we
   // never double-save the dirty file or interleave a save with the buffer swap.
   const navigatingRef = useRef(false);
+  /** Vault PDF currently shown in the main-process viewer. `page` is 1-based. */
+  const [pdfTarget, setPdfTarget] = useState<{ path: string; page: number } | null>(null);
 
   // Engine status
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
@@ -455,23 +457,29 @@ export function App() {
    * rather than navigate-and-discard. `navigatingRef` drops re-entrant calls so a rapid
    * double-click can't double-save or interleave a save with the buffer swap.
    */
+  const savePendingNavigation = useCallback(async (): Promise<boolean> => {
+    const pending = pendingSaveBeforeNavigate({ activeNode, docKey, buffer, savedContent });
+    if (!pending) return true;
+    try {
+      await window.cairn.writeSource(pending.path, pending.content);
+      setSavedContent(pending.content);
+      // The just-saved file diverges from the index until a reindex.
+      setIndexState((prev) => (prev === "indexed" || prev === "stale" ? "stale" : prev));
+      return true;
+    } catch (err) {
+      // Save failed: do NOT navigate-and-discard. Keep the user on the dirty buffer.
+      setError(errorMessage(err));
+      return false;
+    }
+  }, [activeNode, docKey, buffer, savedContent]);
+
   const openMarkdown = useCallback(async (node: TreeNode, flashLine?: number) => {
     if (navigatingRef.current) return;
     navigatingRef.current = true;
     try {
-      const pending = pendingSaveBeforeNavigate({ activeNode, docKey, buffer, savedContent });
-      if (pending) {
-        try {
-          await window.cairn.writeSource(pending.path, pending.content);
-          setSavedContent(pending.content);
-          // The just-saved file diverges from the index until a reindex.
-          setIndexState((prev) => (prev === "indexed" || prev === "stale" ? "stale" : prev));
-        } catch (err) {
-          // Save failed: do NOT navigate-and-discard. Keep the user on the dirty buffer.
-          setError(errorMessage(err));
-          return;
-        }
-      }
+      const saved = await savePendingNavigation();
+      if (!saved) return;
+      setPdfTarget(null);
       setActiveNode(node);
       setLoading(true);
       setLoadError(null);
@@ -494,23 +502,82 @@ export function App() {
     } finally {
       navigatingRef.current = false;
     }
-  }, [activeNode, docKey, buffer, savedContent]);
+  }, [savePendingNavigation]);
+
+  const openPdf = useCallback(
+    async (path: string, page: number) => {
+      if (navigatingRef.current) return;
+      navigatingRef.current = true;
+      try {
+        const saved = await savePendingNavigation();
+        if (!saved) return;
+        const nextPage = page > 0 ? page : 1;
+        setPdfTarget((cur) => (cur && cur.path === path && cur.page === nextPage ? cur : { path, page: nextPage }));
+        setActiveNode({ name: basename(path), path, type: "other" });
+        setDocKey(null);
+        setBuffer("");
+        setSavedContent("");
+        setLoadError(null);
+        setLoading(false);
+        setFlash(null);
+      } finally {
+        navigatingRef.current = false;
+      }
+    },
+    [savePendingNavigation],
+  );
+
+  useEffect(() => {
+    if (!pdfTarget) {
+      void window.cairn.hidePdf();
+      return;
+    }
+    const host = document.getElementById("pdf-viewer-host");
+    if (!host) return;
+    let frame = 0;
+    const send = (): void => {
+      const rect = host.getBoundingClientRect();
+      void window.cairn.openPdf({
+        file: pdfTarget.path,
+        page: pdfTarget.page,
+        bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      });
+    };
+    send();
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(send);
+    });
+    observer.observe(host);
+    window.addEventListener("resize", send);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", send);
+    };
+  }, [pdfTarget]);
 
   const openNode = useCallback(
     (node: TreeNode) => {
+      if (isPdfPath(node.path)) {
+        void openPdf(node.path, 1);
+        return;
+      }
       if (node.type === "markdown") {
         void openMarkdown(node);
       } else {
         // Non-Markdown: generic read-only host, no editor (ADR-0009).
+        setPdfTarget(null);
         setActiveNode(node);
         setDocKey(null);
         setLoadError(null);
       }
     },
-    [openMarkdown],
+    [openMarkdown, openPdf],
   );
 
   const closeTab = useCallback(() => {
+    setPdfTarget(null);
     setActiveNode(null);
     setDocKey(null);
     setBuffer("");
@@ -673,6 +740,7 @@ export function App() {
         if (affectsOpen) {
           closeTab();
         } else if (activeNode && (activeNode.path === node.path || activeNode.path.startsWith(`${node.path}/`))) {
+          setPdfTarget(null);
           setActiveNode(null);
         }
         setExpanded((prev) => {
@@ -706,6 +774,10 @@ export function App() {
   /** Citation click-through: open the cited file in the center pane and flash the line (or heading). */
   const openCitation = useCallback(
     (source: SearchHit) => {
+      if (isPdfPath(source.file)) {
+        void openPdf(source.file, source.page && source.page > 0 ? source.page : 1);
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(source);
         if (!rightRailOpen) setRightRailOpen(true);
@@ -717,7 +789,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openMarkdown, rightRailOpen],
+    [docKey, resolveOpenLine, openMarkdown, openPdf, rightRailOpen],
   );
 
   function submitChat(): void {
@@ -1040,6 +1112,10 @@ export function App() {
   /** Open a search result in the editor and flash its line (same path as citation pills). */
   const openSearchResult = useCallback(
     (hit: SearchHit) => {
+      if (isPdfPath(hit.file)) {
+        void openPdf(hit.file, hit.page && hit.page > 0 ? hit.page : 1);
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(hit);
         if (docKey !== null && vaultPathsEqual(docKey, hit.file)) {
@@ -1054,7 +1130,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openMarkdown],
+    [docKey, resolveOpenLine, openMarkdown, openPdf],
   );
 
   const composerReason = useMemo(

@@ -1,10 +1,14 @@
 export {
   indexVault,
   discoverMarkdownFiles,
+  discoverIndexableFiles,
   chunkVaultFiles,
   embedPendingChunks,
   persistVaultIndex,
+  chunkNeedsEmbedding,
 } from "./indexer.js";
+export { extractPdfPages, pdfPageHeading, textFromItems, PdfTextError } from "./pdf-text.js";
+export type { PdfPageText } from "./pdf-text.js";
 export type { IndexStats, PendingChunk, EmbedChunksResult } from "./indexer.js";
 export { search, sanitizeForFts, rrfFuse, DEFAULT_COVERAGE_THRESHOLD } from "./retrieve.js";
 export type { Mode, SearchCoverage, SearchHit, SearchOpts } from "./retrieve.js";

@@ -6,9 +6,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-const { basename, typeChip, citationLineLabel, citationTitle, vaultPathsEqual } = await import(
-  "../out-test/cite-format.js"
-);
+const {
+  basename,
+  typeChip,
+  citationLineLabel,
+  citationTitle,
+  vaultPathsEqual,
+  PDF_OPEN_LANDS_ON_PAGE,
+  pdfChipLabel,
+  pdfOpenTitle,
+} = await import("../out-test/cite-format.js");
 
 test("basename returns the final path segment", () => {
   assert.equal(basename("notes/sub/file.md"), "file.md");
@@ -53,6 +60,21 @@ test("unresolved whole-file cites are labeled file, not line 1", () => {
   assert.equal(citationLineLabel(1), "1");
   assert.equal(citationTitle("notes/project-heron.md", 0), "Open notes/project-heron.md (file)");
   assert.equal(citationTitle("notes/project-heron.md", 0).includes("line 1"), false);
+});
+
+test("(a) a PDF chip names the page and the tooltip follows the landing switch", () => {
+  assert.equal(pdfChipLabel("notes/section-b.pdf", 3), "section-b.pdf p.3");
+  assert.equal(pdfChipLabel("report.pdf", 3), "report.pdf p.3");
+  assert.equal(pdfOpenTitle("notes/report.pdf", 3, true), "Open notes/report.pdf at page 3");
+  assert.equal(pdfOpenTitle("notes/report.pdf", 3, false), "Open notes/report.pdf");
+  assert.equal(pdfOpenTitle("report.pdf", 3), pdfOpenTitle("report.pdf", 3, PDF_OPEN_LANDS_ON_PAGE));
+  if (PDF_OPEN_LANDS_ON_PAGE) {
+    assert.equal(citationTitle("report.pdf", 2, "Section B", 3), "Open report.pdf at page 3");
+  } else {
+    assert.equal(citationTitle("report.pdf", 2, "Section B", 3), "Open report.pdf");
+  }
+  assert.equal(citationTitle("report.pdf", 2, "Section B", 3).includes("line"), false);
+  assert.equal(citationTitle("project-heron.md", 21, "Section B"), "Open project-heron.md at line 21 › Section B");
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

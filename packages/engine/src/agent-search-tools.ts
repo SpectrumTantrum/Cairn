@@ -6,6 +6,7 @@ import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import type { ToolSchema } from "./model-provider.js";
+import { pdfPageHeading } from "./pdf-text.js";
 
 export const ASK_SEARCH_TOOL_NAMES = ["list", "find", "grep", "read", "open"] as const;
 export type AskSearchToolName = (typeof ASK_SEARCH_TOOL_NAMES)[number];
@@ -15,11 +16,18 @@ export interface OpenAnchor {
   path: string;
   line?: number;
   heading?: string;
+  /** 1-based PDF page. Absent for Markdown. */
+  page?: number;
 }
 
 export interface AskSearchToolContext {
   index: Index;
   readNote: (path: string) => Promise<string>;
+  /**
+   * Per-page text of a vault PDF. Empty means the file has no text layer.
+   * Markdown reads stay on `readNote`.
+   */
+  readPdf?: (path: string) => Promise<{ page: number; text: string }[]>;
   /** When set, `list` uses the live vault tree; otherwise indexed paths only. */
   listNotes?: (prefix?: string) => Promise<string[]>;
   scope?: string[];
@@ -34,16 +42,23 @@ export interface AskSearchToolState {
   sources: SearchHit[];
   /** Distinct open targets the agent requested (for UI). */
   opened: OpenAnchor[];
+  /** A read or open touched a PDF that extracted no text. */
+  textlessPdf?: boolean;
 }
 
 const MAX_READ_CHARS_DEFAULT = 8000;
 const GREP_LIMIT_DEFAULT = 20;
+const PDF_NO_TEXT = "ERROR: This PDF has no text layer, so Cairn cannot read it.";
+
+function isPdfPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".pdf");
+}
 
 export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "list",
     description:
-      "List Markdown note paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
+      "List Markdown note and PDF paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
     parameters: {
       type: "object",
       properties: {
@@ -54,7 +69,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "find",
     description:
-      "Search the indexed vault for relevant note chunks (hybrid dense+keyword when available, else keyword). Returns ranked snippets with file, line, and heading.",
+      "Search the indexed vault for relevant chunks (hybrid dense+keyword when available, else keyword). PDF chunks are keyword-only and include a page. Returns ranked snippets with file, line, heading, and page when the source is a PDF.",
     parameters: {
       type: "object",
       properties: {
@@ -67,7 +82,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "grep",
     description:
-      "Substring search over indexed chunk text (case-insensitive). Each hit is the line where the pattern matched and the nearest heading at or above that line, not the start of the chunk. Optional path limits to one note.",
+      "Substring search over indexed chunk text (case-insensitive). Each hit is the line where the pattern matched and the nearest heading at or above that line, not the start of the chunk. PDF hits include a page. Optional path limits to one file.",
     parameters: {
       type: "object",
       properties: {
@@ -80,7 +95,8 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   },
   {
     name: "read",
-    description: "Read the full current contents of a Markdown note. Use after find/grep to read surrounding context.",
+    description:
+      "Read a Markdown note, or the text of each page of a PDF. A PDF with no text layer cannot be read. Use after find/grep to read surrounding context.",
     parameters: {
       type: "object",
       properties: {
@@ -92,13 +108,14 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "open",
     description:
-      "Record a UI open target for a note (path, optional line or heading). Call when you cite a specific location the user should jump to.",
+      "Record a UI open target (path, optional line or heading, and for a PDF the 1-based page). Call when you cite a specific location the user should jump to.",
     parameters: {
       type: "object",
       properties: {
         path: { type: "string", description: "Vault-relative path" },
-        line: { type: "integer", description: "1-based line number in the note" },
+        line: { type: "integer", description: "1-based line number in a Markdown note" },
         heading: { type: "string", description: "Heading text to scroll to when line is unknown" },
+        page: { type: "integer", description: "1-based PDF page. Required when citing a PDF." },
       },
       required: ["path"],
     },
@@ -125,11 +142,11 @@ function normalizeListPrefix(prefix: string): string {
   return norm.replace(/\/+$/, "");
 }
 
-function sourceKey(hit: Pick<SearchHit, "file" | "line" | "heading">): string {
-  return `${hit.file}:${hit.line}:${hit.heading}`;
+function sourceKey(hit: Pick<SearchHit, "file" | "line" | "heading" | "page">): string {
+  return `${hit.file}:${hit.line}:${hit.heading}:${hit.page ?? ""}`;
 }
 
-function sourceRef(state: AskSearchToolState, hit: Pick<SearchHit, "file" | "line" | "heading">): number {
+function sourceRef(state: AskSearchToolState, hit: Pick<SearchHit, "file" | "line" | "heading" | "page">): number {
   const idx = state.sources.findIndex((s) => sourceKey(s) === sourceKey(hit));
   return idx >= 0 ? idx + 1 : 0;
 }
@@ -154,6 +171,39 @@ function mergeSource(state: AskSearchToolState, hit: SearchHit): void {
 function snippet(text: string, max = 160): string {
   const t = text.replace(/\s+/g, " ").trim();
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
+}
+
+async function loadPdfPages(
+  ctx: AskSearchToolContext,
+  path: string,
+): Promise<{ page: number; text: string }[] | string> {
+  if (!ctx.readPdf) return "ERROR: PDF reading is not available.";
+  try {
+    const pages = await ctx.readPdf(path);
+    if (pages.length === 0) return PDF_NO_TEXT;
+    return pages;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return `ERROR: ${message}`;
+  }
+}
+
+function pageHit(file: string, page: { page: number; text: string }, arms: string): SearchHit {
+  return {
+    file,
+    line: 1,
+    heading: pdfPageHeading(page.text),
+    page: page.page,
+    score: NaN,
+    cosine: NaN,
+    snippet: snippet(page.text),
+    text: page.text,
+    arms,
+  };
+}
+
+function markTextless(state: AskSearchToolState, message: string): void {
+  if (message === PDF_NO_TEXT) state.textlessPdf = true;
 }
 
 /** ATX heading title, or null when the line is not a heading. */
@@ -218,7 +268,7 @@ export async function runAskSearchTool(
         paths = paths.filter((p) => p === prefixNorm || p.startsWith(`${prefixNorm}/`));
       }
     }
-    paths = paths.filter((p) => /\.(md|markdown)$/i.test(p));
+    paths = paths.filter((p) => /\.(md|markdown|pdf)$/i.test(p));
     if (paths.length === 0) return JSON.stringify({ paths: [], note: "No matching notes." });
     return JSON.stringify({ paths, count: paths.length });
   }
@@ -239,6 +289,7 @@ export async function runAskSearchTool(
       file: h.file,
       line: h.line,
       heading: h.heading || undefined,
+      ...(h.page ? { page: h.page } : {}),
       snippet: h.snippet,
     }));
     return JSON.stringify({ mode, results });
@@ -259,6 +310,7 @@ export async function runAskSearchTool(
     const located = matches.map((m) => ({
       file: m.file,
       text: m.text,
+      page: m.page,
       ...matchInsideChunk(m.line, m.heading, m.text, needle),
     }));
     for (const m of located) {
@@ -266,6 +318,7 @@ export async function runAskSearchTool(
         file: m.file,
         line: m.line,
         heading: m.heading,
+        ...(m.page ? { page: m.page } : {}),
         score: NaN,
         cosine: NaN,
         snippet: m.snippet,
@@ -278,6 +331,7 @@ export async function runAskSearchTool(
         file: m.file,
         line: m.line,
         heading: m.heading || undefined,
+        ...(m.page ? { page: m.page } : {}),
         snippet: m.snippet,
       })),
       count: located.length,
@@ -288,6 +342,16 @@ export async function runAskSearchTool(
     const path = asString(args.path);
     if (!path) return "ERROR: read requires a string 'path'.";
     const norm = normalizePath(path);
+    if (isPdfPath(norm)) {
+      const pages = await loadPdfPages(ctx, norm);
+      if (typeof pages === "string") {
+        markTextless(state, pages);
+        return pages;
+      }
+      for (const page of pages) mergeSource(state, pageHit(norm, page, "read"));
+      const body = pages.map((page) => `--- page ${page.page} ---\n${page.text}`).join("\n\n");
+      return body.length > maxRead ? `${body.slice(0, maxRead)}\n…(truncated at ${maxRead} chars)` : body;
+    }
     try {
       const content = await ctx.readNote(norm);
       const clipped =
@@ -313,6 +377,24 @@ export async function runAskSearchTool(
     const path = asString(args.path);
     if (!path) return "ERROR: open requires a string 'path'.";
     const norm = normalizePath(path);
+    if (isPdfPath(norm)) {
+      const pages = await loadPdfPages(ctx, norm);
+      if (typeof pages === "string") {
+        markTextless(state, pages);
+        return pages;
+      }
+      const requested = args.page === undefined ? null : asInt(args.page);
+      if (args.page !== undefined && requested === null) return "ERROR: open page must be an integer.";
+      const page = requested === null ? pages[0] : pages.find((item) => item.page === requested);
+      if (!page) return `ERROR: Page ${requested} has no text layer, so Cairn cannot read it.`;
+      const heading = asString(args.heading)?.trim() || pdfPageHeading(page.text);
+      const anchor: OpenAnchor = { path: norm, page: page.page, ...(heading ? { heading } : {}) };
+      if (!state.opened.some((o) => o.path === anchor.path && o.page === anchor.page && o.heading === anchor.heading)) {
+        state.opened.push(anchor);
+      }
+      mergeSource(state, { ...pageHit(norm, page, "open"), heading });
+      return JSON.stringify({ recorded: anchor });
+    }
     const line = args.line === undefined ? undefined : asInt(args.line);
     const heading = asString(args.heading) ?? undefined;
     const anchor: OpenAnchor = { path: norm, ...(line !== null && line !== undefined ? { line } : {}), ...(heading ? { heading } : {}) };
@@ -358,6 +440,8 @@ export function labelAskSearchToolCall(name: string, args: Record<string, unknow
       const path = asString(args.path)?.trim() || "note";
       const heading = asString(args.heading)?.trim();
       const line = args.line === undefined ? undefined : asInt(args.line);
+      const page = args.page === undefined ? undefined : asInt(args.page);
+      if (isPdfPath(path) && page !== null && page !== undefined && page > 0) return `Cited ${path} p.${page}`;
       if (heading) return `Cited ${path} › ${heading}`;
       if (line !== null && line !== undefined && line > 0) return `Cited ${path}:${line}`;
       return `Cited ${path}`;

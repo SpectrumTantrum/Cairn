@@ -8,6 +8,7 @@ import { chunkMarkdown } from "./chunk.js";
 import type { Chunk } from "./chunk.js";
 import { chunkHash } from "./normalize.js";
 import { resolveEmbedder, embed } from "./embed.js";
+import { extractPdfPages, pdfPageHeading } from "./pdf-text.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
 
@@ -25,6 +26,13 @@ export interface PendingChunk {
   file: string;
   chunk: Chunk;
   hash: string;
+  /** 1-based PDF page. Absent for Markdown. PDF chunks are not embedded. */
+  page?: number;
+}
+
+/** PDF text is keyword-only in this slice. Markdown chunks are embedded. */
+export function chunkNeedsEmbedding(chunk: PendingChunk): boolean {
+  return chunk.page == null;
 }
 
 export interface EmbedChunksResult {
@@ -35,7 +43,7 @@ export interface EmbedChunksResult {
   cached: number;
 }
 
-export function discoverMarkdownFiles(root: string): string[] {
+function discoverFiles(root: string, pattern: RegExp): string[] {
   const out: string[] = [];
   const rec = (dir: string): void => {
     for (const name of readdirSync(dir)) {
@@ -43,17 +51,55 @@ export function discoverMarkdownFiles(root: string): string[] {
       const full = join(dir, name);
       const st = statSync(full);
       if (st.isDirectory()) rec(full);
-      else if (/\.(md|markdown)$/i.test(name)) out.push(full);
+      else if (pattern.test(name)) out.push(full);
     }
   };
   rec(root);
   return out;
 }
 
+export function discoverMarkdownFiles(root: string): string[] {
+  return discoverFiles(root, /\.(md|markdown)$/i);
+}
+
+/** Markdown notes and PDF files. Images, audio, and other types stay out. */
+export function discoverIndexableFiles(root: string): string[] {
+  return discoverFiles(root, /\.(md|markdown|pdf)$/i);
+}
+
+async function chunkPdfFile(rel: string, abs: string): Promise<PendingChunk[]> {
+  let pages;
+  try {
+    pages = await extractPdfPages(abs);
+  } catch {
+    // Unreadable or password-protected: index nothing from this file.
+    return [];
+  }
+  const pending: PendingChunk[] = [];
+  let ordinal = 0;
+  for (const page of pages) {
+    const heading = pdfPageHeading(page.text);
+    const chunks = await chunkMarkdown(page.text);
+    for (const ch of chunks) {
+      pending.push({
+        file: rel,
+        chunk: { ...ch, ordinal: ordinal++, heading: ch.heading || heading },
+        hash: chunkHash(ch.text),
+        page: page.page,
+      });
+    }
+  }
+  return pending;
+}
+
 export async function chunkVaultFiles(root: string, files: string[]): Promise<PendingChunk[]> {
   const pending: PendingChunk[] = [];
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join("/");
+    if (/\.pdf$/i.test(rel)) {
+      pending.push(...(await chunkPdfFile(rel, abs)));
+      continue;
+    }
     const text = readFileSync(abs, "utf8");
     const chunks = await chunkMarkdown(text);
     for (const ch of chunks) pending.push({ file: rel, chunk: ch, hash: chunkHash(ch.text) });
@@ -73,20 +119,21 @@ export async function embedPendingChunks(
   let embedded = 0;
   let cached = 0;
 
-  if (!lexical && pending.length > 0) {
+  const embedIdx = pending.map((p, i) => i).filter((i) => chunkNeedsEmbedding(pending[i]));
+  if (!lexical && embedIdx.length > 0) {
     embedder = await resolveEmbedder(opts.embedder);
     dim = (await embed(embedder, ["cairn dimension probe"]))[0].length;
 
     const missIdx: number[] = [];
-    pending.forEach((p, i) => {
-      const hit = index.getCachedVec(p.hash, embedder as string, dim as number);
+    for (const i of embedIdx) {
+      const hit = index.getCachedVec(pending[i].hash, embedder as string, dim as number);
       if (hit) {
         vectors[i] = hit;
         cached++;
       } else {
         missIdx.push(i);
       }
-    });
+    }
 
     const BATCH = 64;
     for (let b = 0; b < missIdx.length; b += BATCH) {
@@ -129,6 +176,7 @@ export function persistVaultIndex(
       heading: p.chunk.heading,
       text: p.chunk.text,
       hash: p.hash,
+      page: p.page,
       vector: lexical ? undefined : vectors[i],
     })),
   });
@@ -138,7 +186,7 @@ export async function indexVault(
   root: string,
   opts: { lexical?: boolean; embedder?: string } = {},
 ): Promise<IndexStats> {
-  const files = discoverMarkdownFiles(root);
+  const files = discoverIndexableFiles(root);
   const index = openIndex(root);
   const pending = await chunkVaultFiles(root, files);
   const embedResult = await embedPendingChunks(index, pending, opts);

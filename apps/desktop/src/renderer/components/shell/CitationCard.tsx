@@ -1,6 +1,6 @@
 import type { SearchHit } from "../../../shared/types.js";
 import { citationLandingLine } from "../../agent-citations";
-import { basename, citationLineLabel, citationTitle } from "../../cite-format";
+import { basename, citationLineLabel, citationTitle, isPdfPath, pdfChipLabel, pdfOpenTitle } from "../../cite-format";
 
 interface CitationCardProps {
   hit: SearchHit;
@@ -23,21 +23,30 @@ interface CitationCardProps {
  */
 export function CitationCard({ hit, variant, index, showSnippet, onOpen }: CitationCardProps) {
   const withSnippet = showSnippet ?? variant === "full";
+  const pdfPage = isPdfPath(hit.file) ? (hit.page ?? 0) : 0;
   // Label and tooltip use the heading line the click opens. hit.line can be a
   // later fact line; the heading on the chip stays the click target.
-  const landing = citationLandingLine(hit);
+  // A PDF chip names the page (`report.pdf p.3`) and does not use a line or heading.
+  const landing = pdfPage > 0 ? hit.line : citationLandingLine(hit);
+  const title = pdfPage > 0 ? pdfOpenTitle(hit.file, pdfPage) : citationTitle(hit.file, landing, hit.heading);
   return (
     <button
       type="button"
       className={`citation-card citation-card-${variant}`}
-      title={citationTitle(hit.file, landing, hit.heading)}
+      title={title}
       onClick={() => onOpen(hit)}
     >
       {index !== undefined ? <span className="citation-index">{index}</span> : null}
       <span className="citation-loc">
-        {basename(hit.file)}
-        <span className="citation-line">:{citationLineLabel(landing)}</span>
-        {hit.heading ? <span className="citation-heading"> › {hit.heading}</span> : null}
+        {pdfPage > 0 ? (
+          pdfChipLabel(hit.file, pdfPage)
+        ) : (
+          <>
+            {basename(hit.file)}
+            <span className="citation-line">:{citationLineLabel(landing)}</span>
+            {hit.heading ? <span className="citation-heading"> › {hit.heading}</span> : null}
+          </>
+        )}
       </span>
       {withSnippet && hit.snippet ? <span className="citation-snippet">{hit.snippet}</span> : null}
     </button>

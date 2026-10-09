@@ -37,6 +37,8 @@ export interface SearchHit {
   snippet: string; // truncated, for display
   text: string; // full chunk text, for grounding (ask)
   arms: string; // "dense+fts" | "dense" | "fts"
+  /** 1-based PDF page. Absent for Markdown. */
+  page?: number;
 }
 
 export type Mode = "auto" | "hybrid" | "lexical";
@@ -134,6 +136,7 @@ function toHit(index: Index, id: number, score: number, cosine: number, inDense:
     snippet: snippetOf(c?.text ?? ""),
     text: c?.text ?? "",
     arms,
+    ...(c?.page ? { page: c.page } : {}),
   };
 }
 

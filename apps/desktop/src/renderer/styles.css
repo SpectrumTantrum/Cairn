@@ -348,6 +348,12 @@ button {
   flex-direction: column;
 }
 
+.editor-pdf-host {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
 /* CodeMirror host fills the body; padding 26x34 lives inside CM content. */
 .cm-host {
   flex: 1;

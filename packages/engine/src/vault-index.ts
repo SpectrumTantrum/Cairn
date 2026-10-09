@@ -14,6 +14,8 @@ export interface ChunkRow {
   line: number;
   heading: string;
   text: string;
+  /** 1-based PDF page. Null for Markdown. */
+  page: number | null;
 }
 
 export interface DenseHit {
@@ -30,6 +32,7 @@ export interface RebuildChunkInput {
   heading: string;
   text: string;
   hash: string;
+  page?: number | null;
   vector?: Buffer | null;
 }
 
@@ -72,7 +75,7 @@ export interface Index {
     needle: string,
     limit: number,
     scope?: readonly string[],
-  ): { file: string; line: number; heading: string; text: string }[];
+  ): { file: string; line: number; heading: string; text: string; page: number | null }[];
 
   close(): void;
 }
@@ -94,6 +97,7 @@ export class SqliteIndex implements Index {
     this.loadVecExtension();
     this.db.pragma("journal_mode = WAL");
     this.initSchema();
+    this.ensurePageColumn();
   }
 
   /**
@@ -122,7 +126,8 @@ export class SqliteIndex implements Index {
         line    INTEGER NOT NULL,
         heading TEXT NOT NULL DEFAULT '',
         text    TEXT NOT NULL,
-        hash    TEXT NOT NULL
+        hash    TEXT NOT NULL,
+        page    INTEGER
       );
       CREATE TABLE IF NOT EXISTS emb_cache (
         hash     TEXT NOT NULL,
@@ -136,6 +141,14 @@ export class SqliteIndex implements Index {
         tokenize='unicode61 remove_diacritics 2'
       );
     `);
+  }
+
+  /** Older indexes were created before `page` existed. CREATE IF NOT EXISTS will not add it. */
+  private ensurePageColumn(): void {
+    const cols = this.db.prepare("PRAGMA table_info(chunks)").all() as { name: string }[];
+    if (!cols.some((col) => col.name === "page")) {
+      this.db.exec("ALTER TABLE chunks ADD COLUMN page INTEGER");
+    }
   }
 
   getMeta(key: string): string | undefined {
@@ -195,8 +208,8 @@ export class SqliteIndex implements Index {
       if (input.mode === "hybrid" && input.dim) this.resetVectors(input.dim);
       for (const c of input.chunks) {
         this.db
-          .prepare("INSERT INTO chunks(id,file,ordinal,line,heading,text,hash) VALUES(?,?,?,?,?,?,?)")
-          .run(c.id, c.file, c.ordinal, c.line, c.heading, c.text, c.hash);
+          .prepare("INSERT INTO chunks(id,file,ordinal,line,heading,text,hash,page) VALUES(?,?,?,?,?,?,?,?)")
+          .run(c.id, c.file, c.ordinal, c.line, c.heading, c.text, c.hash, c.page ?? null);
         this.db.prepare("INSERT INTO fts_chunks(rowid,text) VALUES(?,?)").run(c.id, c.text);
         if (input.mode === "hybrid" && c.vector) {
           this.db.prepare("INSERT INTO vec_chunks(chunk_id,embedding) VALUES(?,?)").run(BigInt(c.id), c.vector);
@@ -212,7 +225,7 @@ export class SqliteIndex implements Index {
 
   getChunk(id: number): ChunkRow | undefined {
     return this.db
-      .prepare("SELECT id,file,ordinal,line,heading,text FROM chunks WHERE id=?")
+      .prepare("SELECT id,file,ordinal,line,heading,text,page FROM chunks WHERE id=?")
       .get(id) as ChunkRow | undefined;
   }
 
@@ -279,16 +292,16 @@ export class SqliteIndex implements Index {
     needle: string,
     limit: number,
     scope?: readonly string[],
-  ): { file: string; line: number; heading: string; text: string }[] {
+  ): { file: string; line: number; heading: string; text: string; page: number | null }[] {
     if (!needle) return [];
     const scoped = scope !== undefined && scope.length > 0;
     const cap = Math.max(1, limit | 0);
     const sql = scoped
-      ? `SELECT file, line, heading, text FROM chunks
+      ? `SELECT file, line, heading, text, page FROM chunks
            WHERE instr(lower(text), lower(?)) > 0
              AND file IN (SELECT value FROM json_each(?))
            LIMIT ${cap}`
-      : `SELECT file, line, heading, text FROM chunks
+      : `SELECT file, line, heading, text, page FROM chunks
            WHERE instr(lower(text), lower(?)) > 0
            LIMIT ${cap}`;
     const stmt = this.db.prepare(sql);
@@ -297,6 +310,7 @@ export class SqliteIndex implements Index {
       line: number;
       heading: string;
       text: string;
+      page: number | null;
     }[];
     return rows;
   }
@@ -382,6 +396,7 @@ export class InMemoryIndex implements Index {
         heading: c.heading,
         text: c.text,
         hash: c.hash,
+        page: c.page ?? null,
       });
       if (input.mode === "hybrid" && c.vector) this.vectors.set(c.id, c.vector);
     }
@@ -439,15 +454,21 @@ export class InMemoryIndex implements Index {
     needle: string,
     limit: number,
     scope?: readonly string[],
-  ): { file: string; line: number; heading: string; text: string }[] {
+  ): { file: string; line: number; heading: string; text: string; page: number | null }[] {
     if (!needle) return [];
     const inScope = scopeFilter(scope);
     const n = needle.toLowerCase();
-    const out: { file: string; line: number; heading: string; text: string }[] = [];
+    const out: { file: string; line: number; heading: string; text: string; page: number | null }[] = [];
     for (const chunk of this.chunks.values()) {
       if (!inScope(chunk.file)) continue;
       if (!chunk.text.toLowerCase().includes(n)) continue;
-      out.push({ file: chunk.file, line: chunk.line, heading: chunk.heading, text: chunk.text });
+      out.push({
+        file: chunk.file,
+        line: chunk.line,
+        heading: chunk.heading,
+        text: chunk.text,
+        page: chunk.page,
+      });
       if (out.length >= limit) break;
     }
     return out;
