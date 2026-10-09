@@ -15,7 +15,7 @@ Agentic Ask is a desktop setting. The engine CLI `ask` command is classic Ask.
 1. Open **Settings** (the gear on the vault rail).
 2. Under **Ask / Chat**, turn on **Agentic Ask (experimental)**.
 
-That checkbox writes the setting `cairn.agenticAsk` (`1` when on, `0` when off). When the key is unset, agentic Ask is off.
+That checkbox writes the setting `cairn.agenticAsk` (`1` when on, `0` when off). When the key is unset and `CAIRN_AGENTIC_ASK` is not `1`, agentic Ask is off.
 
 To enable it for a launch before that setting is saved, start the desktop app with the environment flag set to exactly `1`:
 
