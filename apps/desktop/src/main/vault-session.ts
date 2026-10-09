@@ -2,7 +2,8 @@ import {
   ask,
   ChatThread,
   diffLines,
-  discoverMarkdownFiles,
+  discoverIndexableFiles,
+  extractPdfPages,
   generateStudioNote,
   indexVault,
   openIndex,
@@ -335,7 +336,7 @@ export class VaultSession {
     }
 
     const listNotes = async (prefix?: string) => {
-      const abs = discoverMarkdownFiles(vaultPath);
+      const abs = discoverIndexableFiles(vaultPath);
       let rel = abs.map((p) => relative(vaultPath, p).split(sep).join("/"));
       const scope = opts.scope;
       if (scope !== undefined && scope.length > 0) {
@@ -355,6 +356,7 @@ export class VaultSession {
         scope: opts.scope,
         retrievalSeed: opts.retrievalSeed ?? false,
         readNote: async (rel) => this.readSource(rel),
+        readPdf: async (rel) => extractPdfPages(this.resolveSourcePath(rel)),
         listNotes,
         onProgress: opts.onProgress,
       }),

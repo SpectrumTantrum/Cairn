@@ -1,4 +1,5 @@
-import { app, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
+import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CloudProvider, getModelProvider, PROVIDER_PRESETS, studioTemplateMetas } from "@cairn/engine";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
@@ -10,6 +11,7 @@ import {
 } from "./provider-store.js";
 import { ThreadStore } from "./thread-store.js";
 import { toUserError } from "./user-error.js";
+import { hidePdfView, showPdfView, type PdfViewBounds } from "./pdf-viewer.js";
 
 const session = createVaultSession();
 
@@ -52,6 +54,17 @@ async function handleUserErrors<T>(fn: () => T | Promise<T>): Promise<T> {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function asPdfBounds(value: unknown): PdfViewBounds | null {
+  if (typeof value !== "object" || value === null) return null;
+  const b = value as Record<string, unknown>;
+  const x = b.x;
+  const y = b.y;
+  const width = b.width;
+  const height = b.height;
+  if (![x, y, width, height].every((n) => typeof n === "number" && Number.isFinite(n))) return null;
+  return { x: x as number, y: y as number, width: width as number, height: height as number };
 }
 
 /** Coerce an unknown IPC value into a validated `string[]` scope include-list, or undefined. */
@@ -241,6 +254,38 @@ export function registerIpcHandlers(): void {
     return handleUserErrors(() => {
       session.resetChat();
     });
+  });
+
+  ipcMain.handle("pdf:open", async (event, payload: unknown) => {
+    return handleUserErrors(() => {
+      const p = asRecord(payload);
+      const file = typeof p.file === "string" ? p.file : "";
+      if (!file.toLowerCase().endsWith(".pdf")) {
+        throw new Error("Only a PDF can be opened in the PDF viewer.");
+      }
+      const pageRaw = p.page;
+      let page: number | undefined;
+      if (pageRaw !== undefined) {
+        if (typeof pageRaw !== "number" || !Number.isInteger(pageRaw) || pageRaw < 1) {
+          throw new Error("PDF page must be a positive integer.");
+        }
+        page = pageRaw;
+      }
+      const bounds = asPdfBounds(p.bounds);
+      if (!bounds) throw new Error("PDF viewer bounds are invalid.");
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win) throw new Error("PDF viewer has no window.");
+      const abs = session.resolveSourcePath(file);
+      if (!existsSync(abs) || !statSync(abs).isFile()) {
+        throw new Error("The source file is no longer available. Try re-indexing this vault.");
+      }
+      showPdfView(win, abs, page, bounds);
+    });
+  });
+
+  ipcMain.handle("pdf:hide", async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) hidePdfView(win);
   });
 
   ipcMain.handle("source:read", async (_event, file: unknown) => {

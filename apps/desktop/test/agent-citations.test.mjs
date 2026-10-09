@@ -8,7 +8,8 @@ const {
   resolveCitationLine,
   splitInlineCites,
 } = await import("../out-test/agent-citations.js");
-const { FILE_CITE_LINE, citationLineLabel, citationTitle } = await import("../out-test/cite-format.js");
+const { FILE_CITE_LINE, citationLineLabel, citationTitle, pdfChipLabel, pdfOpenTitle, PDF_OPEN_LANDS_ON_PAGE } =
+  await import("../out-test/cite-format.js");
 
 test("citationsFromAskAgent prefers opened anchors with source snippets", () => {
   const result = {
@@ -758,4 +759,102 @@ test("a grep hit the answer did not use gets no chip beside a matched note", () 
   assert.equal(cites.length, 1);
   assert.equal(cites[0].file, "notes/clean.md");
   assert.equal(cites[0].line, 21);
+});
+
+const PDF_FACT = "The field code is COPPER FINCH, 312 under Section B.";
+const NOTE_FACT = "The notebook codename is COPPER FINCH and the badge is 999.";
+const PDF_PAGE = `Section B\n${PDF_FACT}`;
+const NOTE = `# Project Heron\n\n${NOTE_FACT}\n`;
+
+function pdfGrep(page, heading, text) {
+  return {
+    file: "section-b.pdf",
+    line: 2,
+    heading,
+    page,
+    score: NaN,
+    cosine: NaN,
+    snippet: text.split("\n").pop(),
+    text,
+    arms: "grep",
+  };
+}
+
+test("(c) the PDF sentence chips only section-b.pdf p.3", () => {
+  const cites = citationsFromAskAgent({
+    answer: PDF_FACT,
+    sources: [
+      pdfGrep(3, "Section B", PDF_PAGE),
+      pdfGrep(2, "Section A", "Section A\nDecoy sentence about sparrows."),
+      {
+        file: "project-heron.md",
+        line: 3,
+        heading: "Project Heron",
+        score: NaN,
+        cosine: NaN,
+        snippet: NOTE_FACT,
+        text: NOTE,
+        arms: "grep",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.pdf");
+  assert.equal(cites[0].page, 3);
+  assert.equal(pdfChipLabel(cites[0].file, cites[0].page), "section-b.pdf p.3");
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.some((cite) => cite.page === 2), false);
+  const title = pdfOpenTitle(cites[0].file, cites[0].page);
+  if (PDF_OPEN_LANDS_ON_PAGE) assert.equal(title, "Open section-b.pdf at page 3");
+  else assert.equal(title, "Open section-b.pdf");
+});
+
+test("(c) the note sentence chips only the note at its heading line", () => {
+  const cites = citationsFromAskAgent({
+    answer: NOTE_FACT,
+    sources: [
+      pdfGrep(3, "Section B", PDF_PAGE),
+      {
+        file: "project-heron.md",
+        line: 3,
+        heading: "Project Heron",
+        score: NaN,
+        cosine: NaN,
+        snippet: NOTE_FACT,
+        text: NOTE,
+        arms: "grep",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "project-heron.md");
+  assert.equal(cites[0].heading, "Project Heron");
+  assert.equal(citationLandingLine(cites[0]), 1);
+  assert.equal(citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading), "Open project-heron.md at line 1 › Project Heron");
+  assert.equal(cites.some((cite) => cite.file.endsWith(".pdf")), false);
+});
+
+test("(b) an empty PDF open does not become a chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: `Invented: ${PDF_FACT}`,
+    sources: [
+      {
+        file: "scan.pdf",
+        line: 1,
+        heading: "",
+        score: NaN,
+        cosine: NaN,
+        snippet: "",
+        text: "",
+        arms: "open",
+      },
+    ],
+    opened: [{ path: "scan.pdf" }],
+    ...agentShell,
+  });
+  assert.deepEqual(cites, []);
 });

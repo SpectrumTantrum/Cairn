@@ -50,6 +50,8 @@ export interface AskAgentOptions {
   question: string;
   /** Path-validated note reader (main process supplies the vault-scoped one). */
   readNote: (path: string) => Promise<string>;
+  /** Per-page PDF text. Empty array means the file has no text layer. */
+  readPdf?: (path: string) => Promise<{ page: number; text: string }[]>;
   /** Optional live vault listing; when omitted, `list` uses indexed paths only. */
   listNotes?: (prefix?: string) => Promise<string[]>;
   model?: string;
@@ -82,21 +84,63 @@ export interface AskAgentResult {
   model?: string;
 }
 
+const UNCOVERED = "Your notes don't cover this.";
+
 const ASK_AGENT_SYSTEM = [
-  "You are Cairn, a local knowledge assistant operating over the user's Markdown vault.",
+  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes and text PDFs.",
   "Answer using ONLY information you gather with your tools — do not invent facts.",
   "Tools (read-only):",
-  "- list(prefix?): list note paths in the vault.",
-  "- find(query, k?): search indexed chunks (hybrid or keyword).",
-  "- grep(pattern, path?, limit?): substring search over indexed chunks.",
-  "- read(path): read a note's full current contents.",
-  "- open(path, line?, heading?): record a UI jump target when you cite a specific location.",
-  "Workflow: use list/find/grep to discover relevant notes, read them, then answer.",
+  "- list(prefix?): list Markdown and PDF paths in the vault.",
+  "- find(query, k?): search indexed chunks (hybrid or keyword). PDF chunks are keyword-only and include a page.",
+  "- grep(pattern, path?, limit?): substring search over indexed chunks. PDF hits include a page.",
+  "- read(path): read a note, or the text of each PDF page.",
+  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page.",
+  "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
   "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
-  "Cite sources inline with bracketed numbers matching the SOURCES list when one is provided, or as [path:line] when you opened notes yourself.",
-  'If the vault does not contain the answer after searching, reply exactly: "Your notes don\'t cover this."',
+  "Cite Markdown as [path:line]. Cite a PDF by its page.",
+  "A PDF with no text layer cannot be read. Do not invent its contents.",
+  `If the vault does not contain the answer after searching, reply exactly: "${UNCOVERED}"`,
   "When finished, stop calling tools and give a concise, direct answer.",
 ].join("\n");
+
+function isPdfFile(file: string): boolean {
+  return file.toLowerCase().endsWith(".pdf");
+}
+
+function sourceHasBody(hit: SearchHit): boolean {
+  return Boolean(hit.text?.trim() || hit.snippet?.trim());
+}
+
+/**
+ * Drop PDF sources that never yielded a page of text, and replace an invented
+ * answer when the run touched a text-less PDF and gathered nothing else.
+ * Leaves no-tool-use, timeout, and step-cap messages alone.
+ */
+function settleTextlessPdf(
+  state: AskSearchToolState,
+  stopReason: AskAgentResult["stopReason"],
+  answer: string,
+  seedHits: SearchHit[],
+): Pick<AskAgentResult, "answer" | "sources" | "opened" | "grounded"> {
+  const sources = state.sources.filter((hit) => {
+    if (!isPdfFile(hit.file)) return true;
+    return typeof hit.page === "number" && hit.page > 0 && sourceHasBody(hit);
+  });
+  const keptPdf = new Set(sources.filter((hit) => isPdfFile(hit.file)).map((hit) => hit.file));
+  const opened = state.opened.filter((anchor) => {
+    if (!isPdfFile(anchor.path)) return true;
+    return keptPdf.has(anchor.path);
+  });
+  const anyBody = sources.some(sourceHasBody) || seedHits.some(sourceHasBody);
+  let next = answer;
+  if (state.textlessPdf && !anyBody && stopReason === "done") next = UNCOVERED;
+  return {
+    answer: next,
+    sources,
+    opened,
+    grounded: sources.length > 0 || seedHits.length > 0,
+  };
+}
 
 function seedEnabled(opt: RetrievalSeedOption | undefined): boolean {
   return opt !== undefined && opt !== false;
@@ -152,6 +196,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   const toolCtx: AskSearchToolContext = {
     index: opts.index,
     readNote: opts.readNote,
+    readPdf: opts.readPdf,
     listNotes: opts.listNotes,
     scope: opts.scope,
     defaultMode: opts.mode,
@@ -247,16 +292,16 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     }
   }
 
-  const grounded = toolState.sources.length > 0 || seedHits.length > 0;
+  const settled = settleTextlessPdf(toolState, stopReason, answer, seedHits);
 
   return {
-    answer,
-    sources: toolState.sources,
-    opened: toolState.opened,
+    answer: settled.answer,
+    sources: settled.sources,
+    opened: settled.opened,
     seedHits,
     steps,
     stopReason,
-    grounded,
+    grounded: settled.grounded,
     model,
   };
 }

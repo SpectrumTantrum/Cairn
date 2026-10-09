@@ -14,7 +14,7 @@
 // so #66's Section B chip stays on that line. The 4-word threshold is unchanged.
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
-import { FILE_CITE_LINE } from "./cite-format.js";
+import { FILE_CITE_LINE, isPdfPath } from "./cite-format.js";
 
 /** Answer prose split around inline `[path:line]` cites. */
 export type InlineAnswerSegment = { kind: "text"; text: string } | { kind: "cite"; hit: SearchHit };
@@ -23,8 +23,8 @@ export type InlineAnswerSegment = { kind: "text"; text: string } | { kind: "cite
 const MIN_PASSAGE_WORDS = 4;
 const SNIPPET_MAX = 160;
 
-function sourceKey(hit: Pick<SearchHit, "file" | "line" | "heading">): string {
-  return `${hit.file}:${hit.line}:${hit.heading ?? ""}`;
+function sourceKey(hit: Pick<SearchHit, "file" | "line" | "heading" | "page">): string {
+  return `${hit.file}:${hit.line}:${hit.heading ?? ""}:${hit.page ?? ""}`;
 }
 
 function pickSourceForOpen(
@@ -32,8 +32,13 @@ function pickSourceForOpen(
   path: string,
   line?: number,
   heading?: string,
+  page?: number,
 ): SearchHit | undefined {
   const sameFile = (s: SearchHit) => s.file === path;
+  if (page !== undefined && page > 0) {
+    const atPage = sources.find((s) => sameFile(s) && s.page === page);
+    if (atPage) return atPage;
+  }
   if (heading?.trim()) {
     const withHeading = sources.find((s) => sameFile(s) && s.heading === heading);
     if (withHeading) return withHeading;
@@ -186,6 +191,9 @@ function asUnresolvedWholeFile(hit: SearchHit): SearchHit {
 
 function retargetWholeFileRead(hit: SearchHit, answer: string, sources: SearchHit[]): SearchHit {
   if (hit.arms !== "read") return hit;
+  // A PDF page is already the location. Do not retarget it like a whole-note read,
+  // and do not copy another page's passage onto this one.
+  if (isPdfPath(hit.file)) return hit;
   const content = readBody(hit, sources);
   if (!content.trim() || !answer.trim()) return asUnresolvedWholeFile(hit);
   const located = locateCitedPassage(answer, content);
@@ -352,10 +360,38 @@ function keepAnswerCitations(hits: SearchHit[], result: AskAgentResult): SearchH
   }
   const onlyLocatedGrep = used.size === 0 && grepFiles.size === 1;
   return hits.filter((hit) => {
+    if (isPdfPath(hit.file)) {
+      const page = hit.page ?? 0;
+      const body = (hit.text ?? "").trim() || (hit.snippet ?? "").trim();
+      if (page <= 0 || !body) return false;
+      const openedPage = result.opened.some(
+        (anchor) => vaultFileKey(anchor.path) === vaultFileKey(hit.file) && anchor.page === page,
+      );
+      if (openedPage) return true;
+      if (longestSharedSpan(result.answer, `${hit.text ?? ""}\n${hit.snippet ?? ""}`)) return true;
+      return onlyLocatedGrep && grepFiles.has(vaultFileKey(hit.file)) && hit.line > 1;
+    }
     const key = vaultFileKey(hit.file);
     if (used.has(key)) return true;
     return onlyLocatedGrep && grepFiles.has(key) && hit.line > 1;
   });
+}
+
+/** One chip per PDF page. The first hit (opened anchors are recorded first) wins. */
+function collapsePdfPages(hits: SearchHit[]): SearchHit[] {
+  const seen = new Set<string>();
+  const out: SearchHit[] = [];
+  for (const hit of hits) {
+    if (!isPdfPath(hit.file) || !(hit.page && hit.page > 0)) {
+      out.push(hit);
+      continue;
+    }
+    const key = `${vaultFileKey(hit.file)}:${hit.page}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(hit);
+  }
+  return out;
 }
 
 /**
@@ -368,12 +404,13 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
   const seen = new Set<string>();
 
   for (const o of opened) {
-    const match = pickSourceForOpen(sources, o.path, o.line, o.heading);
+    const match = pickSourceForOpen(sources, o.path, o.line, o.heading, o.page);
     // A heading hit already past line 1 is the location. Do not paint the model's
     // line (often 1 or a wrong inline cite) over it.
     const specificMatch = !!match && match.line > 1 && !!match.heading?.trim();
     const line = specificMatch ? match.line : (o.line ?? match?.line ?? 1);
     const heading = specificMatch ? match.heading : (o.heading ?? match?.heading ?? "");
+    const page = o.page ?? match?.page;
     const base: SearchHit = match ?? {
       file: o.path,
       line,
@@ -390,6 +427,7 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
         file: o.path,
         line: line > 0 ? line : 1,
         heading,
+        ...(page ? { page } : {}),
         snippet: displaySnippet(base),
       },
       answer,
@@ -412,7 +450,7 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
     out.push(hit);
   }
 
-  return keepAnswerCitations(dropUnresolvedWholeFileShadows(out), result);
+  return collapsePdfPages(keepAnswerCitations(dropUnresolvedWholeFileShadows(out), result));
 }
 
 const INLINE_PATH_CITE = /\[([^\[\]\n]+?):(\d+)\]/g;

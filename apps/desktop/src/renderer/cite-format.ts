@@ -32,12 +32,41 @@ export function citationLineLabel(line: number): string {
 }
 
 /**
+ * The in-app PDF viewer is asked to open at `#page=N`. The tooltip says
+ * "Open <path> at page N" only while this is true.
+ * Verified on Electron 42: a WebContentsView load of `file://…pdf#page=3`
+ * reports page 3, and the same file without the fragment reports page 1.
+ * Flip this off if QA sees the viewer open on a different page.
+ */
+export const PDF_OPEN_LANDS_ON_PAGE = true;
+
+export function isPdfPath(file: string): boolean {
+  return file.toLowerCase().endsWith(".pdf");
+}
+
+/** Chip text for a PDF page, e.g. `report.pdf p.3`. */
+export function pdfChipLabel(file: string, page: number): string {
+  return `${basename(file)} p.${page}`;
+}
+
+/**
+ * Hover title for a PDF. `landsOnPage` defaults to the shipped switch.
+ * Tests pass true or false to lock both wordings.
+ */
+export function pdfOpenTitle(file: string, page?: number, landsOnPage = PDF_OPEN_LANDS_ON_PAGE): string {
+  if (landsOnPage && page !== undefined && page > 0) return `Open ${file} at page ${page}`;
+  return `Open ${file}`;
+}
+
+/**
  * Hover title for a citation open target.
  * A located passage is "Open <path> at line <n> › <heading>" when a heading is known.
  * The line is the click target (the heading line), not a later fact line.
  * An unmatched note is "Open <path> (file)".
+ * A PDF uses `pdfOpenTitle` and does not claim a line.
  */
-export function citationTitle(file: string, line: number, heading = ""): string {
+export function citationTitle(file: string, line: number, heading = "", page?: number): string {
+  if (isPdfPath(file)) return pdfOpenTitle(file, page);
   if (line <= 0) return `Open ${file} (file)`;
   const title = heading.trim();
   if (title) return `Open ${file} at line ${line} › ${title}`;

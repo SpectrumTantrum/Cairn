@@ -1,5 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
+import { isPdfPath } from "../../cite-format";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -78,6 +79,8 @@ export function EditorPane(props: EditorPaneProps) {
             <h2>No file open</h2>
             <p>Pick a note from the vault, or click a citation in a grounded answer to jump to its source.</p>
           </div>
+        ) : isPdfPath(activeNode.path) ? (
+          <div id="pdf-viewer-host" className="editor-pdf-host" />
         ) : activeNode.type !== "markdown" ? (
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>
@@ -109,7 +112,12 @@ export function EditorPane(props: EditorPaneProps) {
         ) : null}
       </div>
 
-      <StatusBar {...props} activeIsMarkdown={activeNode?.type === "markdown"} cursor={cursor} />
+      <StatusBar
+        {...props}
+        activeIsMarkdown={activeNode?.type === "markdown"}
+        activeIsPdf={activeNode ? isPdfPath(activeNode.path) : false}
+        cursor={cursor}
+      />
     </>
   );
 }
@@ -121,7 +129,8 @@ function StatusBar({
   onIndex,
   cursor,
   activeIsMarkdown,
-}: EditorPaneProps & { activeIsMarkdown: boolean }) {
+  activeIsPdf,
+}: EditorPaneProps & { activeIsMarkdown: boolean; activeIsPdf: boolean }) {
   return (
     <div className="editor-statusbar">
       {activeIsMarkdown ? (
@@ -131,6 +140,8 @@ function StatusBar({
           </span>
           <span className="status-item">Markdown</span>
         </>
+      ) : activeIsPdf ? (
+        <span className="status-item">PDF</span>
       ) : null}
       <IndexStatusItem
         indexState={indexState}

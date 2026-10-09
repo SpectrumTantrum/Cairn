@@ -13,6 +13,9 @@ directories:
 files:
   - out/**
   - package.json
+  # pdfjs-dist optionally depends on @napi-rs/canvas for painting pages.
+  # Text extraction does not use it, so it stays out of the packaged app.
+  - "!**/node_modules/@napi-rs/**"
 
 # Native/loadable files cannot be dlopen'd from inside app.asar, so they must be
 # unpacked to app.asar.unpacked/:
@@ -25,6 +28,13 @@ asarUnpack:
   - "**/*.node"
   - "**/node_modules/sqlite-vec-darwin-*/**"
   - "**/node_modules/better-sqlite3/**"
+  # pdf.js reads standard fonts from a real directory (the asar fs shim is not enough).
+  - "**/node_modules/pdfjs-dist/**"
+
+# pdfjs-dist LICENSE, NOTICE, and bundled font licenses.
+extraResources:
+  - from: licenses
+    to: licenses
 
 # Native rebuild is done deterministically BEFORE packaging by
 # scripts/rebuild-engine-native.mjs (prepackage), not by electron-builder's
