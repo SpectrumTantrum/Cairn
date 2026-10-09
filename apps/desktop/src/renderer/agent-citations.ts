@@ -7,20 +7,23 @@
 // target are the same line. A read that still cannot be matched is labeled "file"
 // (line FILE_CITE_LINE) and dropped when the same note already has a resolved chip.
 //
-// The chip row only keeps notes the final answer cites or matches. A cite is an
-// `open` anchor or an inline `[path:line]`. A match is the 4-word passage overlap
-// below. Search, grep, and read hits that fail both are omitted. A single grep hit
-// already located past line 1 still shows when the answer cites or matches nothing,
-// so #66's Section B chip stays on that line. The 4-word threshold is unchanged.
+// The chip row keeps notes the final answer cites or matches, and every file the
+// agent read and answered from. A cite is an `open` anchor or an inline `[path:line]`.
+// A match is the 4-word passage overlap below: the chip points at that heading line.
+// A read that contains the answer but shares no 4-word run is labeled "file".
+// It is not dropped. Search and grep hits the answer did not use are still omitted.
+// A single grep hit already located past line 1 still shows when nothing else was
+// cited or matched, so #66's Section B chip stays on that line. The 4-word
+// threshold is unchanged.
 //
-// A shared token is not a match of its own. When the 4-word span's content words
-// all appear in another touched file, and the answer's specific fact (a content
-// word present in that other file) is absent here, this file gets no chip.
-// Function words still count toward the 4-word run; they are not the fact.
+// A shared token is not a match of its own. The veto looks only at other files
+// the agent read, not at search or grep hits. When the overlap's content words
+// all appear in another read, and the answer's fact (a content word in that
+// read) is absent here, this file gets no chip. Function words still count
+// toward the 4-word run; they are not the fact.
 //
 // Each PDF page is its own location. A page the answer matches is cited as
-// `file p.N`. A PDF that was read and matches no page is still cited, labeled
-// "file", the same way an unmatched note is.
+// `file p.N`. A PDF that was read and matches no page is still cited, labeled "file".
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
 import { FILE_CITE_LINE, isPdfPath } from "./cite-format.js";
@@ -134,16 +137,47 @@ function isContentWord(word: string): boolean {
   return !CLOSED_CLASS.has(word);
 }
 
+/** Content words from `answer` that occur in `text`, in answer order, once each. */
+function answerContentIn(text: string, answer: string): string[] {
+  const words = new Set(wordSpans(text).map((span) => span.word));
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const span of wordSpans(answer)) {
+    if (!isContentWord(span.word) || !words.has(span.word) || seen.has(span.word)) continue;
+    seen.add(span.word);
+    out.push(span.word);
+  }
+  return out;
+}
+
+/**
+ * True when every answer content word in `corpus` also appears in another read,
+ * and that other read holds an answer content word this file does not.
+ * Search and grep hits are not reads and must not be passed in `others`.
+ */
+function suppressedByOtherRead(answer: string, corpus: string, others: readonly string[]): boolean {
+  const rest = others.map((text) => text.trim()).filter((text) => text.length > 0);
+  if (rest.length === 0) return false;
+  const here = new Set(answerContentIn(corpus, answer));
+  const elsewhere = new Set<string>();
+  for (const text of rest) {
+    for (const word of answerContentIn(text, answer)) elsewhere.add(word);
+  }
+  if ([...here].some((word) => !elsewhere.has(word))) return false;
+  const fileWords = new Set(wordSpans(corpus).map((span) => span.word));
+  return [...elsewhere].some((word) => !fileWords.has(word));
+}
+
 /**
  * The 4-word overlap cites `corpus` unless it is only a token shared with another
- * touched file and the answer's fact (a content word found in that other file) is
- * not in `corpus`. One file, an open, and an inline cite never reach this veto.
+ * file the agent read and the answer's fact is in that other read, not here.
  */
 function passageMatches(answer: string, corpus: string, others: readonly string[]): boolean {
   const span = longestSharedSpan(answer, corpus);
   if (!span) return false;
   const rest = others.map((text) => text.trim()).filter((text) => text.length > 0);
   if (rest.length === 0) return true;
+  if (!suppressedByOtherRead(answer, corpus, rest)) return true;
   const spanContent = wordSpans(corpus.slice(span.start, span.end))
     .map((w) => w.word)
     .filter(isContentWord);
@@ -154,12 +188,7 @@ function passageMatches(answer: string, corpus: string, others: readonly string[
     }
   }
   const sharedTokenOnly = spanContent.length === 0 || spanContent.every((word) => otherContent.has(word));
-  if (!sharedTokenOnly) return true;
-  const fileWords = new Set(wordSpans(corpus).map((w) => w.word));
-  const factElsewhere = wordSpans(answer).some(
-    (w) => isContentWord(w.word) && !fileWords.has(w.word) && otherContent.has(w.word),
-  );
-  return !factElsewhere;
+  return !sharedTokenOnly;
 }
 
 function lineAt(content: string, offset: number): number {
@@ -385,6 +414,10 @@ function otherCorpora(
   return [...buckets.values()].map((parts) => parts.join("\n"));
 }
 
+function readHits(hits: readonly SearchHit[]): SearchHit[] {
+  return hits.filter((hit) => hit.arms === "read");
+}
+
 function corpusForFile(file: string, hits: readonly SearchHit[]): string {
   const key = vaultFileKey(file);
   const parts: string[] = [];
@@ -415,7 +448,7 @@ function filesCitedInAnswer(answer: string, hits: readonly SearchHit[]): Set<str
 
 /**
  * Notes the answer cites (`open` or `[path:line]`) or matches via the 4-word
- * passage overlap. A shared codename is not enough when the fact is elsewhere.
+ * passage overlap. A shared codename is not enough when the fact is in another read.
  */
 function filesAnswerUses(
   answer: string,
@@ -434,9 +467,8 @@ function filesAnswerUses(
       continue;
     }
     const corpus = corpusForFile(key, hits);
-    if (corpus.trim() && passageMatches(answer, corpus, otherCorpora({ file: hit.file }, hits))) {
-      used.add(key);
-    }
+    const others = otherCorpora({ file: hit.file }, readHits(hits));
+    if (corpus.trim() && passageMatches(answer, corpus, others)) used.add(key);
   }
   return used;
 }
@@ -462,7 +494,8 @@ function keepAnswerCitations(hits: SearchHit[], result: AskAgentResult): SearchH
       );
       if (openedPage) return true;
       const corpus = `${hit.text ?? ""}\n${hit.snippet ?? ""}`;
-      if (passageMatches(result.answer, corpus, otherCorpora(hit, [...result.sources, ...hits]))) return true;
+      const others = otherCorpora(hit, readHits([...result.sources, ...hits]));
+      if (passageMatches(result.answer, corpus, others)) return true;
       return onlyLocatedGrep && grepFiles.has(vaultFileKey(hit.file)) && hit.line > 1;
     }
     const key = vaultFileKey(hit.file);
@@ -472,18 +505,28 @@ function keepAnswerCitations(hits: SearchHit[], result: AskAgentResult): SearchH
 }
 
 /**
- * A PDF the agent read always yields a chip. Matching pages are already kept.
- * When none match, cite the file once, labeled "file", with no page.
+ * A file the agent read and answered from always yields a chip. A matched
+ * passage is already in `kept`. What remains is labeled "file".
+ * A PDF read is always answered-from for this fallback. A note is answered-from
+ * when the answer's content words occur in it. Another read that holds the
+ * answer's fact suppresses a note whose overlap is only the shared token.
  */
-function citeReadPdfWithoutPage(kept: SearchHit[], result: AskAgentResult): SearchHit[] {
+function citeAnsweredReads(kept: SearchHit[], result: AskAgentResult): SearchHit[] {
   const cited = new Set(kept.map((hit) => vaultFileKey(hit.file)));
   const out = [...kept];
+  const reads = readHits(result.sources);
   const seen = new Set<string>();
-  for (const source of result.sources) {
-    if (source.arms !== "read" || !isPdfPath(source.file)) continue;
+  for (const source of reads) {
     const key = vaultFileKey(source.file);
     if (seen.has(key) || cited.has(key)) continue;
     seen.add(key);
+    const pdf = isPdfPath(source.file);
+    const corpus = corpusForFile(key, result.sources);
+    const others = otherCorpora(pdf ? source : { file: source.file }, reads);
+    if (!pdf) {
+      if (answerContentIn(corpus, result.answer).length === 0) continue;
+      if (suppressedByOtherRead(result.answer, corpus, others)) continue;
+    }
     const fileHit: SearchHit = { ...source, line: FILE_CITE_LINE, heading: "" };
     delete fileHit.page;
     out.push(fileHit);
@@ -565,7 +608,7 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
   }
 
   const located = keepAnswerCitations(dropUnresolvedWholeFileShadows(out), result);
-  return collapsePdfPages(citeReadPdfWithoutPage(located, result));
+  return collapsePdfPages(citeAnsweredReads(located, result));
 }
 
 const INLINE_PATH_CITE = /\[([^\[\]\n]+?):(\d+)\]/g;

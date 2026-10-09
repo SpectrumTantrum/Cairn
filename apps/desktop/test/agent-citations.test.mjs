@@ -644,12 +644,16 @@ test("find, grep Section B, then read keeps the line-21 chip for a paraphrase", 
   assert.equal(resolveCitationLine(heronForGrep, cites[0]), 21);
 });
 
-test("find then read with a short answer shows no chip when nothing was grepped", async () => {
-  // Three words cannot pass the 4-word matcher, and the answer cites no path.
-  // Without a located grep hit there is nothing for a chip to point at.
+test("find then read with a short answer cites the file when nothing was grepped", async () => {
+  // Three words cannot pass the 4-word matcher. The note was read and it contains
+  // the answer, so the chip is the file rather than nothing.
   const state = await searchThenMaybeGrepThenRead(false);
   const cites = heronChips(TERSE_ANSWER, state);
-  assert.equal(cites.length, 0);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "project-heron.md");
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].heading, "");
+  assert.equal(citationLineLabel(cites[0].line), "file");
 });
 
 test("citation tooltip line equals the click target line", () => {
@@ -900,6 +904,104 @@ function chipsFor(answer, state) {
     ...agentShell,
   });
 }
+
+test("a search hit does not suppress a note that was read", () => {
+  const answer = "The field code is COPPER FINCH and the number is 312.";
+  const cites = citationsFromAskAgent({
+    answer,
+    sources: [
+      readHit("project-heron.md", "The notebook codename is COPPER FINCH and the badge is 999.\n"),
+      {
+        file: "other.md",
+        line: 4,
+        heading: "Elsewhere",
+        score: 1,
+        cosine: NaN,
+        snippet: "The field code is COPPER FINCH, 312 under Section B.",
+        text: "The field code is COPPER FINCH, 312 under Section B.",
+        arms: "find",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), true);
+});
+
+const heronQa = linesToNote({
+  1: "# Project Heron",
+  3: "Status notes for the heron effort.",
+  5: "Preamble before either section.",
+  13: "## Section A",
+  15: "Earlier draft. The working name was still unset.",
+  21: "## Section B",
+  23: "The field listing is COPPER FINCH, with 312 sensors.",
+});
+
+async function listSearchReadHeron() {
+  const chunks = await chunkMarkdown(heronQa);
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: chunks.map((chunk, ordinal) => ({
+      id: ordinal + 1,
+      file: "project-heron.md",
+      ordinal: chunk.ordinal,
+      line: chunk.line,
+      heading: chunk.heading,
+      text: chunk.text,
+      hash: `qa-${ordinal}`,
+    })),
+  });
+  const state = { sources: [], opened: [] };
+  const ctx = {
+    index,
+    readNote: async (path) => {
+      if (path !== "project-heron.md") throw new Error(`missing ${path}`);
+      return heronQa;
+    },
+    listNotes: async () => ["project-heron.md"],
+    defaultMode: "lexical",
+  };
+  try {
+    await runAskSearchTool("list", {}, ctx, state);
+    await runAskSearchTool("find", { query: "Project Heron", k: 8 }, ctx, state);
+    await runAskSearchTool("read", { path: "project-heron.md" }, ctx, state);
+    assert.equal(state.sources.some((source) => source.arms === "grep"), false);
+    assert.equal(state.sources.some((source) => source.arms === "read" && source.file === "project-heron.md"), true);
+    return state;
+  } finally {
+    index.close();
+  }
+}
+
+test("QA: list, search Project Heron, read project-heron.md cites Section B for COPPER FINCH, with 312 sensors", async () => {
+  const questionSteps = ["list", "search Project Heron", "read project-heron.md"];
+  assert.deepEqual(questionSteps, ["list", "search Project Heron", "read project-heron.md"]);
+  const state = await listSearchReadHeron();
+  const cites = heronChips("COPPER FINCH, with 312 sensors", state);
+  assert.ok(cites.length >= 1);
+  assert.equal(cites[0].file, "project-heron.md");
+  assert.equal(cites[0].line, 21);
+  assert.equal(cites[0].heading, "Section B");
+  assert.equal(`${cites[0].file}:${citationLineLabel(cites[0].line)} › ${cites[0].heading}`, "project-heron.md:21 › Section B");
+  assert.equal(
+    citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading),
+    "Open project-heron.md at line 21 › Section B",
+  );
+});
+
+test("QA: list, search Project Heron, read project-heron.md cites the file for COPPER FINCH", async () => {
+  const state = await listSearchReadHeron();
+  const cites = heronChips("COPPER FINCH", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "project-heron.md");
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].heading, "");
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.equal(`${cites[0].file}:${citationLineLabel(cites[0].line)}`, "project-heron.md:file");
+});
 
 test("QA: In section-b.pdf, what is the field code — list then read cites the matching page", async () => {
   const question = "In section-b.pdf, what is the field code?";
