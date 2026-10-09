@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, Cloud, HardDrive, Sparkles } from "lucide-react";
 import type {
   DesktopChatSendResult,
@@ -6,6 +6,7 @@ import type {
   ProviderMeta,
   SearchHit,
 } from "../../../shared/types.js";
+import { buildProgressView, type AgenticProgressState } from "../../agentic-progress";
 import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
@@ -13,11 +14,8 @@ import type { AgentThreadTurn } from "./AgentTurn";
 import { AnswerText } from "./AnswerText";
 import { CitationCard } from "./CitationCard";
 
-/** Live tool-step list while agentic Ask runs (classic Ask leaves this unset). */
-export type AgenticAskStreamState = {
-  steps: string[];
-  status: string;
-};
+/** Live tool-step list and start time while agentic Ask runs (classic Ask leaves this unset). */
+export type AgenticAskStreamState = AgenticProgressState;
 
 export type ChatTurn =
   | { role: "user"; text: string }
@@ -135,6 +133,18 @@ export function ChatTab(props: ChatTabProps) {
   );
 }
 
+/** Tick once a second so the elapsed clock moves while the model is quiet. */
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
 /** The in-flight assistant turn: classic stream text, or agentic tool-step progress. */
 function StreamingTurn({
   text,
@@ -146,7 +156,8 @@ function StreamingTurn({
   agentic?: AgenticAskStreamState;
 }) {
   const showAgentic = agentic !== undefined;
-  const status = agentic?.status ?? label ?? "Grounding in your notes…";
+  const now = useNow(showAgentic);
+  const status = label ?? "Grounding in your notes…";
   return (
     <div className="chat-assistant">
       <span className="chat-avatar">
@@ -154,18 +165,7 @@ function StreamingTurn({
       </span>
       <div className="chat-assistant-body">
         {showAgentic ? (
-          <>
-            {agentic.steps.length > 0 ? (
-              <ol className="agentic-progress-steps">
-                {agentic.steps.map((step, idx) => (
-                  <li key={idx}>{step}</li>
-                ))}
-              </ol>
-            ) : null}
-            <span className="chat-thinking">
-              <span className="dot-pulse" /> {status}
-            </span>
-          </>
+          <AgenticProgressPanel state={agentic} now={now} />
         ) : text.length === 0 ? (
           <span className="chat-thinking">
             <span className="dot-pulse" /> {status}
@@ -173,6 +173,40 @@ function StreamingTurn({
         ) : (
           <div className="assistant-text streaming">{text}</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * While agentic Ask runs, show that it is still working, how long it has taken,
+ * the current status, and each tool step as it happens.
+ */
+function AgenticProgressPanel({ state, now }: { state: AgenticAskStreamState; now: number }) {
+  const view = buildProgressView(state, now);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const activity = `${state.status}|${state.steps.length}`;
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activity]);
+  return (
+    <div className="agentic-progress" ref={panelRef}>
+      <div className="agentic-progress-head">
+        <span className="dot-pulse" aria-hidden="true" />
+        <span className="agentic-progress-working">{view.workingLabel}</span>
+        <span className="agentic-progress-elapsed">{view.elapsedText}</span>
+      </div>
+      <div aria-live="polite">
+        {view.showStatus ? <p className="agentic-progress-status">{view.status}</p> : null}
+        {view.steps.length > 0 ? (
+          <ol className="agentic-progress-steps">
+            {view.steps.map((step, idx) => (
+              <li key={idx} className={step.current ? "is-current" : "is-done"}>
+                {step.label}
+              </li>
+            ))}
+          </ol>
+        ) : null}
       </div>
     </div>
   );
