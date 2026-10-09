@@ -67,7 +67,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "grep",
     description:
-      "Substring search over indexed chunk text (case-insensitive). Use to locate exact phrases; optional path limits to one note.",
+      "Substring search over indexed chunk text (case-insensitive). Each hit is the line where the pattern matched and the nearest heading at or above that line, not the start of the chunk. Optional path limits to one note.",
     parameters: {
       type: "object",
       properties: {
@@ -156,6 +156,43 @@ function snippet(text: string, max = 160): string {
   return t.length <= max ? t : `${t.slice(0, max - 1)}…`;
 }
 
+/** ATX heading title, or null when the line is not a heading. */
+function atxHeadingTitle(line: string): string | null {
+  const m = /^(#{1,6})[ \t]+(.+)$/.exec(line.trimEnd());
+  if (!m) return null;
+  const title = m[2].replace(/\s+#+\s*$/, "").trim();
+  return title.length > 0 ? title : null;
+}
+
+/**
+ * Where a grep needle sits inside one indexed chunk.
+ * `line` is the 1-based line of the first match, not the chunk start.
+ * `heading` is the nearest ATX heading at or above that line inside the chunk.
+ * A match before any heading keeps the chunk heading (the heading above the
+ * chunk, or "" when the note has not started one yet).
+ */
+function matchInsideChunk(
+  chunkLine: number,
+  chunkHeading: string,
+  text: string,
+  needle: string,
+): { line: number; heading: string; snippet: string } {
+  const at = text.toLowerCase().indexOf(needle);
+  if (at < 0) return { line: chunkLine, heading: chunkHeading, snippet: snippet(text) };
+  const rel = text.slice(0, at).match(/\n/g)?.length ?? 0;
+  const lines = text.split(/\r?\n/);
+  let heading = "";
+  for (let i = 0; i <= rel && i < lines.length; i++) {
+    const title = atxHeadingTitle(lines[i] ?? "");
+    if (title) heading = title;
+  }
+  return {
+    line: chunkLine + rel,
+    heading: heading || chunkHeading,
+    snippet: snippet(lines[rel] ?? text),
+  };
+}
+
 /**
  * Run one read-only search tool. Mutates `state` (sources/opened) and returns the tool message string.
  */
@@ -219,26 +256,31 @@ export async function runAskSearchTool(
         ? [normalizePath(pathFilter)]
         : ctx.scope;
     const matches = ctx.index.grepChunks(needle, limit, scope);
-    for (const m of matches) {
+    const located = matches.map((m) => ({
+      file: m.file,
+      text: m.text,
+      ...matchInsideChunk(m.line, m.heading, m.text, needle),
+    }));
+    for (const m of located) {
       mergeSource(state, {
         file: m.file,
         line: m.line,
         heading: m.heading,
         score: NaN,
         cosine: NaN,
-        snippet: snippet(m.text),
+        snippet: m.snippet,
         text: m.text,
         arms: "grep",
       });
     }
     return JSON.stringify({
-      matches: matches.map((m) => ({
+      matches: located.map((m) => ({
         file: m.file,
         line: m.line,
         heading: m.heading || undefined,
-        snippet: snippet(m.text),
+        snippet: m.snippet,
       })),
-      count: matches.length,
+      count: located.length,
     });
   }
 

@@ -538,3 +538,124 @@ test("ambiguous basename inline cites are stripped and full paths still match", 
   );
   assert.equal(flattenCites(splitInlineCites("ends [missing.md:3]", [])), "ends");
 });
+
+const { runAskSearchTool } = await import("@cairn/engine");
+const { InMemoryIndex } = await import("@cairn/engine/testing");
+const { chunkMarkdown } = await import("../../../packages/engine/dist/chunk.js");
+
+const TERSE_ANSWER = "COPPER FINCH, 312";
+const PARAPHRASE_ANSWER = "The codename is COPPER FINCH and the number is 312.";
+
+const heronForGrep = linesToNote({
+  1: "# Project Heron",
+  3: "Status notes for the heron effort.",
+  5: "Preamble before either section.",
+  13: "## Section A",
+  15: "Earlier draft. The working name was still unset.",
+  21: "## Section B",
+  23: "The unique cairn-alpha phrase is COPPER FINCH, 312.",
+});
+
+async function indexedHeron() {
+  const chunks = await chunkMarkdown(heronForGrep);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].line, 1);
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "project-heron.md",
+        ordinal: chunks[0].ordinal,
+        line: chunks[0].line,
+        heading: chunks[0].heading,
+        text: chunks[0].text,
+        hash: "heron",
+      },
+    ],
+  });
+  return { index, chunkHeading: chunks[0].heading };
+}
+
+async function searchThenMaybeGrepThenRead(grep) {
+  const { index, chunkHeading } = await indexedHeron();
+  try {
+    const state = { sources: [], opened: [] };
+    const ctx = {
+      index,
+      readNote: async (path) => {
+        if (path !== "project-heron.md") throw new Error(`missing ${path}`);
+        return heronForGrep;
+      },
+      defaultMode: "lexical",
+    };
+    await runAskSearchTool("find", { query: "COPPER FINCH", k: 4 }, ctx, state);
+    if (grep) {
+      const reported = JSON.parse(
+        await runAskSearchTool("grep", { pattern: "Section B" }, ctx, state),
+      );
+      assert.equal(reported.matches[0].file, "project-heron.md");
+      assert.equal(reported.matches[0].line, 21);
+      assert.equal(reported.matches[0].heading, "Section B");
+      const findHit = state.sources.find((s) => s.arms === "fts");
+      const grepHit = state.sources.find((s) => s.arms === "grep");
+      assert.ok(findHit);
+      assert.ok(grepHit);
+      assert.equal(findHit.line, 1);
+      assert.equal(findHit.heading, chunkHeading);
+      assert.notEqual(
+        `${findHit.file}:${findHit.line}:${findHit.heading}`,
+        `${grepHit.file}:${grepHit.line}:${grepHit.heading}`,
+      );
+    }
+    await runAskSearchTool("read", { path: "project-heron.md" }, ctx, state);
+    return state;
+  } finally {
+    index.close();
+  }
+}
+
+function heronChips(answer, state) {
+  return citationsFromAskAgent({
+    answer,
+    sources: state.sources,
+    opened: state.opened,
+    ...agentShell,
+  }).filter((hit) => hit.file === "project-heron.md");
+}
+
+test("find, grep Section B, then read cites project-heron at line 21 for a terse answer", async () => {
+  const state = await searchThenMaybeGrepThenRead(true);
+  const cites = heronChips(TERSE_ANSWER, state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].line, 21);
+  assert.equal(cites[0].heading, "Section B");
+  assert.equal(cites[0].arms, "grep");
+  assert.equal(citationLineLabel(cites[0].line), "21");
+  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open project-heron.md at line 21");
+  assert.equal(resolveCitationLine(heronForGrep, cites[0]), 21);
+});
+
+test("find, grep Section B, then read keeps the line-21 chip for a paraphrase", async () => {
+  const state = await searchThenMaybeGrepThenRead(true);
+  const cites = heronChips(PARAPHRASE_ANSWER, state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].line, 21);
+  assert.equal(cites[0].heading, "Section B");
+  assert.equal(citationLineLabel(cites[0].line), "21");
+  assert.equal(resolveCitationLine(heronForGrep, cites[0]), 21);
+});
+
+test("find then read with a short answer stays a file chip when nothing was grepped", async () => {
+  const state = await searchThenMaybeGrepThenRead(false);
+  const cites = heronChips(TERSE_ANSWER, state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].heading, "");
+  assert.equal(cites[0].arms, "read");
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open project-heron.md (file)");
+  assert.equal(resolveCitationLine(heronForGrep, cites[0]), 1);
+});
