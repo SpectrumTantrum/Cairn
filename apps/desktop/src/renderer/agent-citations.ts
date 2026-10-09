@@ -533,3 +533,50 @@ export function resolveCitationLine(content: string, hit: Pick<SearchHit, "line"
   }
   return hit.line > 0 ? hit.line : 1;
 }
+
+function collapsedLine(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim();
+}
+
+/** 1-based line in `text` that contains the snippet, if any. */
+function lineMatchingSnippet(text: string, snippet: string): number | null {
+  const want = collapsedLine(snippet).replace(/…$/, "").trim();
+  if (want.length < 8) return null;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = collapsedLine(lines[i] ?? "");
+    if (!line) continue;
+    if (line.includes(want) || want.includes(line)) return i + 1;
+  }
+  return null;
+}
+
+/**
+ * File line a citation click opens, from the hit alone.
+ * When the hit text contains the heading, that heading line wins over a later
+ * matched fact line so the tooltip matches `resolveCitationLine` on the note.
+ * A file sentinel (line <= 0) is unchanged — the chip still says "file".
+ */
+export function citationLandingLine(
+  hit: Pick<SearchHit, "line" | "heading" | "text" | "snippet">,
+): number {
+  if (hit.line <= 0) return hit.line;
+  if (!hit.heading?.trim()) return hit.line;
+  const text = hit.text ?? "";
+  const headingAt = text ? lineForMarkdownHeading(text, hit.heading) : null;
+  if (headingAt === null) return hit.line;
+
+  const lineCount = text.split(/\r?\n/).length;
+  const snippetAt = lineMatchingSnippet(text, hit.snippet ?? "");
+  // Whole note, or a chunk that starts at file line 1: the stored line is the
+  // heading or the matched fact inside this text.
+  if (hit.line <= lineCount && (hit.line === headingAt || hit.line === snippetAt)) {
+    return resolveCitationLine(text, hit);
+  }
+  // A later chunk: the stored line is the match, past line 1 of the file.
+  if (snippetAt !== null && hit.line > lineCount) {
+    const start = hit.line - snippetAt + 1;
+    if (start > 1) return resolveCitationLine(`${"\n".repeat(start - 1)}${text}`, hit);
+  }
+  return hit.line;
+}

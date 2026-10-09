@@ -41,6 +41,10 @@ test("typeChip uppercases unknown extensions", () => {
 test("citationTitle formats the open-target hover string", () => {
   assert.equal(citationTitle("notes/a.md", 42), "Open notes/a.md at line 42");
   assert.equal(citationTitle("b.md", 1), "Open b.md at line 1");
+  assert.equal(
+    citationTitle("project-heron.md", 21, "Section B"),
+    "Open project-heron.md at line 21 › Section B",
+  );
 });
 
 test("unresolved whole-file cites are labeled file, not line 1", () => {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const {
+  citationLandingLine,
   citationsFromAskAgent,
   lineForMarkdownHeading,
   resolveCitationLine,
@@ -624,7 +625,11 @@ test("find, grep Section B, then read cites project-heron at line 21 for a terse
   assert.equal(cites[0].heading, "Section B");
   assert.equal(cites[0].arms, "grep");
   assert.equal(citationLineLabel(cites[0].line), "21");
-  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open project-heron.md at line 21");
+  assert.equal(citationLandingLine(cites[0]), resolveCitationLine(heronForGrep, cites[0]));
+  assert.equal(
+    citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading),
+    "Open project-heron.md at line 21 › Section B",
+  );
   assert.equal(resolveCitationLine(heronForGrep, cites[0]), 21);
 });
 
@@ -644,6 +649,30 @@ test("find then read with a short answer shows no chip when nothing was grepped"
   const state = await searchThenMaybeGrepThenRead(false);
   const cites = heronChips(TERSE_ANSWER, state);
   assert.equal(cites.length, 0);
+});
+
+test("citation tooltip line equals the click target line", () => {
+  const note = linesToNote({
+    1: "# Project Heron",
+    21: "## Section B",
+    25: CLEAN_FACT,
+  });
+  const hit = {
+    file: "project-heron.md",
+    line: 25,
+    heading: "Section B",
+    score: NaN,
+    cosine: NaN,
+    snippet: CLEAN_FACT,
+    text: note,
+    arms: "grep",
+  };
+  const click = resolveCitationLine(note, hit);
+  const landing = citationLandingLine(hit);
+  assert.equal(click, 21);
+  assert.equal(landing, click);
+  assert.equal(citationLineLabel(landing), "21");
+  assert.equal(citationTitle(hit.file, landing, hit.heading), "Open project-heron.md at line 21 › Section B");
 });
 
 test("an unused search hit gets no chip", () => {
