@@ -6,7 +6,7 @@ This repo has the desktop app and the headless engine `@cairn/engine` ([ADR-0001
 
 **Classic Ask is the default.** Agentic search (agentic Ask) is opt-in. The setting `cairn.agenticAsk` is off until you turn it on, and the launch flag `CAIRN_AGENTIC_ASK` is off unless you set it to `1`. Agentic Ask has been tested on the Ollama model `qwen3:8b` only.
 
-With agentic Ask on, the desktop app shows each search and tool step live. Clicking a citation opens the cited note.
+With agentic Ask on, the desktop app shows each search and tool step live. Clicking a citation opens the cited note, at the matched heading when Ask located the passage. Otherwise the chip says 'file' and opens the top of the note.
 
 An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
 
@@ -88,7 +88,7 @@ node packages/engine/dist/cli.js ask "why did we choose X over Y?" --in /path/to
 ## Principles
 
 - **Local-first.** No telemetry. Network calls go only to model endpoints you configure: Ollama on localhost, or a cloud endpoint you add.
-- **Cited.** Search results name the note as `file:line › heading`. With agentic Ask on, clicking a citation opens the cited note.
+- **Cited.** Search results name the note as `file:line › heading`. With agentic Ask on, clicking a citation opens the cited note, at the matched heading when Ask located the passage. Otherwise the chip says 'file' and opens the top of the note.
 - **Permissive-license-only.** MIT / Apache-2.0 / BSD / MPL dependencies only. AGPL/GPL dependencies are excluded.
 
 ## License

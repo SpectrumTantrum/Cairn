@@ -227,6 +227,156 @@ test("grep tool matches indexed chunk text", async () => {
     );
     assert.match(out, /other\.md/);
     assert.equal(state.sources.length, 1);
+    assert.equal(state.sources[0].line, 1);
+    assert.equal(state.sources[0].heading, "Other");
+  } finally {
+    index.close();
+  }
+});
+
+test("grep records the matched line and enclosing heading inside a chunk", async () => {
+  const { chunkMarkdown } = await import("../dist/chunk.js");
+  const deep = [
+    "zebra in the preamble.",
+    "",
+    "# Title",
+    "",
+    "Intro line.",
+    "",
+    "## Section A",
+    "",
+    "Alpha body.",
+    "",
+    "## Section B",
+    "",
+    "Deep copper finch under B.",
+  ].join("\n");
+  const heron = [
+    "# Project Heron",
+    "",
+    "Status notes for the heron effort.",
+    "",
+    "Preamble before either section.",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "## Section A",
+    "",
+    "Earlier draft.",
+    "",
+    "",
+    "",
+    "",
+    "",
+    "## Section B",
+    "",
+    "The unique cairn-alpha phrase is COPPER FINCH, 312.",
+  ].join("\n");
+  assert.equal(heron.split("\n")[20], "## Section B");
+
+  const index = new InMemoryIndex();
+  try {
+    const heronChunks = await chunkMarkdown(heron);
+    assert.equal(heronChunks.length, 1);
+    assert.equal(heronChunks[0].line, 1);
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 2,
+      chunks: [
+        {
+          id: 1,
+          file: "notes/deep.md",
+          ordinal: 0,
+          line: 1,
+          heading: "",
+          text: deep,
+          hash: "deep",
+        },
+        {
+          id: 2,
+          file: "notes/continued.md",
+          ordinal: 1,
+          line: 30,
+          heading: "Section A",
+          text: "still the same section.\nquartz appears here.\n",
+          hash: "cont",
+        },
+        {
+          id: 3,
+          file: "project-heron.md",
+          ordinal: 0,
+          line: heronChunks[0].line,
+          heading: heronChunks[0].heading,
+          text: heronChunks[0].text,
+          hash: "heron",
+        },
+      ],
+    });
+    const ctx = { index, readNote: async () => "", defaultMode: "lexical" };
+
+    const sectionB = JSON.parse(
+      await runAskSearchTool("grep", { pattern: "Section B", path: "notes/deep.md" }, ctx, {
+        sources: [],
+        opened: [],
+      }),
+    );
+    assert.equal(sectionB.matches.length, 1);
+    assert.equal(sectionB.matches[0].line, 11);
+    assert.equal(sectionB.matches[0].heading, "Section B");
+
+    const deepBody = JSON.parse(
+      await runAskSearchTool("grep", { pattern: "Deep copper", path: "notes/deep.md" }, ctx, {
+        sources: [],
+        opened: [],
+      }),
+    );
+    assert.equal(deepBody.matches[0].line, 13);
+    assert.equal(deepBody.matches[0].heading, "Section B");
+
+    const alpha = JSON.parse(
+      await runAskSearchTool("grep", { pattern: "Alpha body", path: "notes/deep.md" }, ctx, {
+        sources: [],
+        opened: [],
+      }),
+    );
+    assert.equal(alpha.matches[0].line, 9);
+    assert.equal(alpha.matches[0].heading, "Section A");
+
+    const preamble = JSON.parse(
+      await runAskSearchTool("grep", { pattern: "zebra", path: "notes/deep.md" }, ctx, {
+        sources: [],
+        opened: [],
+      }),
+    );
+    assert.equal(preamble.matches[0].line, 1);
+    assert.equal(preamble.matches[0].heading, undefined);
+
+    const continued = JSON.parse(
+      await runAskSearchTool("grep", { pattern: "quartz", path: "notes/continued.md" }, ctx, {
+        sources: [],
+        opened: [],
+      }),
+    );
+    assert.equal(continued.matches[0].line, 31);
+    assert.equal(continued.matches[0].heading, "Section A");
+
+    const heronGrep = { sources: [], opened: [] };
+    const heronOut = JSON.parse(
+      await runAskSearchTool("grep", { pattern: "Section B", path: "project-heron.md" }, ctx, heronGrep),
+    );
+    assert.equal(heronOut.matches[0].line, 21);
+    assert.equal(heronOut.matches[0].heading, "Section B");
+    assert.equal(heronGrep.sources[0].line, 21);
+    assert.equal(heronGrep.sources[0].heading, "Section B");
+    assert.equal(heronGrep.sources[0].arms, "grep");
+    assert.notEqual(
+      `${heronGrep.sources[0].file}:${heronGrep.sources[0].line}:${heronGrep.sources[0].heading}`,
+      `project-heron.md:1:${heronChunks[0].heading}`,
+    );
   } finally {
     index.close();
   }
