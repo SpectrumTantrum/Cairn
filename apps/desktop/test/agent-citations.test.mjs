@@ -188,12 +188,13 @@ test("whole-file read ignores a wrong Section A anchor when the fact is under Se
 test("heading search still lands on Section 2 at line 13", () => {
   assert.equal(lineForMarkdownHeading(messyNote, "Section 2"), 13);
   const sectionTwo = "Section two holds the heading-search target passage.";
+  const file = "MixedCase/ReadMe.md";
   const result = {
     answer: "See [1]. First section is a decoy.",
     sources: [
-      readHit("ReadMe.md", messyNote),
+      readHit(file, messyNote),
       {
-        file: "ReadMe.md",
+        file,
         line: 13,
         heading: "Section 2",
         score: 1,
@@ -203,7 +204,7 @@ test("heading search still lands on Section 2 at line 13", () => {
         arms: "find",
       },
     ],
-    opened: [{ path: "ReadMe.md", heading: "Section 2" }],
+    opened: [{ path: file, heading: "Section 2" }],
     ...agentShell,
     steps: 2,
   };
@@ -441,6 +442,71 @@ test("inline cite keeps a lone file chip when nothing resolved a passage", () =>
   assert.equal(chips[0].hit, fileChip);
   assert.equal(citationLineLabel(chips[0].hit.line), "file");
   assert.equal(flattenCites(segments), "See {0:}.");
+});
+
+test("clean vault cite of project-heron.md:12 keeps one Section B chip at line 21", () => {
+  const read = readHit("project-heron.md", cleanNote);
+  const top = {
+    ...read,
+    arms: "dense+fts",
+    text: cleanNote.split("\n").slice(0, 12).join("\n"),
+  };
+  const sectionB = {
+    file: "project-heron.md",
+    line: 21,
+    heading: "Section B",
+    score: 1,
+    cosine: NaN,
+    snippet: CLEAN_FACT,
+    text: CLEAN_FACT,
+    arms: "dense+fts",
+  };
+  const answer = `See [project-heron.md:12]. ${CLEAN_FACT}`;
+  const cites = citationsFromAskAgent({
+    answer,
+    sources: [top, sectionB, read],
+    opened: [{ path: "project-heron.md", line: 12 }],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "project-heron.md");
+  assert.equal(cites[0].line, 21);
+  assert.equal(cites[0].heading, "Section B");
+  assert.match(cites[0].snippet, /enclosing heading line/);
+  assert.equal(cites[0].snippet.includes("Notes for the agentic Ask citation check"), false);
+  const segments = splitInlineCites(answer, cites);
+  const chips = segments.filter((s) => s.kind === "cite");
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].hit, cites[0]);
+  assert.equal(chips[0].hit.line, 21);
+  assert.equal(chips[0].hit.heading, "Section B");
+  assert.equal(
+    segments.map((s) => (s.kind === "text" ? s.text : "")).join("").includes("[project-heron.md:12]"),
+    false,
+  );
+  assert.equal(flattenCites(segments), `See {21:Section B}. ${CLEAN_FACT}`);
+});
+
+test("unmatched reads of meeting-notes, reading-list, and recipes are labeled file", () => {
+  const files = ["meeting-notes.md", "reading-list.md", "recipes.md"];
+  const cites = citationsFromAskAgent({
+    answer: "Bananas telescope through purple widgets overnight.",
+    sources: files.map((file) =>
+      readHit(file, `# ${file}\n\nBody that does not overlap the answer at all.\n`),
+    ),
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 3);
+  for (const file of files) {
+    const hit = cites.find((c) => c.file === file);
+    assert.ok(hit);
+    assert.equal(hit.line, FILE_CITE_LINE);
+    assert.equal(hit.heading, "");
+    assert.equal(citationLineLabel(hit.line), "file");
+    assert.equal(citationTitle(hit.file, hit.line), `Open ${file} (file)`);
+    assert.equal(resolveCitationLine(`# ${file}\n\nBody\n`, hit), 1);
+  }
 });
 
 test("ambiguous basename inline cites are stripped and full paths still match", () => {

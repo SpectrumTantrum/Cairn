@@ -1,5 +1,6 @@
 import { Check } from "lucide-react";
 import type { SearchHit } from "../../../shared/types.js";
+import { citationBeats } from "../../agent-citations";
 import { CitationCard } from "./CitationCard";
 import { typeChip } from "../../cite-format";
 
@@ -61,12 +62,16 @@ export function SourcesTab({ sources, excluded, onToggle, onOpen }: SourcesTabPr
 }
 
 function dedupe(sources: SearchHit[]): SearchHit[] {
-  const seen = new Set<string>();
-  const out: SearchHit[] = [];
-  for (const s of sources) {
-    if (seen.has(s.file)) continue;
-    seen.add(s.file);
-    out.push(s);
+  const best = new Map<string, SearchHit>();
+  const order: string[] = [];
+  for (const hit of sources) {
+    const prev = best.get(hit.file);
+    if (!prev) {
+      best.set(hit.file, hit);
+      order.push(hit.file);
+      continue;
+    }
+    if (citationBeats(hit, prev)) best.set(hit.file, hit);
   }
-  return out;
+  return order.map((file) => best.get(file)!);
 }

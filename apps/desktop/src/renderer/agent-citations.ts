@@ -192,34 +192,92 @@ function retargetWholeFileRead(hit: SearchHit, answer: string, sources: SearchHi
   };
 }
 
-function isUnresolvedWholeFileChip(hit: SearchHit): boolean {
-  return hit.arms === "read" && hit.line <= 0 && !hit.heading?.trim();
-}
-
 function vaultFileKey(file: string): string {
   return normVaultPath(file);
 }
 
+function citationRank(hit: SearchHit): number {
+  if (hit.heading?.trim() && hit.line > 1) return 4;
+  if (hit.line > 1) return 3;
+  if (hit.heading?.trim() && hit.line > 0) return 2;
+  if (hit.line > 0) return 1;
+  return 0;
+}
+
+/** True when `next` is a better open target than `prev` for the same note. */
+export function citationBeats(next: SearchHit, prev: SearchHit): boolean {
+  return citationRank(next) > citationRank(prev);
+}
+
+function normalizeSnippet(snippet: string): string {
+  return snippet.replace(/\s+/g, " ").trim();
+}
+
 /**
- * One note can produce both a heading/passage chip and the original whole-file read.
- * Keep the resolved chip. Collapse leftover unmatched reads to a single "file" chip.
+ * A chip that is only the top of the file: line 1 with no heading, the file sentinel,
+ * or the same file-start snippet copied onto the model's line number.
+ */
+function isWholeFileShadow(hit: SearchHit, topSnippets: ReadonlySet<string>): boolean {
+  if (hit.line > 1 && hit.heading?.trim()) return false;
+  if (hit.line <= 1 && !hit.heading?.trim()) return true;
+  if (hit.line <= 0) return true;
+  const snippet = normalizeSnippet(hit.snippet);
+  if (!snippet) return !hit.heading?.trim();
+  return topSnippets.has(snippet);
+}
+
+/**
+ * Per file, a passage or heading chip beats an unmatched / line-1 / file-start chip.
+ * Distinct heading hits (Section 1 and Section 2) both stay. Leftover whole-file
+ * reads collapse to one chip labeled "file".
  */
 function dropUnresolvedWholeFileShadows(hits: SearchHit[]): SearchHit[] {
-  const filesWithResolved = new Set<string>();
+  const groups = new Map<string, SearchHit[]>();
+  const order: string[] = [];
   for (const hit of hits) {
-    if (!isUnresolvedWholeFileChip(hit)) filesWithResolved.add(vaultFileKey(hit.file));
-  }
-  const kept: SearchHit[] = [];
-  const seenUnresolved = new Set<string>();
-  for (const hit of hits) {
-    if (isUnresolvedWholeFileChip(hit)) {
-      const key = vaultFileKey(hit.file);
-      if (filesWithResolved.has(key) || seenUnresolved.has(key)) continue;
-      seenUnresolved.add(key);
+    const key = vaultFileKey(hit.file);
+    const group = groups.get(key);
+    if (group) group.push(hit);
+    else {
+      groups.set(key, [hit]);
+      order.push(key);
     }
-    kept.push(hit);
+  }
+
+  const kept: SearchHit[] = [];
+  for (const key of order) {
+    const group = groups.get(key) ?? [];
+    const topSnippets = new Set(
+      group
+        .filter((hit) => hit.line <= 1)
+        .map((hit) => normalizeSnippet(hit.snippet))
+        .filter((snippet) => snippet.length > 0),
+    );
+    const hasSpecific = group.some((hit) => hit.line > 1 && !isWholeFileShadow(hit, topSnippets));
+    if (!hasSpecific) {
+      kept.push(collapseWholeFile(group));
+      continue;
+    }
+    const seen = new Set<string>();
+    for (const hit of group) {
+      if (isWholeFileShadow(hit, topSnippets)) continue;
+      const id = sourceKey(hit);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      kept.push(hit);
+    }
   }
   return kept;
+}
+
+/** One chip for a note that never resolved past the top of the file. Reads say "file". */
+function collapseWholeFile(group: SearchHit[]): SearchHit {
+  const preferred = group.find((hit) => hit.arms === "read" || hit.line <= 0) ?? group[0];
+  if (preferred.heading?.trim()) return preferred;
+  if (preferred.arms === "read" || preferred.line <= 0) {
+    return { ...preferred, line: FILE_CITE_LINE };
+  }
+  return preferred;
 }
 
 /**
@@ -233,8 +291,11 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
 
   for (const o of opened) {
     const match = pickSourceForOpen(sources, o.path, o.line, o.heading);
-    const line = o.line ?? match?.line ?? 1;
-    const heading = o.heading ?? match?.heading ?? "";
+    // A heading hit already past line 1 is the location. Do not paint the model's
+    // line (often 1 or a wrong inline cite) over it.
+    const specificMatch = !!match && match.line > 1 && !!match.heading?.trim();
+    const line = specificMatch ? match.line : (o.line ?? match?.line ?? 1);
+    const heading = specificMatch ? match.heading : (o.heading ?? match?.heading ?? "");
     const base: SearchHit = match ?? {
       file: o.path,
       line,
@@ -306,17 +367,16 @@ function hitsForInlinePath(sources: readonly SearchHit[], citedPath: string): Se
   return files.size === 1 ? byBase : [];
 }
 
-/** Ignore the model's line number. Prefer a heading or passage chip over a file-level read. */
-function preferResolvedHit(hits: readonly SearchHit[], citedLine: number): SearchHit | undefined {
+/** Ignore the bracket's line. A heading or passage chip beats a line-1 / file chip. */
+function preferResolvedHit(hits: readonly SearchHit[]): SearchHit | undefined {
   if (hits.length === 0) return undefined;
-  const resolved = hits.filter((h) => h.line > 0 || !!h.heading?.trim());
-  const pool = resolved.length > 0 ? resolved : hits;
-  if (pool.length === 1) return pool[0];
-  const atCitedLine = pool.find((h) => citedLine > 1 && h.line === citedLine);
-  if (atCitedLine) return atCitedLine;
-  const headed = pool.find((h) => !!h.heading?.trim() && h.line > 0);
+  const headed = hits.find((h) => !!h.heading?.trim() && h.line > 1);
   if (headed) return headed;
-  return pool.find((h) => h.line > 0) ?? pool[0];
+  const later = hits.find((h) => h.line > 1);
+  if (later) return later;
+  const titled = hits.find((h) => !!h.heading?.trim() && h.line > 0);
+  if (titled) return titled;
+  return hits.find((h) => h.line > 0) ?? hits[0];
 }
 
 function pushText(segments: InlineAnswerSegment[], text: string): void {
@@ -348,7 +408,7 @@ export function splitInlineCites(answer: string, sources: readonly SearchHit[]):
       before = before.replace(/^[ \t]+/, "");
       trimLeading = false;
     }
-    const hit = preferResolvedHit(hitsForInlinePath(sources, rawPath), Number(match[2]));
+    const hit = preferResolvedHit(hitsForInlinePath(sources, rawPath));
     if (hit) {
       pushText(segments, before);
       segments.push({ kind: "cite", hit });
