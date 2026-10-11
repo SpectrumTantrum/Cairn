@@ -1,7 +1,9 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -10,13 +12,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const { createVaultSession } = await import("../out-test/vault-session.js");
 const { InMemoryIndex, FakeModelProvider } = await import("@cairn/engine/testing");
-const { setModelProvider, resetModelProvider } = await import("@cairn/engine");
+const { setModelProvider, resetModelProvider, IMAGE_NO_TEXT } = await import("@cairn/engine");
+const imageFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/images");
 
 function makeVaultDir() {
   return mkdtempSync(join(tmpdir(), "cairn-vault-session-"));
@@ -180,6 +184,82 @@ test("readSource returns raw CSV and TSV rows and refuses empty or non-UTF-8 tab
     assert.throws(() => session.writeSource("section-b.csv", "x"), /Refusing to write a non-Markdown file/);
     assert.throws(() => session.writeSource("rows.tsv", "x"), /Refusing to write a non-Markdown file/);
   } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("readImage opens a real image and readSource refuses to decode it as text", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    const names = ["section-b.png", "field.jpg", "field.jpeg", "mark.webp", "badge.gif"];
+    for (const name of names) copyFileSync(join(imageFixtures, name), join(vault, name));
+    writeFileSync(join(vault, "project-heron.md"), "# Project Heron\n\nCOPPER FINCH\n");
+
+    const tree = session.listTree();
+    const pngNode = tree.find((node) => node.name === "section-b.png");
+    assert.ok(pngNode);
+    assert.equal(pngNode.type, "other");
+
+    const opened = session.readImage("section-b.png");
+    assert.equal(opened.mime, "image/png");
+    assert.equal(opened.dataUrl.startsWith("data:image/png;base64,"), true);
+    const raw = readFileSync(join(vault, "section-b.png"));
+    assert.ok(raw.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47])));
+    assert.deepEqual(Buffer.from(opened.dataUrl.slice("data:image/png;base64,".length), "base64"), raw);
+
+    assert.equal(session.readImage("field.jpg").mime, "image/jpeg");
+    assert.equal(session.readImage("field.jpeg").mime, "image/jpeg");
+    assert.equal(session.readImage("mark.webp").mime, "image/webp");
+    assert.equal(session.readImage("badge.gif").mime, "image/gif");
+    assert.equal(session.readImage("badge.gif").dataUrl.startsWith("data:image/gif;base64,"), true);
+
+    assert.throws(() => session.readSource("section-b.png"), { message: IMAGE_NO_TEXT });
+    assert.throws(() => session.readSource("gone.png"), /The source file is no longer available/);
+    assert.throws(() => session.readImage("project-heron.md"), /Only an image can be opened/);
+    assert.throws(() => session.readImage("../secret.png"), /Refusing to open a path outside/);
+    assert.throws(() => session.writeSource("section-b.png", "x"), /Refusing to write a non-Markdown file/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("askAgent that names an image misses and does not cite the shared-codename note", async () => {
+  const vault = makeIndexedVaultDir();
+  const note = "# Project Heron\n\nThe notebook codename is COPPER FINCH and the badge is 999.\n";
+  copyFileSync(join(imageFixtures, "section-b.png"), join(vault, "section-b.png"));
+  writeFileSync(join(vault, "project-heron.md"), note);
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [{ name: "read", arguments: { path: "project-heron.md" } }],
+          };
+        }
+        return { content: note, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (dir) => buildLexicalIndex(dir, [{ file: "project-heron.md", text: note }]),
+    });
+    session.setVault(vault);
+    const result = await session.askAgent("What does section-b.png show about Project Heron?");
+    assert.equal(calls, 0);
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
+  } finally {
+    resetModelProvider();
     rmSync(vault, { recursive: true, force: true });
   }
 });

@@ -1,6 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
-import { isHtmlPath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, opensInEditor } from "../../cite-format";
+import { isHtmlPath, isImagePath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, opensInEditor } from "../../cite-format";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -12,6 +12,8 @@ interface EditorPaneProps {
   dirty: boolean;
   loading: boolean;
   loadError: string | null;
+  /** Data URL for the in-app image viewer. Null unless an image file is open. */
+  imageSrc: string | null;
   flash: { line: number; nonce: number } | null;
   cursor: { line: number; col: number };
   rightRailOpen: boolean;
@@ -34,6 +36,7 @@ export function EditorPane(props: EditorPaneProps) {
     dirty,
     loading,
     loadError,
+    imageSrc,
     flash,
     cursor,
     rightRailOpen,
@@ -81,6 +84,24 @@ export function EditorPane(props: EditorPaneProps) {
           </div>
         ) : isPdfPath(activeNode.path) ? (
           <div id="pdf-viewer-host" className="editor-pdf-host" />
+        ) : isImagePath(activeNode.path) ? (
+          loading ? (
+            <div className="editor-empty">
+              <p className="muted">Loading {activeNode.name}…</p>
+            </div>
+          ) : loadError ? (
+            <div className="editor-empty">
+              <p className="muted">{loadError}</p>
+            </div>
+          ) : imageSrc ? (
+            <div className="editor-image-host">
+              <img src={imageSrc} alt={activeNode.name} />
+            </div>
+          ) : (
+            <div className="editor-empty">
+              <p className="muted">Loading {activeNode.name}…</p>
+            </div>
+          )
         ) : !opensInEditor(activeNode.path) ? (
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>
@@ -116,6 +137,7 @@ export function EditorPane(props: EditorPaneProps) {
         activeIsHtml={activeNode ? isHtmlPath(activeNode.path) : false}
         activeTableLabel={activeNode ? tableLabel(activeNode.path) : null}
         activeIsPdf={activeNode ? isPdfPath(activeNode.path) : false}
+        activeIsImage={activeNode ? isImagePath(activeNode.path) : false}
         cursor={cursor}
       />
     </>
@@ -133,12 +155,14 @@ function StatusBar({
   activeIsHtml,
   activeTableLabel,
   activeIsPdf,
+  activeIsImage,
 }: EditorPaneProps & {
   activeIsMarkdown: boolean;
   activeIsText: boolean;
   activeIsHtml: boolean;
   activeTableLabel: string | null;
   activeIsPdf: boolean;
+  activeIsImage: boolean;
 }) {
   const showLine = activeIsMarkdown || activeIsText || activeIsHtml || activeTableLabel !== null;
   return (
@@ -154,6 +178,8 @@ function StatusBar({
         </>
       ) : activeIsPdf ? (
         <span className="status-item">PDF</span>
+      ) : activeIsImage ? (
+        <span className="status-item">Image</span>
       ) : null}
       <IndexStatusItem
         indexState={indexState}

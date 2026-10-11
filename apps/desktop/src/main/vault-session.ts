@@ -8,6 +8,9 @@ import {
   extractHtmlText,
   extractPdfPages,
   HTML_NO_TEXT,
+  IMAGE_NO_TEXT,
+  imageMimeType,
+  isImagePath,
   generateStudioNote,
   INVALID_UTF8_MESSAGE,
   indexVault,
@@ -378,6 +381,7 @@ export class VaultSession {
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
     }
+    if (isImagePath(file)) throw new Error(IMAGE_NO_TEXT);
     const lower = target.toLowerCase();
     if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
@@ -391,6 +395,21 @@ export class VaultSession {
       return text;
     }
     return readFileSync(target, "utf8");
+  }
+
+  /**
+   * Bytes of a vault image as a data URL the renderer can put on an `<img>`.
+   * Chromium displays png, jpeg, webp, and gif. No image library and no OCR.
+   */
+  readImage(file: string): { mime: string; dataUrl: string } {
+    const mime = imageMimeType(file);
+    if (!mime) throw new Error("Only an image can be opened in the image viewer.");
+    const target = this.resolveSourcePath(file);
+    if (!existsSync(target) || !statSync(target).isFile()) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    const bytes = readFileSync(target);
+    return { mime, dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
   }
 
   /**

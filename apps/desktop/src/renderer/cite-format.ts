@@ -59,6 +59,11 @@ export function isTablePath(file: string): boolean {
   return /\.(csv|tsv)$/i.test(file);
 }
 
+/** png, jpg, jpeg, webp, or gif. Opens in the in-app image viewer, not the editor. */
+export function isImagePath(file: string): boolean {
+  return /\.(png|jpe?g|webp|gif)$/i.test(file);
+}
+
 /** Editor buffer that Ask can cite but the user cannot save (edit only Markdown). */
 export function isReadOnlyEditorPath(file: string): boolean {
   return isPlainTextPath(file) || isHtmlPath(file) || isTablePath(file);

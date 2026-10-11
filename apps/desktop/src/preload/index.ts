@@ -68,6 +68,8 @@ export interface CairnApi {
   /** List the vault tree; `sort` chooses file order (name / mtime / size), default name. */
   listTree(sort?: TreeSortMode): Promise<TreeNode[]>;
   readSource(file: string): Promise<string>;
+  /** Vault image as a data URL for the in-app viewer (png, jpg, jpeg, webp, gif). */
+  readImage(file: string): Promise<{ mime: string; dataUrl: string }>;
   /** Show a vault PDF in the in-app viewer. `page` is 1-based. Bounds are CSS pixels. */
   openPdf(payload: {
     file: string;
@@ -155,6 +157,7 @@ const api: CairnApi = {
   onAskAgentProgress: (listener) => subscribe<AskAgentProgressEvent>("askAgent:progress", listener),
   listTree: (sort) => ipcRenderer.invoke("vault:listTree", sort),
   readSource: (file) => ipcRenderer.invoke("source:read", file),
+  readImage: (file) => ipcRenderer.invoke("source:readImage", file),
   openPdf: (payload) => ipcRenderer.invoke("pdf:open", payload),
   hidePdf: () => ipcRenderer.invoke("pdf:hide"),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),

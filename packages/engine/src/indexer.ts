@@ -10,6 +10,7 @@ import { chunkHash } from "./normalize.js";
 import { resolveEmbedder, embed } from "./embed.js";
 import { extractPdfPages, pdfPageHeading } from "./pdf-text.js";
 import { extractHtmlText } from "./html-text.js";
+import { isImagePath } from "./image-files.js";
 import { decodeUtf8Text } from "./utf8-text.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
@@ -32,7 +33,10 @@ export interface PendingChunk {
   page?: number;
 }
 
-/** PDF text is keyword-only in this slice. Markdown, plain text, and HTML chunks are embedded. */
+/**
+ * PDF text is keyword-only in this slice. Markdown, plain text, HTML, and tables are embedded.
+ * Image files never become chunks, so they are not embedded.
+ */
 export function chunkNeedsEmbedding(chunk: PendingChunk): boolean {
   return chunk.page == null;
 }
@@ -64,7 +68,7 @@ export function discoverMarkdownFiles(root: string): string[] {
   return discoverFiles(root, /\.(md|markdown)$/i);
 }
 
-const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|pdf)$/i;
+const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|pdf|png|jpe?g|webp|gif)$/i;
 
 function isHtmlPath(path: string): boolean {
   return /\.html?$/i.test(path);
@@ -78,7 +82,10 @@ function isTablePath(path: string): boolean {
   return /\.(csv|tsv)$/i.test(path);
 }
 
-/** Markdown, plain UTF-8 text, CSV, TSV, HTML, and PDF. Images, audio, and other types stay out. */
+/**
+ * Markdown, plain UTF-8 text, CSV, TSV, HTML, PDF, and images (png, jpg, jpeg, webp, gif).
+ * Video, audio, and other types stay out. Images are path-only: no text body.
+ */
 export function isIndexableVaultPath(path: string): boolean {
   return INDEXABLE_EXT.test(path);
 }
@@ -92,9 +99,9 @@ function readUtf8TextFile(abs: string): string | null {
 }
 
 /**
- * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, and PDF files.
+ * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, PDF, and images.
  * A text, table, or HTML file that is not valid UTF-8 is skipped.
- * Images, audio, and other types stay out.
+ * Images are included by extension only. Video, audio, and other types stay out.
  */
 export function discoverIndexableFiles(root: string): string[] {
   return discoverFiles(root, INDEXABLE_EXT).filter((abs) => {
@@ -132,6 +139,8 @@ export async function chunkVaultFiles(root: string, files: string[]): Promise<Pe
   const pending: PendingChunk[] = [];
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join("/");
+    // Path and filename only. No OCR, no text body, no embedding.
+    if (isImagePath(rel)) continue;
     if (/\.pdf$/i.test(rel)) {
       pending.push(...(await chunkPdfFile(rel, abs)));
       continue;
