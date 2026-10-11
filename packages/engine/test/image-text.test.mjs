@@ -101,13 +101,13 @@ test("isImagePath accepts the five image extensions and rejects video and audio"
 test("images are indexed by path only, with no text body and no embeddings", async () => {
   const root = await vaultWith([...IMAGES, "project-heron.md"]);
   await writeFile(join(root, "clip.mp4"), Buffer.from("not video"));
-  await writeFile(join(root, "tone.mp3"), Buffer.from("not audio"));
+  await writeFile(join(root, "tone.ogg"), Buffer.from("not audio"));
   try {
     const names = discoverIndexableFiles(root).map((abs) => basename(abs));
     for (const image of IMAGES) assert.ok(names.includes(image), image);
     assert.ok(names.includes("project-heron.md"));
     assert.equal(names.includes("clip.mp4"), false);
-    assert.equal(names.includes("tone.mp3"), false);
+    assert.equal(names.includes("tone.ogg"), false);
 
     const stats = await indexVault(root, { lexical: true });
     assert.equal(stats.files, IMAGES.length + 1);
@@ -139,14 +139,14 @@ test("images are indexed by path only, with no text body and no embeddings", asy
           {
             index,
             readNote: async () => "",
-            listNotes: async () => [...IMAGES, "project-heron.md", "clip.mp4", "tone.mp3"],
+            listNotes: async () => [...IMAGES, "project-heron.md", "clip.mp4", "tone.ogg"],
           },
           { sources: [], opened: [] },
         ),
       );
       for (const image of IMAGES) assert.ok(fromVault.paths.includes(image), image);
       assert.equal(fromVault.paths.includes("clip.mp4"), false);
-      assert.equal(fromVault.paths.includes("tone.mp3"), false);
+      assert.equal(fromVault.paths.includes("tone.ogg"), false);
     } finally {
       index.close();
     }

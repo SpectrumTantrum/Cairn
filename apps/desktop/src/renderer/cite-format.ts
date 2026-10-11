@@ -64,6 +64,11 @@ export function isImagePath(file: string): boolean {
   return /\.(png|jpe?g|webp|gif)$/i.test(file);
 }
 
+/** mp3, wav, or m4a. Opens in the in-app audio player, not the editor. */
+export function isAudioPath(file: string): boolean {
+  return /\.(mp3|wav|m4a)$/i.test(file);
+}
+
 /** Editor buffer that Ask can cite but the user cannot save (edit only Markdown). */
 export function isReadOnlyEditorPath(file: string): boolean {
   return isPlainTextPath(file) || isHtmlPath(file) || isTablePath(file);

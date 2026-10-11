@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { isImagePath, isPdfPath, isReadOnlyEditorPath, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -167,6 +167,8 @@ export function App() {
   const [pdfTarget, setPdfTarget] = useState<{ path: string; page: number } | null>(null);
   /** Data URL for the open image. Chromium draws it; the main process only reads bytes. */
   const [imageSrc, setImageSrc] = useState<string | null>(null);
+  /** Data URL for the open audio file. Chromium plays it; the main process only reads bytes. */
+  const [audioSrc, setAudioSrc] = useState<string | null>(null);
 
   // Engine status
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
@@ -404,6 +406,7 @@ export function App() {
       setBuffer("");
       setSavedContent("");
       setImageSrc(null);
+      setAudioSrc(null);
       setPdfTarget(null);
       setIndexStats(null);
       setIndexState("none");
@@ -485,6 +488,7 @@ export function App() {
       if (!saved) return;
       setPdfTarget(null);
       setImageSrc(null);
+      setAudioSrc(null);
       setActiveNode(node);
       setLoading(true);
       setLoadError(null);
@@ -519,6 +523,7 @@ export function App() {
         const nextPage = page > 0 ? page : 1;
         setPdfTarget((cur) => (cur && cur.path === path && cur.page === nextPage ? cur : { path, page: nextPage }));
         setImageSrc(null);
+        setAudioSrc(null);
         setActiveNode({ name: basename(path), path, type: "other" });
         setDocKey(null);
         setBuffer("");
@@ -576,12 +581,45 @@ export function App() {
         setBuffer("");
         setSavedContent("");
         setImageSrc(null);
+        setAudioSrc(null);
         setLoadError(null);
         setLoading(true);
         setFlash(null);
         try {
           const image = await window.cairn.readImage(node.path);
           setImageSrc(image.dataUrl);
+        } catch (err) {
+          setLoadError(errorMessage(err));
+        } finally {
+          setLoading(false);
+        }
+      } finally {
+        navigatingRef.current = false;
+      }
+    },
+    [savePendingNavigation],
+  );
+
+  const openAudio = useCallback(
+    async (node: TreeNode) => {
+      if (navigatingRef.current) return;
+      navigatingRef.current = true;
+      try {
+        const saved = await savePendingNavigation();
+        if (!saved) return;
+        setPdfTarget(null);
+        setActiveNode(node);
+        setDocKey(null);
+        setBuffer("");
+        setSavedContent("");
+        setImageSrc(null);
+        setAudioSrc(null);
+        setLoadError(null);
+        setLoading(true);
+        setFlash(null);
+        try {
+          const audio = await window.cairn.readAudio(node.path);
+          setAudioSrc(audio.dataUrl);
         } catch (err) {
           setLoadError(errorMessage(err));
         } finally {
@@ -604,23 +642,29 @@ export function App() {
         void openImage(node);
         return;
       }
+      if (isAudioPath(node.path)) {
+        void openAudio(node);
+        return;
+      }
       if (node.type === "markdown" || opensInEditor(node.path)) {
         void openMarkdown(node);
       } else {
         // Non-Markdown: generic read-only host, no editor (ADR-0009).
         setPdfTarget(null);
         setImageSrc(null);
+        setAudioSrc(null);
         setActiveNode(node);
         setDocKey(null);
         setLoadError(null);
       }
     },
-    [openImage, openMarkdown, openPdf],
+    [openAudio, openImage, openMarkdown, openPdf],
   );
 
   const closeTab = useCallback(() => {
     setPdfTarget(null);
     setImageSrc(null);
+    setAudioSrc(null);
     setActiveNode(null);
     setDocKey(null);
     setBuffer("");
@@ -785,6 +829,7 @@ export function App() {
         } else if (activeNode && (activeNode.path === node.path || activeNode.path.startsWith(`${node.path}/`))) {
           setPdfTarget(null);
           setImageSrc(null);
+          setAudioSrc(null);
           setActiveNode(null);
         }
         setExpanded((prev) => {
@@ -826,6 +871,10 @@ export function App() {
         void openImage({ name: basename(source.file), path: source.file, type: "other" });
         return;
       }
+      if (isAudioPath(source.file)) {
+        void openAudio({ name: basename(source.file), path: source.file, type: "other" });
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(source);
         if (!rightRailOpen) setRightRailOpen(true);
@@ -844,7 +893,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openImage, openMarkdown, openPdf, rightRailOpen],
+    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf, rightRailOpen],
   );
 
   function submitChat(): void {
@@ -1175,6 +1224,10 @@ export function App() {
         void openImage({ name: basename(hit.file), path: hit.file, type: "other" });
         return;
       }
+      if (isAudioPath(hit.file)) {
+        void openAudio({ name: basename(hit.file), path: hit.file, type: "other" });
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(hit);
         if (docKey !== null && vaultPathsEqual(docKey, hit.file)) {
@@ -1189,7 +1242,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openImage, openMarkdown, openPdf],
+    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf],
   );
 
   const composerReason = useMemo(
@@ -1349,6 +1402,7 @@ export function App() {
           loading={loading}
           loadError={loadError}
           imageSrc={imageSrc}
+          audioSrc={audioSrc}
           flash={flash}
           cursor={cursor}
           rightRailOpen={rightRailOpen}

@@ -4,12 +4,15 @@ import {
   decodeUtf8Text,
   diffLines,
   discoverIndexableFiles,
+  AUDIO_NO_TEXT,
+  audioMimeType,
   EMPTY_TABLE_MESSAGE,
   extractHtmlText,
   extractPdfPages,
   HTML_NO_TEXT,
   IMAGE_NO_TEXT,
   imageMimeType,
+  isAudioPath,
   isImagePath,
   generateStudioNote,
   INVALID_UTF8_MESSAGE,
@@ -382,6 +385,7 @@ export class VaultSession {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
     }
     if (isImagePath(file)) throw new Error(IMAGE_NO_TEXT);
+    if (isAudioPath(file)) throw new Error(AUDIO_NO_TEXT);
     const lower = target.toLowerCase();
     if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
@@ -404,6 +408,21 @@ export class VaultSession {
   readImage(file: string): { mime: string; dataUrl: string } {
     const mime = imageMimeType(file);
     if (!mime) throw new Error("Only an image can be opened in the image viewer.");
+    const target = this.resolveSourcePath(file);
+    if (!existsSync(target) || !statSync(target).isFile()) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    const bytes = readFileSync(target);
+    return { mime, dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
+  }
+
+  /**
+   * Bytes of a vault audio file as a data URL the renderer can put on an `<audio>`.
+   * Chromium plays mp3, wav, and AAC m4a. No audio library and no transcript.
+   */
+  readAudio(file: string): { mime: string; dataUrl: string } {
+    const mime = audioMimeType(file);
+    if (!mime) throw new Error("Only an audio file can be opened in the audio player.");
     const target = this.resolveSourcePath(file);
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");

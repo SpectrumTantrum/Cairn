@@ -21,6 +21,7 @@ import {
   type OpenAnchor,
 } from "./agent-search-tools.js";
 import { HTML_NO_TEXT } from "./html-text.js";
+import { AUDIO_NO_TEXT, isAudioPath } from "./audio-files.js";
 import { IMAGE_NO_TEXT, isImagePath } from "./image-files.js";
 import { EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
@@ -93,7 +94,7 @@ const ASK_AGENT_SYSTEM = [
   "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, CSV and TSV files, HTML files, and text PDFs.",
   "Answer using ONLY information you gather with your tools — do not invent facts.",
   "Tools (read-only):",
-  "- list(prefix?): list Markdown, plain text, CSV, TSV, HTML, PDF, and image paths in the vault.",
+  "- list(prefix?): list Markdown, plain text, CSV, TSV, HTML, PDF, image, and audio paths in the vault.",
   "- find(query, k?): search indexed chunks (hybrid or keyword). PDF chunks are keyword-only and include a page.",
   "- grep(pattern, path?, limit?): substring search over indexed chunks. PDF hits include a page.",
   "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, or the text of each PDF page.",
@@ -101,7 +102,7 @@ const ASK_AGENT_SYSTEM = [
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
   "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
   "Cite Markdown, plain text, CSV, TSV, and HTML as [path:line]. Cite a PDF by its page.",
-  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows.",
+  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows. An audio file (.mp3, .wav, .m4a) has no transcript. Do not invent what it says.",
   "If the question names a file that cannot be read, do not answer from any other file.",
   `If the vault does not contain the answer after searching, reply exactly: "${UNCOVERED}"`,
   "When finished, stop calling tools and give a concise, direct answer.",
@@ -119,7 +120,7 @@ function normalizeVaultPath(path: string): string {
 function filesNamedInQuestion(question: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  const named = /[\w./\\-]+\.(?:markdown|txt|csv|tsv|pdf|html|htm|png|jpe?g|webp|gif|md)\b/gi;
+  const named = /[\w./\\-]+\.(?:markdown|txt|csv|tsv|pdf|html|htm|png|jpe?g|webp|gif|mp3|wav|m4a|md)\b/gi;
   for (const match of question.matchAll(named)) {
     const norm = normalizeVaultPath(match[0]);
     const key = norm.toLowerCase();
@@ -162,14 +163,32 @@ async function namedImageIsPresent(opts: AskAgentOptions, name: string): Promise
 }
 
 /**
+ * The named audio file is on disk (the reader returns, or refuses with AUDIO_NO_TEXT).
+ * A missing path is not a skipped file.
+ */
+async function namedAudioIsPresent(opts: AskAgentOptions, name: string): Promise<boolean> {
+  try {
+    await opts.readNote(name);
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return message === AUDIO_NO_TEXT;
+  }
+}
+
+/**
  * The question names a file the index skipped: invalid UTF-8 text, an empty CSV or
- * TSV, an HTML file with no visible text, a PDF with no text layer, or an image.
- * A readable indexed file does not count. An image has no text body even if listed.
+ * TSV, an HTML file with no visible text, a PDF with no text layer, an image, or audio.
+ * A readable indexed file does not count. An image or audio file has no text body even if listed.
  */
 async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boolean> {
   for (const name of filesNamedInQuestion(opts.question)) {
     if (isImagePath(name)) {
       if (await namedImageIsPresent(opts, name)) return true;
+      continue;
+    }
+    if (isAudioPath(name)) {
+      if (await namedAudioIsPresent(opts, name)) return true;
       continue;
     }
     if (indexContainsFile(opts.index, name)) continue;
@@ -233,10 +252,10 @@ function sourceHasBody(hit: SearchHit): boolean {
 
 /**
  * Drop PDF sources that never yielded a page of text, drop HTML sources with no
- * visible text, drop CSV/TSV sources with no body, drop image sources (no text
- * layer), and replace an invented answer when the run touched a text-less PDF, an
- * empty HTML file, an empty or unreadable table, an unreadable text file, or an
- * image and gathered nothing else.
+ * visible text, drop CSV/TSV sources with no body, drop image and audio sources
+ * (no text layer), and replace an invented answer when the run touched a text-less
+ * PDF, an empty HTML file, an empty or unreadable table, an unreadable text file,
+ * an image, or an audio file and gathered nothing else.
  * Leaves no-tool-use, timeout, and step-cap messages alone.
  */
 function settleTextlessPdf(
@@ -246,7 +265,7 @@ function settleTextlessPdf(
   seedHits: SearchHit[],
 ): Pick<AskAgentResult, "answer" | "sources" | "opened" | "grounded"> {
   const sources = state.sources.filter((hit) => {
-    if (isImagePath(hit.file)) return false;
+    if (isImagePath(hit.file) || isAudioPath(hit.file)) return false;
     if (isPdfFile(hit.file)) return typeof hit.page === "number" && hit.page > 0 && sourceHasBody(hit);
     if (state.textlessHtml && isHtmlFile(hit.file)) return sourceHasBody(hit);
     if (state.unreadableText && isTableFile(hit.file)) return sourceHasBody(hit);
@@ -256,7 +275,7 @@ function settleTextlessPdf(
   const keptHtml = new Set(sources.filter((hit) => isHtmlFile(hit.file)).map((hit) => hit.file));
   const keptTables = new Set(sources.filter((hit) => isTableFile(hit.file)).map((hit) => hit.file));
   const opened = state.opened.filter((anchor) => {
-    if (isImagePath(anchor.path)) return false;
+    if (isImagePath(anchor.path) || isAudioPath(anchor.path)) return false;
     if (isPdfFile(anchor.path)) return keptPdf.has(anchor.path);
     if (state.textlessHtml && isHtmlFile(anchor.path)) return keptHtml.has(anchor.path);
     if (state.unreadableText && isTableFile(anchor.path)) return keptTables.has(anchor.path);
@@ -265,7 +284,7 @@ function settleTextlessPdf(
   const anyBody = sources.some(sourceHasBody) || seedHits.some(sourceHasBody);
   let next = answer;
   if (
-    (state.textlessPdf || state.unreadableText || state.textlessHtml || state.textlessImage) &&
+    (state.textlessPdf || state.unreadableText || state.textlessHtml || state.textlessImage || state.textlessAudio) &&
     !anyBody &&
     stopReason === "done"
   ) {

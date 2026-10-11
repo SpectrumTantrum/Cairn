@@ -1,6 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
-import { isHtmlPath, isImagePath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, opensInEditor } from "../../cite-format";
+import { isAudioPath, isHtmlPath, isImagePath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, opensInEditor } from "../../cite-format";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -14,6 +14,8 @@ interface EditorPaneProps {
   loadError: string | null;
   /** Data URL for the in-app image viewer. Null unless an image file is open. */
   imageSrc: string | null;
+  /** Data URL for the in-app audio player. Null unless an audio file is open. */
+  audioSrc: string | null;
   flash: { line: number; nonce: number } | null;
   cursor: { line: number; col: number };
   rightRailOpen: boolean;
@@ -37,6 +39,7 @@ export function EditorPane(props: EditorPaneProps) {
     loading,
     loadError,
     imageSrc,
+    audioSrc,
     flash,
     cursor,
     rightRailOpen,
@@ -102,6 +105,24 @@ export function EditorPane(props: EditorPaneProps) {
               <p className="muted">Loading {activeNode.name}…</p>
             </div>
           )
+        ) : isAudioPath(activeNode.path) ? (
+          loading ? (
+            <div className="editor-empty">
+              <p className="muted">Loading {activeNode.name}…</p>
+            </div>
+          ) : loadError ? (
+            <div className="editor-empty">
+              <p className="muted">{loadError}</p>
+            </div>
+          ) : audioSrc ? (
+            <div className="editor-audio-host">
+              <audio controls src={audioSrc} />
+            </div>
+          ) : (
+            <div className="editor-empty">
+              <p className="muted">Loading {activeNode.name}…</p>
+            </div>
+          )
         ) : !opensInEditor(activeNode.path) ? (
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>
@@ -138,6 +159,7 @@ export function EditorPane(props: EditorPaneProps) {
         activeTableLabel={activeNode ? tableLabel(activeNode.path) : null}
         activeIsPdf={activeNode ? isPdfPath(activeNode.path) : false}
         activeIsImage={activeNode ? isImagePath(activeNode.path) : false}
+        activeIsAudio={activeNode ? isAudioPath(activeNode.path) : false}
         cursor={cursor}
       />
     </>
@@ -156,6 +178,7 @@ function StatusBar({
   activeTableLabel,
   activeIsPdf,
   activeIsImage,
+  activeIsAudio,
 }: EditorPaneProps & {
   activeIsMarkdown: boolean;
   activeIsText: boolean;
@@ -163,6 +186,7 @@ function StatusBar({
   activeTableLabel: string | null;
   activeIsPdf: boolean;
   activeIsImage: boolean;
+  activeIsAudio: boolean;
 }) {
   const showLine = activeIsMarkdown || activeIsText || activeIsHtml || activeTableLabel !== null;
   return (
@@ -180,6 +204,8 @@ function StatusBar({
         <span className="status-item">PDF</span>
       ) : activeIsImage ? (
         <span className="status-item">Image</span>
+      ) : activeIsAudio ? (
+        <span className="status-item">Audio</span>
       ) : null}
       <IndexStatusItem
         indexState={indexState}
