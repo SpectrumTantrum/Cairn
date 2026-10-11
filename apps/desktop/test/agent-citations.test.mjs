@@ -1161,6 +1161,66 @@ test("a shared codename does not cite a note that lacks the answer's fact", () =
   assert.equal(cites[0].file, "notes/spec.md");
 });
 
+const SHARED_ANSWER = "The field code is COPPER FINCH and the number is 312.";
+const SHARED_FACT = "# Field report\n\n## Section B\n\nThe field code is COPPER FINCH, 312 under Section B.\n";
+const SHARED_NEIGHBOR = "# Project Heron\n\nThe notebook codename is COPPER FINCH and the badge is 999.\n";
+
+test("an opened neighbor that only shares the codename is not cited", () => {
+  const cites = citationsFromAskAgent({
+    answer: SHARED_ANSWER,
+    sources: [readHit("section-b.txt", SHARED_FACT), readHit("project-heron.md", SHARED_NEIGHBOR)],
+    opened: [
+      { path: "section-b.txt", line: 1 },
+      { path: "project-heron.md", line: 1, heading: "Project Heron" },
+    ],
+    ...agentShell,
+  });
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].heading, "Section B");
+  assert.equal(cites[0].line, 3);
+});
+
+test("an inline cite of a shared-codename neighbor is not a chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: `${SHARED_ANSWER} See [project-heron.md:1].`,
+    sources: [readHit("section-b.txt", SHARED_FACT), readHit("project-heron.md", SHARED_NEIGHBOR)],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].heading, "Section B");
+});
+
+test("a heading grep that only shares the codename is not the #66 chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: "COPPER FINCH, 312",
+    sources: [
+      readHit("section-b.txt", SHARED_FACT),
+      {
+        file: "project-heron.md",
+        line: 3,
+        heading: "Project Heron",
+        score: NaN,
+        cosine: NaN,
+        snippet: "The notebook codename is COPPER FINCH and the badge is 999.",
+        text: SHARED_NEIGHBOR,
+        arms: "grep",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(citationLineLabel(cites[0].line), "file");
+});
+
 test("(b) an empty PDF open does not become a chip", () => {
   const cites = citationsFromAskAgent({
     answer: `Invented: ${PDF_FACT}`,
@@ -1261,6 +1321,24 @@ test("QA: a shared codename does not cite the markdown note that lacks 312", asy
     ["list", {}],
     ["read", { path: "section-b.txt" }],
     ["read", { path: "project-heron.md" }],
+  ]);
+  const text = await readTxtFixture("section-b.txt");
+  const line = headingLineIn(text, "Section B");
+  const cites = chipsFor("The field code is COPPER FINCH and the number is 312.", state);
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "Section B");
+});
+
+test("QA: opening the shared-codename note does not add a chip beside the txt fact", async () => {
+  const state = await scriptedTxtAsk([
+    ["list", {}],
+    ["read", { path: "section-b.txt" }],
+    ["read", { path: "project-heron.md" }],
+    ["open", { path: "project-heron.md", line: 1, heading: "Project Heron" }],
+    ["open", { path: "section-b.txt", line: 1 }],
   ]);
   const text = await readTxtFixture("section-b.txt");
   const line = headingLineIn(text, "Section B");
@@ -1432,6 +1510,23 @@ test("QA: a shared codename does not cite the markdown note that lacks 312", asy
   assert.equal(cites[0].heading, "Section B");
 });
 
+test("QA: opening the shared-codename note does not add a chip beside the html fact", async () => {
+  const state = await scriptedHtmlAsk([
+    ["list", {}],
+    ["read", { path: "section-b.html" }],
+    ["read", { path: "project-heron.md" }],
+    ["open", { path: "project-heron.md", line: 1, heading: "Project Heron" }],
+  ]);
+  const text = await readHtmlFixture("section-b.html");
+  const line = headingLineIn(text, "Section B");
+  const cites = chipsFor("The field code is COPPER FINCH and the number is 312.", state);
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.html");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "Section B");
+});
+
 test("QA: an empty html read leaves no chip", async () => {
   const index = new InMemoryIndex();
   const state = { sources: [], opened: [] };
@@ -1582,6 +1677,23 @@ test("QA: a shared codename does not cite the markdown note that lacks 312", asy
     ["list", {}],
     ["read", { path: "section-b.csv" }],
     ["read", { path: "project-heron.md" }],
+  ]);
+  const text = await readCsvFixture("section-b.csv");
+  const line = lineContaining(text, CSV_FACT);
+  const cites = chipsFor("The field code is COPPER FINCH and the number is 312.", state);
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.csv");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "");
+});
+
+test("QA: opening the shared-codename note does not add a chip beside the csv fact", async () => {
+  const state = await scriptedCsvAsk([
+    ["list", {}],
+    ["read", { path: "section-b.csv" }],
+    ["read", { path: "project-heron.md" }],
+    ["open", { path: "project-heron.md", line: 1, heading: "Project Heron" }],
   ]);
   const text = await readCsvFixture("section-b.csv");
   const line = lineContaining(text, CSV_FACT);

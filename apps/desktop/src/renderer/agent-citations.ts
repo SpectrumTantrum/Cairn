@@ -19,8 +19,9 @@
 // A shared token is not a match of its own. The veto looks only at other files
 // the agent read, not at search or grep hits. When the overlap's content words
 // all appear in another read, and the answer's fact (a content word in that
-// read) is absent here, this file gets no chip. Function words still count
-// toward the 4-word run; they are not the fact.
+// read) is absent here, this file gets no chip. An open or an inline cite does
+// not keep that neighbor. Function words still count toward the 4-word run;
+// they are not the fact.
 //
 // Each PDF page is its own location. A page the answer matches is cited as
 // `file p.N`. A PDF that was read and matches no page is still cited, labeled "file".
@@ -192,6 +193,17 @@ function passageMatches(answer: string, corpus: string, others: readonly string[
   }
   const sharedTokenOnly = spanContent.length === 0 || spanContent.every((word) => otherContent.has(word));
   return !sharedTokenOnly;
+}
+
+/**
+ * This body was read, and another read holds the answer's fact while this one
+ * only shares the codename. Search hits are not evidence. An empty body is not
+ * a neighbor we can judge.
+ */
+function sharedTokenNeighbor(answer: string, corpus: string, others: readonly string[]): boolean {
+  if (!corpus.trim()) return false;
+  if (!suppressedByOtherRead(answer, corpus, others)) return false;
+  return !passageMatches(answer, corpus, others);
 }
 
 function lineAt(content: string, offset: number): number {
@@ -465,12 +477,15 @@ function filesAnswerUses(
     const key = vaultFileKey(hit.file);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (opened.some((anchor) => vaultFileKey(anchor.path) === key) || cited.has(key)) {
+    const corpus = corpusForFile(key, hits);
+    const others = otherCorpora({ file: hit.file }, readHits(hits));
+    const openedOrCited = opened.some((anchor) => vaultFileKey(anchor.path) === key) || cited.has(key);
+    // An open or inline cite still has to hold the fact. A neighbor that only
+    // shares the codename with another read does not become a chip.
+    if (openedOrCited && !sharedTokenNeighbor(answer, corpus, others)) {
       used.add(key);
       continue;
     }
-    const corpus = corpusForFile(key, hits);
-    const others = otherCorpora({ file: hit.file }, readHits(hits));
     if (corpus.trim() && passageMatches(answer, corpus, others)) used.add(key);
   }
   return used;
@@ -495,15 +510,22 @@ function keepAnswerCitations(hits: SearchHit[], result: AskAgentResult): SearchH
       const openedPage = result.opened.some(
         (anchor) => vaultFileKey(anchor.path) === vaultFileKey(hit.file) && anchor.page === page,
       );
-      if (openedPage) return true;
       const corpus = `${hit.text ?? ""}\n${hit.snippet ?? ""}`;
       const others = otherCorpora(hit, readHits([...result.sources, ...hits]));
+      if (openedPage && !sharedTokenNeighbor(result.answer, corpus, others)) return true;
       if (passageMatches(result.answer, corpus, others)) return true;
-      return onlyLocatedGrep && grepFiles.has(vaultFileKey(hit.file)) && hit.line > 1;
+      return (
+        onlyLocatedGrep &&
+        grepFiles.has(vaultFileKey(hit.file)) &&
+        hit.line > 1 &&
+        !sharedTokenNeighbor(result.answer, corpus, others)
+      );
     }
     const key = vaultFileKey(hit.file);
     if (used.has(key)) return true;
-    return onlyLocatedGrep && grepFiles.has(key) && hit.line > 1;
+    const corpus = corpusForFile(key, [...result.sources, ...hits]);
+    const others = otherCorpora(hit, readHits([...result.sources, ...hits]));
+    return onlyLocatedGrep && grepFiles.has(key) && hit.line > 1 && !sharedTokenNeighbor(result.answer, corpus, others);
   });
 }
 
@@ -529,9 +551,10 @@ function pdfAnswerPage(answer: string, pages: readonly SearchHit[]): SearchHit |
 /**
  * A file the agent read and answered from always yields a chip. A matched
  * passage is already in `kept`. What remains is labeled "file".
- * A PDF read is always answered-from for this fallback. A note is answered-from
- * when the answer's content words occur in it. Another read that holds the
- * answer's fact suppresses a note whose overlap is only the shared token.
+ * A PDF read is answered-from for this fallback unless another read holds the
+ * answer's fact and this file does not. A note is answered-from when the
+ * answer's content words occur in it. Another read that holds the answer's
+ * fact suppresses a file whose overlap is only the shared token.
  * A PDF file chip quotes the unique read page that contains the answer, or
  * nothing when that page cannot be determined.
  */
@@ -547,10 +570,8 @@ function citeAnsweredReads(kept: SearchHit[], result: AskAgentResult): SearchHit
     const pdf = isPdfPath(source.file);
     const corpus = corpusForFile(key, result.sources);
     const others = otherCorpora(pdf ? source : { file: source.file }, reads);
-    if (!pdf) {
-      if (answerContentIn(corpus, result.answer).length === 0) continue;
-      if (suppressedByOtherRead(result.answer, corpus, others)) continue;
-    }
+    if (suppressedByOtherRead(result.answer, corpus, others)) continue;
+    if (!pdf && answerContentIn(corpus, result.answer).length === 0) continue;
     const fileHit: SearchHit = { ...source, line: FILE_CITE_LINE, heading: "" };
     delete fileHit.page;
     if (pdf) {
