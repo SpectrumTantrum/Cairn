@@ -87,18 +87,18 @@ export interface AskAgentResult {
 const UNCOVERED = "Your notes don't cover this.";
 
 const ASK_AGENT_SYSTEM = [
-  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes and text PDFs.",
+  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, and text PDFs.",
   "Answer using ONLY information you gather with your tools — do not invent facts.",
   "Tools (read-only):",
-  "- list(prefix?): list Markdown and PDF paths in the vault.",
+  "- list(prefix?): list Markdown, plain text, and PDF paths in the vault.",
   "- find(query, k?): search indexed chunks (hybrid or keyword). PDF chunks are keyword-only and include a page.",
   "- grep(pattern, path?, limit?): substring search over indexed chunks. PDF hits include a page.",
-  "- read(path): read a note, or the text of each PDF page.",
-  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page.",
+  "- read(path): read a Markdown or plain text file, or the text of each PDF page.",
+  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text file opens at a line, like a note.",
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
   "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
-  "Cite Markdown as [path:line]. Cite a PDF by its page.",
-  "A PDF with no text layer cannot be read. Do not invent its contents.",
+  "Cite Markdown and plain text as [path:line]. Cite a PDF by its page.",
+  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. Do not invent their contents.",
   `If the vault does not contain the answer after searching, reply exactly: "${UNCOVERED}"`,
   "When finished, stop calling tools and give a concise, direct answer.",
 ].join("\n");
@@ -113,8 +113,8 @@ function sourceHasBody(hit: SearchHit): boolean {
 
 /**
  * Drop PDF sources that never yielded a page of text, and replace an invented
- * answer when the run touched a text-less PDF and gathered nothing else.
- * Leaves no-tool-use, timeout, and step-cap messages alone.
+ * answer when the run touched a text-less PDF or an unreadable text file and
+ * gathered nothing else. Leaves no-tool-use, timeout, and step-cap messages alone.
  */
 function settleTextlessPdf(
   state: AskSearchToolState,
@@ -133,7 +133,7 @@ function settleTextlessPdf(
   });
   const anyBody = sources.some(sourceHasBody) || seedHits.some(sourceHasBody);
   let next = answer;
-  if (state.textlessPdf && !anyBody && stopReason === "done") next = UNCOVERED;
+  if ((state.textlessPdf || state.unreadableText) && !anyBody && stopReason === "done") next = UNCOVERED;
   return {
     answer: next,
     sources,

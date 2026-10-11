@@ -7,6 +7,8 @@ import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import type { ToolSchema } from "./model-provider.js";
 import { pdfPageHeading } from "./pdf-text.js";
+import { isIndexableVaultPath } from "./indexer.js";
+import { INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
 export const ASK_SEARCH_TOOL_NAMES = ["list", "find", "grep", "read", "open"] as const;
 export type AskSearchToolName = (typeof ASK_SEARCH_TOOL_NAMES)[number];
@@ -44,6 +46,8 @@ export interface AskSearchToolState {
   opened: OpenAnchor[];
   /** A read or open touched a PDF that extracted no text. */
   textlessPdf?: boolean;
+  /** A read touched a `.txt` file that is not valid UTF-8. */
+  unreadableText?: boolean;
 }
 
 const MAX_READ_CHARS_DEFAULT = 8000;
@@ -58,7 +62,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "list",
     description:
-      "List Markdown note and PDF paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
+      "List Markdown, plain text, and PDF paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
     parameters: {
       type: "object",
       properties: {
@@ -96,7 +100,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "read",
     description:
-      "Read a Markdown note, or the text of each page of a PDF. A PDF with no text layer cannot be read. Use after find/grep to read surrounding context.",
+      "Read a Markdown note or a plain text file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. Use after find/grep to read surrounding context.",
     parameters: {
       type: "object",
       properties: {
@@ -268,7 +272,7 @@ export async function runAskSearchTool(
         paths = paths.filter((p) => p === prefixNorm || p.startsWith(`${prefixNorm}/`));
       }
     }
-    paths = paths.filter((p) => /\.(md|markdown|pdf)$/i.test(p));
+    paths = paths.filter((p) => isIndexableVaultPath(p));
     if (paths.length === 0) return JSON.stringify({ paths: [], note: "No matching notes." });
     return JSON.stringify({ paths, count: paths.length });
   }
@@ -369,6 +373,9 @@ export async function runAskSearchTool(
       return clipped;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (norm.toLowerCase().endsWith(".txt") && message === INVALID_UTF8_MESSAGE) {
+        state.unreadableText = true;
+      }
       return `ERROR: ${message}`;
     }
   }

@@ -10,7 +10,7 @@ import { search } from "./retrieve.js";
 import { ask } from "./ask.js";
 import { openIndex } from "./vault-index.js";
 
-const HELP = `cairn — local-first grounded retrieval over a Markdown folder
+const HELP = `cairn — local-first grounded retrieval over a folder of notes
 
 USAGE
   cairn index  <folder> [--lexical] [--embedder <tag>]
@@ -18,7 +18,7 @@ USAGE
   cairn ask    <question...> [--in <folder>] [-k <n>] [--model <tag>] [--lexical]
 
 COMMANDS
-  index   Chunk + index every .md/.markdown file under <folder> into <folder>/.cairn/.
+  index   Chunk + index every .md/.markdown/.txt file and text PDF under <folder> into <folder>/.cairn/.
           Hybrid (dense + keyword) by default — needs Ollama + an embedder pulled.
           --lexical builds a keyword-only index (no model, zero setup).
   search  Return ranked, cited chunks (file:line › heading) for a query. Auto-uses

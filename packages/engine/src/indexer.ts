@@ -9,6 +9,7 @@ import type { Chunk } from "./chunk.js";
 import { chunkHash } from "./normalize.js";
 import { resolveEmbedder, embed } from "./embed.js";
 import { extractPdfPages, pdfPageHeading } from "./pdf-text.js";
+import { decodeUtf8Text } from "./utf8-text.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
 
@@ -26,11 +27,11 @@ export interface PendingChunk {
   file: string;
   chunk: Chunk;
   hash: string;
-  /** 1-based PDF page. Absent for Markdown. PDF chunks are not embedded. */
+  /** 1-based PDF page. Absent for Markdown and plain text. PDF chunks are not embedded. */
   page?: number;
 }
 
-/** PDF text is keyword-only in this slice. Markdown chunks are embedded. */
+/** PDF text is keyword-only in this slice. Markdown and plain text chunks are embedded. */
 export function chunkNeedsEmbedding(chunk: PendingChunk): boolean {
   return chunk.page == null;
 }
@@ -62,9 +63,30 @@ export function discoverMarkdownFiles(root: string): string[] {
   return discoverFiles(root, /\.(md|markdown)$/i);
 }
 
-/** Markdown notes and PDF files. Images, audio, and other types stay out. */
+const INDEXABLE_EXT = /\.(md|markdown|txt|pdf)$/i;
+
+/** Markdown, plain UTF-8 text, and PDF. Images, audio, and other types stay out. */
+export function isIndexableVaultPath(path: string): boolean {
+  return INDEXABLE_EXT.test(path);
+}
+
+function readUtf8TextFile(abs: string): string | null {
+  try {
+    return decodeUtf8Text(readFileSync(abs));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Markdown notes, UTF-8 `.txt`, and PDF files. A `.txt` that is not valid UTF-8
+ * is skipped. Images, audio, and other types stay out.
+ */
 export function discoverIndexableFiles(root: string): string[] {
-  return discoverFiles(root, /\.(md|markdown|pdf)$/i);
+  return discoverFiles(root, INDEXABLE_EXT).filter((abs) => {
+    if (!abs.toLowerCase().endsWith(".txt")) return true;
+    return readUtf8TextFile(abs) !== null;
+  });
 }
 
 async function chunkPdfFile(rel: string, abs: string): Promise<PendingChunk[]> {
@@ -98,6 +120,14 @@ export async function chunkVaultFiles(root: string, files: string[]): Promise<Pe
     const rel = relative(root, abs).split(sep).join("/");
     if (/\.pdf$/i.test(rel)) {
       pending.push(...(await chunkPdfFile(rel, abs)));
+      continue;
+    }
+    if (/\.txt$/i.test(rel)) {
+      const text = readUtf8TextFile(abs);
+      // Invalid UTF-8 and blank files contribute no chunks.
+      if (!text?.trim()) continue;
+      const chunks = await chunkMarkdown(text);
+      for (const ch of chunks) pending.push({ file: rel, chunk: ch, hash: chunkHash(ch.text) });
       continue;
     }
     const text = readFileSync(abs, "utf8");
