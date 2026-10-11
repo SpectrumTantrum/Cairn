@@ -18,6 +18,8 @@ With agentic Ask on, Ask can also read plain UTF-8 `.csv` / `.tsv` files in your
 
 With agentic Ask on, images in your vault (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`) can be opened in the app. Ask does not read text from images. If you ask what an image says, Ask says your notes don't cover them.
 
+With agentic Ask on, audio files in your vault (`.mp3`, `.wav`, `.m4a`) can be opened and played in the app. Ask does not transcribe audio. If you ask what an audio file says, Ask says your notes don't cover them.
+
 An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
 
 ## Enable agentic Ask
