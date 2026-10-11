@@ -33,6 +33,8 @@ export interface PendingSave {
 export function pendingSaveBeforeNavigate(state: EditorNavState): PendingSave | null {
   const { activeNode, docKey, buffer, savedContent } = state;
   if (!activeNode || activeNode.type !== "markdown" || !docKey) return null;
+  // Plain text opens in the editor but stays read-only (edit only Markdown).
+  if (activeNode.path.toLowerCase().endsWith(".txt")) return null;
   if (buffer === savedContent) return null;
   return { path: activeNode.path, content: buffer };
 }

@@ -1181,3 +1181,128 @@ test("(b) an empty PDF open does not become a chip", () => {
   });
   assert.deepEqual(cites, []);
 });
+
+const txtFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/txt");
+const { decodeUtf8Text, INVALID_UTF8_MESSAGE } = await import("@cairn/engine");
+
+function headingLineIn(text, heading) {
+  const at = text.split(/\n/).findIndex((line) => line.trim() === `## ${heading}` || line.trim() === `# ${heading}`);
+  assert.ok(at >= 0, heading);
+  return at + 1;
+}
+
+async function readTxtFixture(path) {
+  const bytes = await readFile(join(txtFixtures, path));
+  const text = decodeUtf8Text(bytes);
+  if (text === null) throw new Error(INVALID_UTF8_MESSAGE);
+  return text;
+}
+
+async function scriptedTxtAsk(calls) {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  const ctx = {
+    index,
+    listNotes: async () => ["project-heron.md", "section-b.txt"],
+    readNote: async (path) => readTxtFixture(path),
+  };
+  try {
+    for (const [name, args] of calls) await runAskSearchTool(name, args, ctx, state);
+    return state;
+  } finally {
+    index.close();
+  }
+}
+
+test("QA: a txt fact under Section B cites that heading line", async () => {
+  const text = await readTxtFixture("section-b.txt");
+  const line = headingLineIn(text, "Section B");
+  const state = await scriptedTxtAsk([
+    ["list", {}],
+    ["read", { path: "section-b.txt" }],
+  ]);
+  const cites = chipsFor("The field code is COPPER FINCH, 312 under Section B.", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "Section B");
+  assert.equal(
+    citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading),
+    `Open section-b.txt at line ${line} › Section B`,
+  );
+});
+
+test("QA: a short txt answer cites the file rather than nothing", async () => {
+  const state = await scriptedTxtAsk([
+    ["list", {}],
+    ["read", { path: "section-b.txt" }],
+  ]);
+  const cites = chipsFor("COPPER FINCH", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].heading, "");
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open section-b.txt (file)");
+});
+
+test("QA: a shared codename does not cite the markdown note that lacks 312", async () => {
+  const state = await scriptedTxtAsk([
+    ["list", {}],
+    ["read", { path: "section-b.txt" }],
+    ["read", { path: "project-heron.md" }],
+  ]);
+  const text = await readTxtFixture("section-b.txt");
+  const line = headingLineIn(text, "Section B");
+  const cites = chipsFor("The field code is COPPER FINCH and the number is 312.", state);
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.txt");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "Section B");
+});
+
+test("QA: a non-UTF-8 txt read leaves no chip", async () => {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  try {
+    const message = await runAskSearchTool(
+      "read",
+      { path: "junk.txt" },
+      {
+        index,
+        readNote: async () => {
+          throw new Error(INVALID_UTF8_MESSAGE);
+        },
+      },
+      state,
+    );
+    assert.equal(message, `ERROR: ${INVALID_UTF8_MESSAGE}`);
+    assert.deepEqual(state.sources, []);
+    const cites = chipsFor("The field code is COPPER FINCH, 312 under Section B.", state);
+    assert.deepEqual(cites, []);
+  } finally {
+    index.close();
+  }
+});
+
+test("an empty txt read is not a chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: "The field code is COPPER FINCH, 312 under Section B.",
+    sources: [
+      {
+        file: "junk.txt",
+        line: 1,
+        heading: "",
+        score: NaN,
+        cosine: NaN,
+        snippet: "",
+        text: "",
+        arms: "read",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.deepEqual(cites, []);
+});

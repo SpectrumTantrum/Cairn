@@ -1,6 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
-import { isPdfPath } from "../../cite-format";
+import { isPdfPath, isPlainTextPath, opensInEditor } from "../../cite-format";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -81,15 +81,11 @@ export function EditorPane(props: EditorPaneProps) {
           </div>
         ) : isPdfPath(activeNode.path) ? (
           <div id="pdf-viewer-host" className="editor-pdf-host" />
-        ) : activeNode.type !== "markdown" ? (
+        ) : !opensInEditor(activeNode.path) ? (
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>
             <h2>{activeNode.name}</h2>
-            <p>
-              Only Markdown is indexed, cited, and editable today. Indexing and viewing this format
-              needs the multi-format ingestion pipeline (ADR-0009) — a Docling-based parsing sidecar
-              that isn't built yet, not just UI click-through wiring.
-            </p>
+            <p>Markdown and plain text open in the editor. This format does not.</p>
           </div>
         ) : loading ? (
           <div className="editor-empty">
@@ -105,6 +101,7 @@ export function EditorPane(props: EditorPaneProps) {
             docKey={docKey}
             initialDoc={buffer}
             flash={flash}
+            readOnly={isPlainTextPath(activeNode.path)}
             onChange={onChange}
             onSave={onSave}
             onCursor={onCursor}
@@ -114,7 +111,8 @@ export function EditorPane(props: EditorPaneProps) {
 
       <StatusBar
         {...props}
-        activeIsMarkdown={activeNode?.type === "markdown"}
+        activeIsMarkdown={activeNode?.type === "markdown" && !isPlainTextPath(activeNode.path)}
+        activeIsText={activeNode ? isPlainTextPath(activeNode.path) : false}
         activeIsPdf={activeNode ? isPdfPath(activeNode.path) : false}
         cursor={cursor}
       />
@@ -129,16 +127,17 @@ function StatusBar({
   onIndex,
   cursor,
   activeIsMarkdown,
+  activeIsText,
   activeIsPdf,
-}: EditorPaneProps & { activeIsMarkdown: boolean; activeIsPdf: boolean }) {
+}: EditorPaneProps & { activeIsMarkdown: boolean; activeIsText: boolean; activeIsPdf: boolean }) {
   return (
     <div className="editor-statusbar">
-      {activeIsMarkdown ? (
+      {activeIsMarkdown || activeIsText ? (
         <>
           <span className="status-item">
             Ln {cursor.line}, Col {cursor.col}
           </span>
-          <span className="status-item">Markdown</span>
+          <span className="status-item">{activeIsText ? "Text" : "Markdown"}</span>
         </>
       ) : activeIsPdf ? (
         <span className="status-item">PDF</span>
