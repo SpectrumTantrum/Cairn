@@ -49,9 +49,19 @@ export function isPlainTextPath(file: string): boolean {
   return file.toLowerCase().endsWith(".txt");
 }
 
-/** Markdown notes and plain text open in the editor. PDFs use the viewer. */
+/** HTML vault file. Opens in the editor at a line, and is not a Markdown write target. */
+export function isHtmlPath(file: string): boolean {
+  return /\.html?$/i.test(file);
+}
+
+/** Editor buffer that Ask can cite but the user cannot save (edit only Markdown). */
+export function isReadOnlyEditorPath(file: string): boolean {
+  return isPlainTextPath(file) || isHtmlPath(file);
+}
+
+/** Markdown notes, plain text, and HTML open in the editor. PDFs use the viewer. */
 export function opensInEditor(file: string): boolean {
-  return /\.(md|markdown|txt)$/i.test(file);
+  return /\.(md|markdown|txt|html|htm)$/i.test(file);
 }
 
 /** Chip text for a PDF page, e.g. `report.pdf p.3`. */

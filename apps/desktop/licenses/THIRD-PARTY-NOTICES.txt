@@ -8,3 +8,9 @@ pdfjs-dist 5.4.296
   Standard fonts shipped inside pdfjs-dist (used to read text PDFs):
     licenses/pdfjs-dist/LICENSE_LIBERATION  (SIL Open Font License 1.1)
     licenses/pdfjs-dist/LICENSE_FOXIT       (BSD-style PDFium Authors notice)
+
+node-html-parser 9.0.4
+  License: MIT
+  Source: https://github.com/taoqf/node-html-parser
+  Files: licenses/node-html-parser/LICENSE
+         (packaged under the app's resources/licenses/node-html-parser/)

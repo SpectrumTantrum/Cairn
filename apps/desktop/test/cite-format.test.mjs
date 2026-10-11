@@ -16,6 +16,8 @@ const {
   pdfChipLabel,
   pdfOpenTitle,
   isPlainTextPath,
+  isHtmlPath,
+  isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
 
@@ -89,6 +91,19 @@ test("plain text opens in the editor at a line and is not a PDF", () => {
   assert.equal(opensInEditor("notes/field.pdf"), false);
   assert.equal(citationTitle("notes/field.txt", 9, "Section B"), "Open notes/field.txt at line 9 › Section B");
   assert.equal(citationTitle("notes/field.txt", 0), "Open notes/field.txt (file)");
+});
+
+test("html opens in the editor at a line and is not a write target", () => {
+  assert.equal(isHtmlPath("notes/section-b.html"), true);
+  assert.equal(isHtmlPath("notes/section-b.HTM"), true);
+  assert.equal(isHtmlPath("notes/field.txt"), false);
+  assert.equal(isReadOnlyEditorPath("notes/section-b.html"), true);
+  assert.equal(isReadOnlyEditorPath("notes/field.txt"), true);
+  assert.equal(isReadOnlyEditorPath("notes/field.md"), false);
+  assert.equal(opensInEditor("notes/section-b.html"), true);
+  assert.equal(opensInEditor("notes/section-b.htm"), true);
+  assert.equal(citationTitle("notes/section-b.html", 9, "Section B"), "Open notes/section-b.html at line 9 › Section B");
+  assert.equal(citationTitle("notes/section-b.html", 0), "Open notes/section-b.html (file)");
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

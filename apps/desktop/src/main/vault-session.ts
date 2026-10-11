@@ -4,7 +4,9 @@ import {
   decodeUtf8Text,
   diffLines,
   discoverIndexableFiles,
+  extractHtmlText,
   extractPdfPages,
+  HTML_NO_TEXT,
   generateStudioNote,
   INVALID_UTF8_MESSAGE,
   indexVault,
@@ -375,9 +377,15 @@ export class VaultSession {
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
     }
-    if (target.toLowerCase().endsWith(".txt")) {
+    const lower = target.toLowerCase();
+    if (lower.endsWith(".txt") || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
       if (text === null) throw new Error(INVALID_UTF8_MESSAGE);
+      if (/\.html?$/i.test(lower)) {
+        const visible = extractHtmlText(text);
+        if (!visible.trim()) throw new Error(HTML_NO_TEXT);
+        return visible;
+      }
       return text;
     }
     return readFileSync(target, "utf8");

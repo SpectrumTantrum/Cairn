@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { isPdfPath, isPlainTextPath, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { isPdfPath, isReadOnlyEditorPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -586,7 +586,7 @@ export function App() {
   }, []);
 
   const saveBuffer = useCallback(async () => {
-    if (!activeNode || activeNode.type !== "markdown" || isPlainTextPath(activeNode.path) || !docKey) return;
+    if (!activeNode || activeNode.type !== "markdown" || isReadOnlyEditorPath(activeNode.path) || !docKey) return;
     if (buffer === savedContent) return;
     try {
       await window.cairn.writeSource(activeNode.path, buffer);
@@ -789,7 +789,7 @@ export function App() {
             {
               name: basename(source.file),
               path: source.file,
-              type: isPlainTextPath(source.file) ? "other" : "markdown",
+              type: isReadOnlyEditorPath(source.file) ? "other" : "markdown",
             },
             line,
           );

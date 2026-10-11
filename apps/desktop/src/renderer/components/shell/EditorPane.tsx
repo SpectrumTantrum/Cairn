@@ -1,6 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
-import { isPdfPath, isPlainTextPath, opensInEditor } from "../../cite-format";
+import { isHtmlPath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, opensInEditor } from "../../cite-format";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -85,7 +85,7 @@ export function EditorPane(props: EditorPaneProps) {
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>
             <h2>{activeNode.name}</h2>
-            <p>Markdown and plain text open in the editor. This format does not.</p>
+            <p>Markdown, plain text, and HTML open in the editor. This format does not.</p>
           </div>
         ) : loading ? (
           <div className="editor-empty">
@@ -101,7 +101,7 @@ export function EditorPane(props: EditorPaneProps) {
             docKey={docKey}
             initialDoc={buffer}
             flash={flash}
-            readOnly={isPlainTextPath(activeNode.path)}
+            readOnly={isReadOnlyEditorPath(activeNode.path)}
             onChange={onChange}
             onSave={onSave}
             onCursor={onCursor}
@@ -111,8 +111,9 @@ export function EditorPane(props: EditorPaneProps) {
 
       <StatusBar
         {...props}
-        activeIsMarkdown={activeNode?.type === "markdown" && !isPlainTextPath(activeNode.path)}
+        activeIsMarkdown={activeNode?.type === "markdown" && !isReadOnlyEditorPath(activeNode.path)}
         activeIsText={activeNode ? isPlainTextPath(activeNode.path) : false}
+        activeIsHtml={activeNode ? isHtmlPath(activeNode.path) : false}
         activeIsPdf={activeNode ? isPdfPath(activeNode.path) : false}
         cursor={cursor}
       />
@@ -128,16 +129,22 @@ function StatusBar({
   cursor,
   activeIsMarkdown,
   activeIsText,
+  activeIsHtml,
   activeIsPdf,
-}: EditorPaneProps & { activeIsMarkdown: boolean; activeIsText: boolean; activeIsPdf: boolean }) {
+}: EditorPaneProps & {
+  activeIsMarkdown: boolean;
+  activeIsText: boolean;
+  activeIsHtml: boolean;
+  activeIsPdf: boolean;
+}) {
   return (
     <div className="editor-statusbar">
-      {activeIsMarkdown || activeIsText ? (
+      {activeIsMarkdown || activeIsText || activeIsHtml ? (
         <>
           <span className="status-item">
             Ln {cursor.line}, Col {cursor.col}
           </span>
-          <span className="status-item">{activeIsText ? "Text" : "Markdown"}</span>
+          <span className="status-item">{activeIsHtml ? "HTML" : activeIsText ? "Text" : "Markdown"}</span>
         </>
       ) : activeIsPdf ? (
         <span className="status-item">PDF</span>
