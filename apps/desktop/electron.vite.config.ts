@@ -20,6 +20,7 @@ function cspPlugin(): Plugin {
         `script-src ${scriptSrc}`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data:",
+        "media-src 'self' data:",
         `connect-src ${connectSrc}`,
       ].join("; ");
 

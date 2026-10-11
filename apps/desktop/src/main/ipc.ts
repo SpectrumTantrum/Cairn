@@ -306,6 +306,15 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle("source:readAudio", async (_event, file: unknown) => {
+    return handleUserErrors(() => {
+      if (typeof file !== "string") {
+        throw new Error("No source file was provided.");
+      }
+      return session.readAudio(file);
+    });
+  });
+
   ipcMain.handle("source:write", async (_event, payload: unknown) => {
     return handleUserErrors(() => {
       const file = typeof payload === "object" && payload !== null && "file" in payload

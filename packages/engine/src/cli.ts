@@ -20,6 +20,7 @@ USAGE
 COMMANDS
   index   Chunk + index every .md/.markdown/.txt/.csv/.tsv/.html/.htm file and text PDF under <folder> into <folder>/.cairn/.
           Image files (.png/.jpg/.jpeg/.webp/.gif) are indexed by path only (no text, no OCR).
+          Audio files (.mp3/.wav/.m4a) are indexed by path only (no transcript).
           Hybrid (dense + keyword) by default — needs Ollama + an embedder pulled.
           --lexical builds a keyword-only index (no model, zero setup).
   search  Return ranked, cited chunks (file:line › heading) for a query. Auto-uses

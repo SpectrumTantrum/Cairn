@@ -371,6 +371,20 @@ button {
   object-fit: contain;
 }
 
+.editor-audio-host {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.editor-audio-host audio {
+  width: min(480px, 100%);
+}
+
 /* CodeMirror host fills the body; padding 26x34 lives inside CM content. */
 .cm-host {
   flex: 1;

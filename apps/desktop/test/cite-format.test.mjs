@@ -19,6 +19,7 @@ const {
   isHtmlPath,
   isTablePath,
   isImagePath,
+  isAudioPath,
   isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
@@ -133,6 +134,17 @@ test("images open in the viewer and not in the editor", () => {
   assert.equal(opensInEditor("notes/section-b.png"), false);
   assert.equal(opensInEditor("notes/field.jpg"), false);
   assert.equal(isReadOnlyEditorPath("notes/section-b.png"), false);
+});
+
+test("audio opens in the player and not in the editor", () => {
+  assert.equal(isAudioPath("notes/section-b.mp3"), true);
+  assert.equal(isAudioPath("notes/tone.WAV"), true);
+  assert.equal(isAudioPath("notes/clip.m4a"), true);
+  assert.equal(isAudioPath("notes/clip.mp4"), false);
+  assert.equal(isAudioPath("notes/section-b.png"), false);
+  assert.equal(opensInEditor("notes/section-b.mp3"), false);
+  assert.equal(opensInEditor("notes/tone.wav"), false);
+  assert.equal(isReadOnlyEditorPath("notes/clip.m4a"), false);
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

@@ -19,8 +19,9 @@ import { test } from "node:test";
 
 const { createVaultSession } = await import("../out-test/vault-session.js");
 const { InMemoryIndex, FakeModelProvider } = await import("@cairn/engine/testing");
-const { setModelProvider, resetModelProvider, IMAGE_NO_TEXT } = await import("@cairn/engine");
+const { setModelProvider, resetModelProvider, AUDIO_NO_TEXT, IMAGE_NO_TEXT } = await import("@cairn/engine");
 const imageFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/images");
+const audioFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/audio");
 
 function makeVaultDir() {
   return mkdtempSync(join(tmpdir(), "cairn-vault-session-"));
@@ -221,6 +222,84 @@ test("readImage opens a real image and readSource refuses to decode it as text",
     assert.throws(() => session.readImage("../secret.png"), /Refusing to open a path outside/);
     assert.throws(() => session.writeSource("section-b.png", "x"), /Refusing to write a non-Markdown file/);
   } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("readAudio opens a real recording and readSource refuses to decode it as text", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    for (const name of ["section-b.mp3", "tone.wav", "clip.m4a"]) {
+      copyFileSync(join(audioFixtures, name), join(vault, name));
+    }
+    writeFileSync(join(vault, "project-heron.md"), "# Project Heron\n");
+
+    const tree = session.listTree();
+    const mp3Node = tree.find((node) => node.name === "section-b.mp3");
+    assert.ok(mp3Node);
+    assert.equal(mp3Node.type, "other");
+
+    const opened = session.readAudio("section-b.mp3");
+    assert.equal(opened.mime, "audio/mpeg");
+    assert.equal(opened.dataUrl.startsWith("data:audio/mpeg;base64,"), true);
+    const raw = readFileSync(join(vault, "section-b.mp3"));
+    assert.ok(raw.subarray(0, 3).equals(Buffer.from("ID3")));
+    assert.deepEqual(Buffer.from(opened.dataUrl.slice("data:audio/mpeg;base64,".length), "base64"), raw);
+
+    assert.equal(session.readAudio("tone.wav").mime, "audio/wav");
+    assert.equal(session.readAudio("clip.m4a").mime, "audio/mp4");
+    assert.equal(session.readAudio("tone.wav").dataUrl.startsWith("data:audio/wav;base64,"), true);
+
+    assert.throws(() => session.readSource("section-b.mp3"), { message: AUDIO_NO_TEXT });
+    assert.throws(() => session.readSource("gone.wav"), /The source file is no longer available/);
+    assert.throws(() => session.readAudio("project-heron.md"), /Only an audio file can be opened/);
+    assert.throws(() => session.readAudio("../secret.mp3"), /Refusing to open a path outside/);
+    assert.throws(() => session.writeSource("section-b.mp3", "x"), /Refusing to write a non-Markdown file/);
+
+    const csp = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../electron.vite.config.ts"), "utf8");
+    assert.match(csp, /media-src 'self' data:/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("askAgent that names audio misses and does not cite the shared-codename note", async () => {
+  const vault = makeIndexedVaultDir();
+  const note = "# Project Heron\n\nThe notebook codename is COPPER FINCH and the badge is 999.\n";
+  copyFileSync(join(audioFixtures, "section-b.mp3"), join(vault, "section-b.mp3"));
+  writeFileSync(join(vault, "project-heron.md"), note);
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [{ name: "read", arguments: { path: "project-heron.md" } }],
+          };
+        }
+        return { content: note, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (dir) => buildLexicalIndex(dir, [{ file: "project-heron.md", text: note }]),
+    });
+    session.setVault(vault);
+    const result = await session.askAgent("What does section-b.mp3 say about Project Heron?");
+    assert.equal(calls, 0);
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
+  } finally {
+    resetModelProvider();
     rmSync(vault, { recursive: true, force: true });
   }
 });
