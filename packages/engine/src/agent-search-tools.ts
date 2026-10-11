@@ -10,6 +10,7 @@ import { pdfPageHeading } from "./pdf-text.js";
 import { HTML_NO_TEXT } from "./html-text.js";
 import { AUDIO_NO_TEXT, isAudioPath } from "./audio-files.js";
 import { IMAGE_NO_TEXT, isImagePath } from "./image-files.js";
+import { VIDEO_NO_TEXT, isVideoPath } from "./video-files.js";
 import { isIndexableVaultPath } from "./indexer.js";
 import { EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
@@ -57,6 +58,8 @@ export interface AskSearchToolState {
   textlessImage?: boolean;
   /** A read or open touched an audio file. Audio has no transcript. */
   textlessAudio?: boolean;
+  /** A read or open touched a video file. Video has no transcript. */
+  textlessVideo?: boolean;
 }
 
 const MAX_READ_CHARS_DEFAULT = 8000;
@@ -84,7 +87,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "list",
     description:
-      "List Markdown, plain text, CSV, TSV, HTML, PDF, image, and audio paths in the vault. Images and audio are path-only and cannot be read. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
+      "List Markdown, plain text, CSV, TSV, HTML, PDF, image, audio, and video paths in the vault. Images, audio, and video are path-only and cannot be read. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
     parameters: {
       type: "object",
       properties: {
@@ -122,7 +125,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "read",
     description:
-      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image cannot be read. An audio file cannot be read. Use after find/grep to read surrounding context.",
+      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image cannot be read. An audio file cannot be read. A video file cannot be read. Use after find/grep to read surrounding context.",
     parameters: {
       type: "object",
       properties: {
@@ -310,6 +313,26 @@ async function refuseAudioRead(
 }
 
 /**
+ * Video has no transcript. A present file is an error with no source.
+ * A missing path keeps the reader's own message and is not marked textless.
+ */
+async function refuseVideoRead(
+  ctx: AskSearchToolContext,
+  state: AskSearchToolState,
+  path: string,
+): Promise<string | null> {
+  if (!isVideoPath(path)) return null;
+  try {
+    await ctx.readNote(path);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message !== VIDEO_NO_TEXT) return `ERROR: ${message}`;
+  }
+  state.textlessVideo = true;
+  return `ERROR: ${VIDEO_NO_TEXT}`;
+}
+
+/**
  * Run one read-only search tool. Mutates `state` (sources/opened) and returns the tool message string.
  */
 export async function runAskSearchTool(
@@ -412,6 +435,8 @@ export async function runAskSearchTool(
     if (imageRefusal) return imageRefusal;
     const audioRefusal = await refuseAudioRead(ctx, state, norm);
     if (audioRefusal) return audioRefusal;
+    const videoRefusal = await refuseVideoRead(ctx, state, norm);
+    if (videoRefusal) return videoRefusal;
     if (isPdfPath(norm)) {
       const pages = await loadPdfPages(ctx, norm);
       if (typeof pages === "string") {
@@ -464,6 +489,8 @@ export async function runAskSearchTool(
     if (imageRefusal) return imageRefusal;
     const audioRefusal = await refuseAudioRead(ctx, state, norm);
     if (audioRefusal) return audioRefusal;
+    const videoRefusal = await refuseVideoRead(ctx, state, norm);
+    if (videoRefusal) return videoRefusal;
     if (isPdfPath(norm)) {
       const pages = await loadPdfPages(ctx, norm);
       if (typeof pages === "string") {

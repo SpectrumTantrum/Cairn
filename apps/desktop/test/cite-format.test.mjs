@@ -20,6 +20,7 @@ const {
   isTablePath,
   isImagePath,
   isAudioPath,
+  isVideoPath,
   isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
@@ -134,6 +135,18 @@ test("images open in the viewer and not in the editor", () => {
   assert.equal(opensInEditor("notes/section-b.png"), false);
   assert.equal(opensInEditor("notes/field.jpg"), false);
   assert.equal(isReadOnlyEditorPath("notes/section-b.png"), false);
+});
+
+test("video opens in the player and not in the editor", () => {
+  assert.equal(isVideoPath("notes/clip.mp4"), true);
+  assert.equal(isVideoPath("notes/tone.WEBM"), true);
+  assert.equal(isVideoPath("notes/section-b.mov"), true);
+  assert.equal(isVideoPath("notes/clip.mkv"), false);
+  assert.equal(isVideoPath("notes/clip.avi"), false);
+  assert.equal(isVideoPath("notes/section-b.mp3"), false);
+  assert.equal(opensInEditor("notes/clip.mp4"), false);
+  assert.equal(opensInEditor("notes/tone.webm"), false);
+  assert.equal(isReadOnlyEditorPath("notes/section-b.mov"), false);
 });
 
 test("audio opens in the player and not in the editor", () => {

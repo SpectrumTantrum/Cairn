@@ -72,6 +72,8 @@ export interface CairnApi {
   readImage(file: string): Promise<{ mime: string; dataUrl: string }>;
   /** Vault audio as a data URL for the in-app player (mp3, wav, m4a). */
   readAudio(file: string): Promise<{ mime: string; dataUrl: string }>;
+  /** Vault video as a data URL for the in-app player (mp4, webm, mov). */
+  readVideo(file: string): Promise<{ mime: string; dataUrl: string }>;
   /** Show a vault PDF in the in-app viewer. `page` is 1-based. Bounds are CSS pixels. */
   openPdf(payload: {
     file: string;
@@ -161,6 +163,7 @@ const api: CairnApi = {
   readSource: (file) => ipcRenderer.invoke("source:read", file),
   readImage: (file) => ipcRenderer.invoke("source:readImage", file),
   readAudio: (file) => ipcRenderer.invoke("source:readAudio", file),
+  readVideo: (file) => ipcRenderer.invoke("source:readVideo", file),
   openPdf: (payload) => ipcRenderer.invoke("pdf:open", payload),
   hidePdf: () => ipcRenderer.invoke("pdf:hide"),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),
