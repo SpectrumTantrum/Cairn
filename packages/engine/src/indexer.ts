@@ -12,6 +12,7 @@ import { extractPdfPages, pdfPageHeading } from "./pdf-text.js";
 import { extractHtmlText } from "./html-text.js";
 import { isAudioPath } from "./audio-files.js";
 import { isImagePath } from "./image-files.js";
+import { isVideoPath } from "./video-files.js";
 import { decodeUtf8Text } from "./utf8-text.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
@@ -69,7 +70,7 @@ export function discoverMarkdownFiles(root: string): string[] {
   return discoverFiles(root, /\.(md|markdown)$/i);
 }
 
-const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|pdf|png|jpe?g|webp|gif|mp3|wav|m4a)$/i;
+const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|pdf|png|jpe?g|webp|gif|mp3|wav|m4a|mp4|webm|mov)$/i;
 
 function isHtmlPath(path: string): boolean {
   return /\.html?$/i.test(path);
@@ -84,8 +85,9 @@ function isTablePath(path: string): boolean {
 }
 
 /**
- * Markdown, plain UTF-8 text, CSV, TSV, HTML, PDF, images, and audio (mp3, wav, m4a).
- * Video and other types stay out. Images and audio are path-only: no text body.
+ * Markdown, plain UTF-8 text, CSV, TSV, HTML, PDF, images, audio (mp3, wav, m4a),
+ * and video (mp4, webm, mov). Other containers stay out.
+ * Images, audio, and video are path-only: no text body.
  */
 export function isIndexableVaultPath(path: string): boolean {
   return INDEXABLE_EXT.test(path);
@@ -100,9 +102,9 @@ function readUtf8TextFile(abs: string): string | null {
 }
 
 /**
- * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, PDF, images, and audio.
+ * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, PDF, images, audio, and video.
  * A text, table, or HTML file that is not valid UTF-8 is skipped.
- * Images and audio are included by extension only. Video and other types stay out.
+ * Images, audio, and video are included by extension only. Other containers stay out.
  */
 export function discoverIndexableFiles(root: string): string[] {
   return discoverFiles(root, INDEXABLE_EXT).filter((abs) => {
@@ -141,7 +143,7 @@ export async function chunkVaultFiles(root: string, files: string[]): Promise<Pe
   for (const abs of files) {
     const rel = relative(root, abs).split(sep).join("/");
     // Path and filename only. No OCR, no transcript, no text body, no embedding.
-    if (isImagePath(rel) || isAudioPath(rel)) continue;
+    if (isImagePath(rel) || isAudioPath(rel) || isVideoPath(rel)) continue;
     if (/\.pdf$/i.test(rel)) {
       pending.push(...(await chunkPdfFile(rel, abs)));
       continue;

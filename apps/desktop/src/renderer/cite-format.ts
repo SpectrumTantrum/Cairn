@@ -69,6 +69,11 @@ export function isAudioPath(file: string): boolean {
   return /\.(mp3|wav|m4a)$/i.test(file);
 }
 
+/** mp4, webm, or mov. Opens in the in-app video player, not the editor. */
+export function isVideoPath(file: string): boolean {
+  return /\.(mp4|webm|mov)$/i.test(file);
+}
+
 /** Editor buffer that Ask can cite but the user cannot save (edit only Markdown). */
 export function isReadOnlyEditorPath(file: string): boolean {
   return isPlainTextPath(file) || isHtmlPath(file) || isTablePath(file);

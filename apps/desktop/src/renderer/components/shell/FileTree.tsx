@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { MouseEvent } from "react";
 import { ChevronDown, ChevronRight, FilePlus, FileQuestion, FileText, FolderInput, FolderPlus, Pencil, Trash2 } from "lucide-react";
 import type { TreeNode } from "../../../shared/types.js";
-import { isAudioPath, isImagePath } from "../../cite-format";
+import { isAudioPath, isImagePath, isVideoPath } from "../../cite-format";
 
 /** Mutation intents surfaced by the tree (issue #21). `parent` is a folder's vault-relative path ("" = root). */
 export interface TreeMutations {
@@ -109,7 +109,9 @@ function TreeLevel({ nodes, expanded, activePath, onToggleFolder, onOpenNode, on
                   ? `${node.path} — opens in the image viewer`
                   : isAudioPath(node.path)
                     ? `${node.path} — opens in the audio player`
-                    : `${node.path} — opens as a read-only host (Markdown editing only for now)`
+                    : isVideoPath(node.path)
+                      ? `${node.path} — opens in the video player`
+                      : `${node.path} — opens as a read-only host (Markdown editing only for now)`
             }
             onClick={() => onOpenNode(node)}
             onContextMenu={(e) => onContextMenu(e, node)}

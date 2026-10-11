@@ -19,9 +19,10 @@ import { test } from "node:test";
 
 const { createVaultSession } = await import("../out-test/vault-session.js");
 const { InMemoryIndex, FakeModelProvider } = await import("@cairn/engine/testing");
-const { setModelProvider, resetModelProvider, AUDIO_NO_TEXT, IMAGE_NO_TEXT } = await import("@cairn/engine");
+const { setModelProvider, resetModelProvider, AUDIO_NO_TEXT, IMAGE_NO_TEXT, VIDEO_NO_TEXT } = await import("@cairn/engine");
 const imageFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/images");
 const audioFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/audio");
+const videoFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/video");
 
 function makeVaultDir() {
   return mkdtempSync(join(tmpdir(), "cairn-vault-session-"));
@@ -261,6 +262,85 @@ test("readAudio opens a real recording and readSource refuses to decode it as te
     const csp = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../electron.vite.config.ts"), "utf8");
     assert.match(csp, /media-src 'self' data:/);
   } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("readVideo opens a real clip and readSource refuses to decode it as text", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    for (const name of ["clip.mp4", "tone.webm", "section-b.mov"]) {
+      copyFileSync(join(videoFixtures, name), join(vault, name));
+    }
+    writeFileSync(join(vault, "project-heron.md"), "# Project Heron\n");
+
+    const tree = session.listTree();
+    const mp4Node = tree.find((node) => node.name === "clip.mp4");
+    assert.ok(mp4Node);
+    assert.equal(mp4Node.type, "other");
+
+    const opened = session.readVideo("clip.mp4");
+    assert.equal(opened.mime, "video/mp4");
+    assert.equal(opened.dataUrl.startsWith("data:video/mp4;base64,"), true);
+    const raw = readFileSync(join(vault, "clip.mp4"));
+    assert.ok(raw.includes(Buffer.from("ftyp")));
+    assert.deepEqual(Buffer.from(opened.dataUrl.slice("data:video/mp4;base64,".length), "base64"), raw);
+
+    assert.equal(session.readVideo("tone.webm").mime, "video/webm");
+    assert.equal(session.readVideo("section-b.mov").mime, "video/quicktime");
+    assert.equal(session.readVideo("tone.webm").dataUrl.startsWith("data:video/webm;base64,"), true);
+
+    assert.throws(() => session.readSource("clip.mp4"), { message: VIDEO_NO_TEXT });
+    assert.throws(() => session.readSource("gone.mov"), /The source file is no longer available/);
+    assert.throws(() => session.readVideo("project-heron.md"), /Only a video file can be opened/);
+    assert.throws(() => session.readVideo("../secret.mp4"), /Refusing to open a path outside/);
+    assert.throws(() => session.writeSource("clip.mp4", "x"), /Refusing to write a non-Markdown file/);
+
+    const csp = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../electron.vite.config.ts"), "utf8");
+    assert.match(csp, /media-src 'self' data:/);
+    assert.equal(csp.includes("video-src"), false);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("askAgent that names video misses and does not cite the shared-codename note", async () => {
+  const vault = makeIndexedVaultDir();
+  const note = "# Project Heron\n\nThe notebook codename is COPPER FINCH and the badge is 999.\n";
+  copyFileSync(join(videoFixtures, "clip.mp4"), join(vault, "clip.mp4"));
+  writeFileSync(join(vault, "project-heron.md"), note);
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [{ name: "read", arguments: { path: "project-heron.md" } }],
+          };
+        }
+        return { content: note, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (dir) => buildLexicalIndex(dir, [{ file: "project-heron.md", text: note }]),
+    });
+    session.setVault(vault);
+    const result = await session.askAgent("What does clip.mp4 say about Project Heron?");
+    assert.equal(calls, 0);
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
+  } finally {
+    resetModelProvider();
     rmSync(vault, { recursive: true, force: true });
   }
 });

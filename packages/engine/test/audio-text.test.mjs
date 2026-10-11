@@ -98,12 +98,12 @@ test("isAudioPath accepts mp3, wav, and m4a and rejects video and images", () =>
 
 test("audio is indexed by path only, with no text body and no embeddings", async () => {
   const root = await vaultWith([...AUDIO, "project-heron.md"]);
-  await writeFile(join(root, "clip.mp4"), Buffer.from("not video"));
+  await writeFile(join(root, "clip.mkv"), Buffer.from("not video"));
   try {
     const names = discoverIndexableFiles(root).map((abs) => basename(abs));
     for (const file of AUDIO) assert.ok(names.includes(file), file);
     assert.ok(names.includes("project-heron.md"));
-    assert.equal(names.includes("clip.mp4"), false);
+    assert.equal(names.includes("clip.mkv"), false);
 
     const stats = await indexVault(root, { lexical: true });
     assert.equal(stats.files, AUDIO.length + 1);
@@ -130,13 +130,13 @@ test("audio is indexed by path only, with no text body and no embeddings", async
           {
             index,
             readNote: async () => "",
-            listNotes: async () => [...AUDIO, "project-heron.md", "clip.mp4"],
+            listNotes: async () => [...AUDIO, "project-heron.md", "clip.mkv"],
           },
           { sources: [], opened: [] },
         ),
       );
       for (const file of AUDIO) assert.ok(fromVault.paths.includes(file), file);
-      assert.equal(fromVault.paths.includes("clip.mp4"), false);
+      assert.equal(fromVault.paths.includes("clip.mkv"), false);
     } finally {
       index.close();
     }

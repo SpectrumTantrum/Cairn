@@ -6,6 +6,8 @@ import {
   discoverIndexableFiles,
   AUDIO_NO_TEXT,
   audioMimeType,
+  VIDEO_NO_TEXT,
+  videoMimeType,
   EMPTY_TABLE_MESSAGE,
   extractHtmlText,
   extractPdfPages,
@@ -14,6 +16,7 @@ import {
   imageMimeType,
   isAudioPath,
   isImagePath,
+  isVideoPath,
   generateStudioNote,
   INVALID_UTF8_MESSAGE,
   indexVault,
@@ -386,6 +389,7 @@ export class VaultSession {
     }
     if (isImagePath(file)) throw new Error(IMAGE_NO_TEXT);
     if (isAudioPath(file)) throw new Error(AUDIO_NO_TEXT);
+    if (isVideoPath(file)) throw new Error(VIDEO_NO_TEXT);
     const lower = target.toLowerCase();
     if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
@@ -423,6 +427,21 @@ export class VaultSession {
   readAudio(file: string): { mime: string; dataUrl: string } {
     const mime = audioMimeType(file);
     if (!mime) throw new Error("Only an audio file can be opened in the audio player.");
+    const target = this.resolveSourcePath(file);
+    if (!existsSync(target) || !statSync(target).isFile()) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    const bytes = readFileSync(target);
+    return { mime, dataUrl: `data:${mime};base64,${bytes.toString("base64")}` };
+  }
+
+  /**
+   * Bytes of a vault video as a data URL the renderer can put on a `<video>`.
+   * Chromium plays mp4, webm, and H.264 mov. No video library and no transcript.
+   */
+  readVideo(file: string): { mime: string; dataUrl: string } {
+    const mime = videoMimeType(file);
+    if (!mime) throw new Error("Only a video file can be opened in the video player.");
     const target = this.resolveSourcePath(file);
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");

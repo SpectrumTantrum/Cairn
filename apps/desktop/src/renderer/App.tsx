@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -169,6 +169,8 @@ export function App() {
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   /** Data URL for the open audio file. Chromium plays it; the main process only reads bytes. */
   const [audioSrc, setAudioSrc] = useState<string | null>(null);
+  /** Data URL for the open video file. Chromium plays it; the main process only reads bytes. */
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
 
   // Engine status
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
@@ -407,6 +409,7 @@ export function App() {
       setSavedContent("");
       setImageSrc(null);
       setAudioSrc(null);
+      setVideoSrc(null);
       setPdfTarget(null);
       setIndexStats(null);
       setIndexState("none");
@@ -489,6 +492,7 @@ export function App() {
       setPdfTarget(null);
       setImageSrc(null);
       setAudioSrc(null);
+      setVideoSrc(null);
       setActiveNode(node);
       setLoading(true);
       setLoadError(null);
@@ -524,6 +528,7 @@ export function App() {
         setPdfTarget((cur) => (cur && cur.path === path && cur.page === nextPage ? cur : { path, page: nextPage }));
         setImageSrc(null);
         setAudioSrc(null);
+        setVideoSrc(null);
         setActiveNode({ name: basename(path), path, type: "other" });
         setDocKey(null);
         setBuffer("");
@@ -582,6 +587,7 @@ export function App() {
         setSavedContent("");
         setImageSrc(null);
         setAudioSrc(null);
+        setVideoSrc(null);
         setLoadError(null);
         setLoading(true);
         setFlash(null);
@@ -614,12 +620,46 @@ export function App() {
         setSavedContent("");
         setImageSrc(null);
         setAudioSrc(null);
+        setVideoSrc(null);
         setLoadError(null);
         setLoading(true);
         setFlash(null);
         try {
           const audio = await window.cairn.readAudio(node.path);
           setAudioSrc(audio.dataUrl);
+        } catch (err) {
+          setLoadError(errorMessage(err));
+        } finally {
+          setLoading(false);
+        }
+      } finally {
+        navigatingRef.current = false;
+      }
+    },
+    [savePendingNavigation],
+  );
+
+  const openVideo = useCallback(
+    async (node: TreeNode) => {
+      if (navigatingRef.current) return;
+      navigatingRef.current = true;
+      try {
+        const saved = await savePendingNavigation();
+        if (!saved) return;
+        setPdfTarget(null);
+        setActiveNode(node);
+        setDocKey(null);
+        setBuffer("");
+        setSavedContent("");
+        setImageSrc(null);
+        setAudioSrc(null);
+        setVideoSrc(null);
+        setLoadError(null);
+        setLoading(true);
+        setFlash(null);
+        try {
+          const video = await window.cairn.readVideo(node.path);
+          setVideoSrc(video.dataUrl);
         } catch (err) {
           setLoadError(errorMessage(err));
         } finally {
@@ -646,6 +686,10 @@ export function App() {
         void openAudio(node);
         return;
       }
+      if (isVideoPath(node.path)) {
+        void openVideo(node);
+        return;
+      }
       if (node.type === "markdown" || opensInEditor(node.path)) {
         void openMarkdown(node);
       } else {
@@ -653,18 +697,20 @@ export function App() {
         setPdfTarget(null);
         setImageSrc(null);
         setAudioSrc(null);
+        setVideoSrc(null);
         setActiveNode(node);
         setDocKey(null);
         setLoadError(null);
       }
     },
-    [openAudio, openImage, openMarkdown, openPdf],
+    [openAudio, openImage, openMarkdown, openPdf, openVideo],
   );
 
   const closeTab = useCallback(() => {
     setPdfTarget(null);
     setImageSrc(null);
     setAudioSrc(null);
+    setVideoSrc(null);
     setActiveNode(null);
     setDocKey(null);
     setBuffer("");
@@ -830,6 +876,7 @@ export function App() {
           setPdfTarget(null);
           setImageSrc(null);
           setAudioSrc(null);
+          setVideoSrc(null);
           setActiveNode(null);
         }
         setExpanded((prev) => {
@@ -875,6 +922,10 @@ export function App() {
         void openAudio({ name: basename(source.file), path: source.file, type: "other" });
         return;
       }
+      if (isVideoPath(source.file)) {
+        void openVideo({ name: basename(source.file), path: source.file, type: "other" });
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(source);
         if (!rightRailOpen) setRightRailOpen(true);
@@ -893,7 +944,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf, rightRailOpen],
+    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf, openVideo, rightRailOpen],
   );
 
   function submitChat(): void {
@@ -1228,6 +1279,10 @@ export function App() {
         void openAudio({ name: basename(hit.file), path: hit.file, type: "other" });
         return;
       }
+      if (isVideoPath(hit.file)) {
+        void openVideo({ name: basename(hit.file), path: hit.file, type: "other" });
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(hit);
         if (docKey !== null && vaultPathsEqual(docKey, hit.file)) {
@@ -1242,7 +1297,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf],
+    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf, openVideo],
   );
 
   const composerReason = useMemo(
@@ -1403,6 +1458,7 @@ export function App() {
           loadError={loadError}
           imageSrc={imageSrc}
           audioSrc={audioSrc}
+          videoSrc={videoSrc}
           flash={flash}
           cursor={cursor}
           rightRailOpen={rightRailOpen}
