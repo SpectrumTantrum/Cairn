@@ -44,6 +44,16 @@ export function isPdfPath(file: string): boolean {
   return file.toLowerCase().endsWith(".pdf");
 }
 
+/** Plain UTF-8 text. Opens in the editor at a line, and is not a Markdown write target. */
+export function isPlainTextPath(file: string): boolean {
+  return file.toLowerCase().endsWith(".txt");
+}
+
+/** Markdown notes and plain text open in the editor. PDFs use the viewer. */
+export function opensInEditor(file: string): boolean {
+  return /\.(md|markdown|txt)$/i.test(file);
+}
+
 /** Chip text for a PDF page, e.g. `report.pdf p.3`. */
 export function pdfChipLabel(file: string, page: number): string {
   return `${basename(file)} p.${page}`;

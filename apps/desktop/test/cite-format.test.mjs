@@ -15,6 +15,8 @@ const {
   PDF_OPEN_LANDS_ON_PAGE,
   pdfChipLabel,
   pdfOpenTitle,
+  isPlainTextPath,
+  opensInEditor,
 } = await import("../out-test/cite-format.js");
 
 test("basename returns the final path segment", () => {
@@ -75,6 +77,18 @@ test("(a) a PDF chip names the page and the tooltip follows the landing switch",
   }
   assert.equal(citationTitle("report.pdf", 2, "Section B", 3).includes("line"), false);
   assert.equal(citationTitle("project-heron.md", 21, "Section B"), "Open project-heron.md at line 21 › Section B");
+});
+
+test("plain text opens in the editor at a line and is not a PDF", () => {
+  assert.equal(isPlainTextPath("notes/field.txt"), true);
+  assert.equal(isPlainTextPath("notes/field.TXT"), true);
+  assert.equal(isPlainTextPath("notes/field.md"), false);
+  assert.equal(opensInEditor("notes/field.txt"), true);
+  assert.equal(opensInEditor("notes/field.md"), true);
+  assert.equal(opensInEditor("Notes/Readme.markdown"), true);
+  assert.equal(opensInEditor("notes/field.pdf"), false);
+  assert.equal(citationTitle("notes/field.txt", 9, "Section B"), "Open notes/field.txt at line 9 › Section B");
+  assert.equal(citationTitle("notes/field.txt", 0), "Open notes/field.txt (file)");
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

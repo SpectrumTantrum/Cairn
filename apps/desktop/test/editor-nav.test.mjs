@@ -58,6 +58,27 @@ test("dirty buffer but no docKey returns null (nothing bound on disk yet)", () =
   assert.equal(pending, null);
 });
 
+test("plain text open in the editor is not written", () => {
+  assert.equal(
+    pendingSaveBeforeNavigate({
+      activeNode: { path: "notes/field.txt", name: "field.txt", type: "other" },
+      docKey: "notes/field.txt",
+      buffer: "edited",
+      savedContent: "original",
+    }),
+    null,
+  );
+  assert.equal(
+    pendingSaveBeforeNavigate({
+      activeNode: { path: "notes/field.txt", name: "field.txt", type: "markdown" },
+      docKey: "notes/field.txt",
+      buffer: "edited",
+      savedContent: "original",
+    }),
+    null,
+  );
+});
+
 test("save targets the CURRENT node's path, not the navigation target", () => {
   // The pending save must flush the file being left, using its own current buffer.
   const pending = pendingSaveBeforeNavigate({

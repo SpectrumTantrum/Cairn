@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { isPdfPath, vaultPathsEqual } from "./cite-format";
+import { isPdfPath, isPlainTextPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -563,7 +563,7 @@ export function App() {
         void openPdf(node.path, 1);
         return;
       }
-      if (node.type === "markdown") {
+      if (node.type === "markdown" || opensInEditor(node.path)) {
         void openMarkdown(node);
       } else {
         // Non-Markdown: generic read-only host, no editor (ADR-0009).
@@ -586,7 +586,7 @@ export function App() {
   }, []);
 
   const saveBuffer = useCallback(async () => {
-    if (!activeNode || activeNode.type !== "markdown" || !docKey) return;
+    if (!activeNode || activeNode.type !== "markdown" || isPlainTextPath(activeNode.path) || !docKey) return;
     if (buffer === savedContent) return;
     try {
       await window.cairn.writeSource(activeNode.path, buffer);
@@ -785,7 +785,14 @@ export function App() {
           flashNonce.current += 1;
           setFlash({ line, nonce: flashNonce.current });
         } else {
-          void openMarkdown({ name: basename(source.file), path: source.file, type: "markdown" }, line);
+          void openMarkdown(
+            {
+              name: basename(source.file),
+              path: source.file,
+              type: isPlainTextPath(source.file) ? "other" : "markdown",
+            },
+            line,
+          );
         }
       })();
     },

@@ -6,7 +6,9 @@ export {
   embedPendingChunks,
   persistVaultIndex,
   chunkNeedsEmbedding,
+  isIndexableVaultPath,
 } from "./indexer.js";
+export { decodeUtf8Text, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 export { extractPdfPages, pdfPageHeading, textFromItems, PdfTextError } from "./pdf-text.js";
 export type { PdfPageText } from "./pdf-text.js";
 export type { IndexStats, PendingChunk, EmbedChunksResult } from "./indexer.js";

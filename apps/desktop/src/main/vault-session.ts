@@ -1,10 +1,12 @@
 import {
   ask,
   ChatThread,
+  decodeUtf8Text,
   diffLines,
   discoverIndexableFiles,
   extractPdfPages,
   generateStudioNote,
+  INVALID_UTF8_MESSAGE,
   indexVault,
   openIndex,
   runAgent,
@@ -372,6 +374,11 @@ export class VaultSession {
     const target = this.resolveSourcePath(file);
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    if (target.toLowerCase().endsWith(".txt")) {
+      const text = decodeUtf8Text(readFileSync(target));
+      if (text === null) throw new Error(INVALID_UTF8_MESSAGE);
+      return text;
     }
     return readFileSync(target, "utf8");
   }

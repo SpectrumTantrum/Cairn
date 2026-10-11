@@ -26,6 +26,8 @@ interface MarkdownEditorProps {
   initialDoc: string;
   /** Citation target: 1-based line to scroll to + flash. `nonce` re-triggers the same line. */
   flash: { line: number; nonce: number } | null;
+  /** Plain text is shown at the cited line and is not a write target. */
+  readOnly?: boolean;
   onChange(value: string): void;
   onSave(): void;
   onCursor(pos: { line: number; col: number }): void;
@@ -113,6 +115,7 @@ export function MarkdownEditor({
   docKey,
   initialDoc,
   flash,
+  readOnly = false,
   onChange,
   onSave,
   onCursor,
@@ -152,6 +155,8 @@ export function MarkdownEditor({
           markdown(),
           syntaxHighlighting(cairnHighlight),
           flashField,
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly),
           cairnTheme,
           EditorView.lineWrapping,
           saveKeymap,

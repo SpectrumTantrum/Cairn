@@ -215,6 +215,66 @@ test("(b) a scanned PDF plus a real note keeps the note and drops the empty PDF"
   }
 });
 
+test('a question that names a textless PDF does not answer from a neighbor note', async () => {
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [
+              { name: "read", arguments: { path: "project-heron.md" } },
+              { name: "open", arguments: { path: "project-heron.md", line: 1 } },
+            ],
+          };
+        }
+        return { content: NOTE_FACT, toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "project-heron.md",
+        ordinal: 0,
+        line: 1,
+        heading: "Project Heron",
+        text: NOTE_FACT,
+        hash: "heron",
+      },
+    ],
+  });
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does scan.pdf say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "project-heron.md") return `# Project Heron\n\n${NOTE_FACT}\n`;
+        throw new Error(`missing ${path}`);
+      },
+      readPdf: async (path) => {
+        if (path === "scan.pdf") return [];
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer, UNCOVERED);
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
 test("(c) a shared codename stays on the PDF page and the note separately", async () => {
   const root = await vaultWith(["section-b.pdf", "project-heron.md", "scan.pdf"]);
   try {

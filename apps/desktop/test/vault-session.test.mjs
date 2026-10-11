@@ -134,6 +134,20 @@ test("readSource refuses to read a directory", () => {
   }
 });
 
+test("readSource returns UTF-8 text and refuses a non-UTF-8 txt", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(join(vault, "notes.txt"), "# Section B\n\nThe field code is COPPER FINCH, 312.\n");
+    writeFileSync(join(vault, "junk.txt"), Buffer.from([0xff, 0xfe, 0x00]));
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.match(session.readSource("notes.txt"), /COPPER FINCH, 312/);
+    assert.throws(() => session.readSource("junk.txt"), /not valid UTF-8/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("listTree ignores .cairn and dotfiles and sorts folders before files", () => {
   const vault = makeVaultDir();
   try {
