@@ -14,6 +14,8 @@ With agentic Ask on, Ask can also read plain UTF-8 `.txt` files in your vault. C
 
 With agentic Ask on, Ask can also read the visible text in `.html` / `.htm` files in your vault. Citations work the same as notes. Empty or unreadable HTML isn't read, and Ask says your notes don't cover them.
 
+With agentic Ask on, Ask can also read plain UTF-8 `.csv` / `.tsv` files in your vault as text. Citations work the same as notes. Invalid or empty files aren't read, and Ask says your notes don't cover them.
+
 An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
 
 ## Enable agentic Ask
