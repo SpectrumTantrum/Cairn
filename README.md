@@ -10,6 +10,8 @@ With agentic Ask on, the desktop app shows each search and tool step live. Click
 
 With agentic Ask on, Ask can also read the text in PDFs in your vault. When it matches the answer to a page, the citation names that page (`report.pdf p.3`) and opens the PDF there. Otherwise the chip says 'file'. Scanned PDFs with no text layer aren't read, and Ask says your notes don't cover them.
 
+With agentic Ask on, Ask can also read plain UTF-8 `.txt` files in your vault. Citations work the same as notes. Files that aren't valid UTF-8 aren't read, and Ask says your notes don't cover them.
+
 An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
 
 ## Enable agentic Ask
