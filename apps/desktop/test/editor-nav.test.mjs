@@ -58,6 +58,18 @@ test("dirty buffer but no docKey returns null (nothing bound on disk yet)", () =
   assert.equal(pending, null);
 });
 
+test("html open in the editor is not written", () => {
+  assert.equal(
+    pendingSaveBeforeNavigate({
+      activeNode: { path: "notes/section-b.html", name: "section-b.html", type: "other" },
+      docKey: "notes/section-b.html",
+      buffer: "edited",
+      savedContent: "original",
+    }),
+    null,
+  );
+});
+
 test("plain text open in the editor is not written", () => {
   assert.equal(
     pendingSaveBeforeNavigate({

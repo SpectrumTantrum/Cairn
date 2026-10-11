@@ -1183,7 +1183,7 @@ test("(b) an empty PDF open does not become a chip", () => {
 });
 
 const txtFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/txt");
-const { decodeUtf8Text, INVALID_UTF8_MESSAGE, runAskAgent, setModelProvider, resetModelProvider } =
+const { decodeUtf8Text, extractHtmlText, HTML_NO_TEXT, INVALID_UTF8_MESSAGE, runAskAgent, setModelProvider, resetModelProvider } =
   await import("@cairn/engine");
 const { FakeModelProvider } = await import("@cairn/engine/testing");
 
@@ -1338,6 +1338,165 @@ test('QA: "What does junk.txt say?" is an honest miss with zero chips', async ()
     assert.equal(result.answer, "Your notes don't cover this.");
     assert.equal(result.answer.includes("COPPER FINCH"), false);
     assert.equal(result.answer.includes("Field report"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.deepEqual(citationsFromAskAgent(result), []);
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
+const htmlFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/html");
+
+async function readHtmlFixture(path) {
+  const bytes = await readFile(join(htmlFixtures, path));
+  const text = decodeUtf8Text(bytes);
+  if (text === null) throw new Error(INVALID_UTF8_MESSAGE);
+  const visible = extractHtmlText(text);
+  if (!visible.trim()) throw new Error(HTML_NO_TEXT);
+  return visible;
+}
+
+async function scriptedHtmlAsk(calls) {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  const ctx = {
+    index,
+    listNotes: async () => ["project-heron.md", "section-b.html"],
+    readNote: async (path) => {
+      if (path.endsWith(".md")) return readFile(join(htmlFixtures, path), "utf8");
+      return readHtmlFixture(path);
+    },
+  };
+  try {
+    for (const [name, args] of calls) await runAskSearchTool(name, args, ctx, state);
+    return state;
+  } finally {
+    index.close();
+  }
+}
+
+test("QA: an html fact under Section B cites that heading line", async () => {
+  const text = await readHtmlFixture("section-b.html");
+  const line = headingLineIn(text, "Section B");
+  const state = await scriptedHtmlAsk([
+    ["list", {}],
+    ["read", { path: "section-b.html" }],
+  ]);
+  const cites = chipsFor("The field code is COPPER FINCH, 312 under Section B.", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.html");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "Section B");
+  assert.equal(
+    citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading),
+    `Open section-b.html at line ${line} › Section B`,
+  );
+});
+
+test("QA: a short html answer cites the file rather than nothing", async () => {
+  const state = await scriptedHtmlAsk([
+    ["list", {}],
+    ["read", { path: "section-b.html" }],
+  ]);
+  const cites = chipsFor("COPPER FINCH", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.html");
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open section-b.html (file)");
+});
+
+test("QA: a shared codename does not cite the markdown note that lacks 312", async () => {
+  const state = await scriptedHtmlAsk([
+    ["list", {}],
+    ["read", { path: "section-b.html" }],
+    ["read", { path: "project-heron.md" }],
+  ]);
+  const text = await readHtmlFixture("section-b.html");
+  const line = headingLineIn(text, "Section B");
+  const cites = chipsFor("The field code is COPPER FINCH and the number is 312.", state);
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.html");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "Section B");
+});
+
+test("QA: an empty html read leaves no chip", async () => {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  try {
+    const message = await runAskSearchTool(
+      "read",
+      { path: "empty.html" },
+      {
+        index,
+        readNote: async () => {
+          throw new Error(HTML_NO_TEXT);
+        },
+      },
+      state,
+    );
+    assert.equal(message, `ERROR: ${HTML_NO_TEXT}`);
+    assert.deepEqual(state.sources, []);
+    const cites = chipsFor("The field code is COPPER FINCH, 312 under Section B.", state);
+    assert.deepEqual(cites, []);
+  } finally {
+    index.close();
+  }
+});
+
+test('QA: "What does empty.html say?" is an honest miss with zero chips', async () => {
+  const section = await readHtmlFixture("section-b.html");
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "section-b.html",
+        ordinal: 0,
+        line: 1,
+        heading: "Field report",
+        text: section,
+        hash: "section-b-html",
+      },
+    ],
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [
+              { name: "read", arguments: { path: "section-b.html" } },
+              { name: "open", arguments: { path: "section-b.html", line: 1 } },
+            ],
+          };
+        }
+        return { content: section, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does empty.html say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "empty.html") throw new Error(HTML_NO_TEXT);
+        if (path === "section-b.html") return section;
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
     assert.deepEqual(result.sources, []);
     assert.deepEqual(result.opened, []);
     assert.deepEqual(citationsFromAskAgent(result), []);

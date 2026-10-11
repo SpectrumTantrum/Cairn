@@ -9,6 +9,7 @@ import type { Chunk } from "./chunk.js";
 import { chunkHash } from "./normalize.js";
 import { resolveEmbedder, embed } from "./embed.js";
 import { extractPdfPages, pdfPageHeading } from "./pdf-text.js";
+import { extractHtmlText } from "./html-text.js";
 import { decodeUtf8Text } from "./utf8-text.js";
 
 const SKIP_DIRS = new Set([".cairn", ".git", "node_modules", ".obsidian"]);
@@ -31,7 +32,7 @@ export interface PendingChunk {
   page?: number;
 }
 
-/** PDF text is keyword-only in this slice. Markdown and plain text chunks are embedded. */
+/** PDF text is keyword-only in this slice. Markdown, plain text, and HTML chunks are embedded. */
 export function chunkNeedsEmbedding(chunk: PendingChunk): boolean {
   return chunk.page == null;
 }
@@ -63,9 +64,17 @@ export function discoverMarkdownFiles(root: string): string[] {
   return discoverFiles(root, /\.(md|markdown)$/i);
 }
 
-const INDEXABLE_EXT = /\.(md|markdown|txt|pdf)$/i;
+const INDEXABLE_EXT = /\.(md|markdown|txt|html|htm|pdf)$/i;
 
-/** Markdown, plain UTF-8 text, and PDF. Images, audio, and other types stay out. */
+function isHtmlPath(path: string): boolean {
+  return /\.html?$/i.test(path);
+}
+
+function isPlainTextPath(path: string): boolean {
+  return path.toLowerCase().endsWith(".txt");
+}
+
+/** Markdown, plain UTF-8 text, HTML, and PDF. Images, audio, and other types stay out. */
 export function isIndexableVaultPath(path: string): boolean {
   return INDEXABLE_EXT.test(path);
 }
@@ -79,12 +88,13 @@ function readUtf8TextFile(abs: string): string | null {
 }
 
 /**
- * Markdown notes, UTF-8 `.txt`, and PDF files. A `.txt` that is not valid UTF-8
- * is skipped. Images, audio, and other types stay out.
+ * Markdown notes, UTF-8 `.txt`, UTF-8 `.html` / `.htm`, and PDF files.
+ * A text or HTML file that is not valid UTF-8 is skipped.
+ * Images, audio, and other types stay out.
  */
 export function discoverIndexableFiles(root: string): string[] {
   return discoverFiles(root, INDEXABLE_EXT).filter((abs) => {
-    if (!abs.toLowerCase().endsWith(".txt")) return true;
+    if (!isPlainTextPath(abs) && !isHtmlPath(abs)) return true;
     return readUtf8TextFile(abs) !== null;
   });
 }
@@ -126,6 +136,16 @@ export async function chunkVaultFiles(root: string, files: string[]): Promise<Pe
       const text = readUtf8TextFile(abs);
       // Invalid UTF-8 and blank files contribute no chunks.
       if (!text?.trim()) continue;
+      const chunks = await chunkMarkdown(text);
+      for (const ch of chunks) pending.push({ file: rel, chunk: ch, hash: chunkHash(ch.text) });
+      continue;
+    }
+    if (isHtmlPath(rel)) {
+      const raw = readUtf8TextFile(abs);
+      if (!raw) continue;
+      const text = extractHtmlText(raw);
+      // Scripts, styles, and empty documents contribute no chunks.
+      if (!text.trim()) continue;
       const chunks = await chunkMarkdown(text);
       for (const ch of chunks) pending.push({ file: rel, chunk: ch, hash: chunkHash(ch.text) });
       continue;

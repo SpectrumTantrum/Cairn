@@ -134,6 +134,30 @@ test("readSource refuses to read a directory", () => {
   }
 });
 
+test("readSource returns visible HTML text and refuses empty or non-UTF-8 html", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(
+      join(vault, "section-b.html"),
+      "<h2>Section B</h2><p>The field code is COPPER FINCH, 312 under Section B.</p><script>secret</script>",
+    );
+    writeFileSync(join(vault, "empty.html"), "<html><body><script>only</script></body></html>");
+    writeFileSync(join(vault, "junk.html"), Buffer.from([0xff, 0xfe, 0x00]));
+    const session = createVaultSession();
+    session.setVault(vault);
+    const text = session.readSource("section-b.html");
+    assert.match(text, /## Section B/);
+    assert.match(text, /COPPER FINCH, 312/);
+    assert.equal(text.includes("secret"), false);
+    assert.equal(text.includes("<"), false);
+    assert.throws(() => session.readSource("empty.html"), /no readable text/);
+    assert.throws(() => session.readSource("junk.html"), /not valid UTF-8/);
+    assert.throws(() => session.writeSource("section-b.html", "x"), /Refusing to write a non-Markdown file/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("readSource returns UTF-8 text and refuses a non-UTF-8 txt", () => {
   const vault = makeVaultDir();
   try {
