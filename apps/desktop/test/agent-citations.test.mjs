@@ -1016,6 +1016,8 @@ test("QA: In section-b.pdf, what is the field code — list then read cites the 
   assert.equal(cites[0].file, "section-b.pdf");
   assert.equal(cites[0].page, 3);
   assert.equal(pdfChipLabel(cites[0].file, cites[0].page), "section-b.pdf p.3");
+  assert.match(cites[0].snippet, /COPPER FINCH, 312/);
+  assert.doesNotMatch(cites[0].snippet, /Title page/);
   assert.equal(cites.some((cite) => cite.page === 1 || cite.page === 2), false);
   if (PDF_OPEN_LANDS_ON_PAGE) assert.equal(pdfOpenTitle(cites[0].file, cites[0].page), "Open section-b.pdf at page 3");
 });
@@ -1033,6 +1035,91 @@ test("QA: a read PDF the answer does not match is still cited as the file", asyn
   assert.equal(cites[0].line, FILE_CITE_LINE);
   assert.equal(citationLineLabel(cites[0].line), "file");
   assert.equal(`${cites[0].file}:${citationLineLabel(cites[0].line)}`, "section-b.pdf:file");
+  assert.equal(cites[0].snippet, "");
+  assert.equal(cites[0].text, "");
+});
+
+function pdfRead(page, text) {
+  return {
+    file: "report.pdf",
+    line: 1,
+    heading: text.split("\n")[0] ?? "",
+    page,
+    score: NaN,
+    cosine: NaN,
+    snippet: text.replace(/\s+/g, " ").trim(),
+    text,
+    arms: "read",
+  };
+}
+
+const pdfPages = [
+  pdfRead(1, "Title page\nThis page introduces the report."),
+  pdfRead(2, "Section A\nDecoy sentence about sparrows."),
+  pdfRead(3, "Section B\nThe field code is COPPER FINCH, 312 under Section B."),
+];
+
+test("a PDF file chip quotes the later page that contains the answer, not the title page", () => {
+  const cites = citationsFromAskAgent({
+    answer: "COPPER FINCH, 312",
+    sources: pdfPages,
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "report.pdf");
+  assert.equal(cites[0].page, undefined);
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].heading, "");
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.match(cites[0].snippet, /COPPER FINCH, 312/);
+  assert.match(cites[0].text, /COPPER FINCH, 312/);
+  assert.doesNotMatch(cites[0].snippet, /Title page/);
+  assert.doesNotMatch(cites[0].text, /Title page/);
+});
+
+test("QA: list then read, short page-3 answer cites the file with that page's text", async () => {
+  const state = await scriptedPdfAsk([
+    ["list", {}],
+    ["read", { path: "section-b.pdf" }],
+  ]);
+  const cites = chipsFor("COPPER FINCH, 312", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.pdf");
+  assert.equal(cites[0].page, undefined);
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.equal(`${cites[0].file}:${citationLineLabel(cites[0].line)}`, "section-b.pdf:file");
+  assert.match(cites[0].snippet, /COPPER FINCH, 312/);
+  assert.doesNotMatch(cites[0].snippet, /Title page/);
+});
+
+test("a PDF file chip quotes the title page only when the answer is on that page", () => {
+  const cites = citationsFromAskAgent({
+    answer: "Title page",
+    sources: pdfPages,
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].page, undefined);
+  assert.match(cites[0].snippet, /Title page/);
+  assert.match(cites[0].snippet, /introduces the report/);
+});
+
+test("a PDF file chip has no snippet when two read pages contain the answer equally", () => {
+  const cites = citationsFromAskAgent({
+    answer: "Section",
+    sources: pdfPages,
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].snippet, "");
+  assert.equal(cites[0].text, "");
+  assert.doesNotMatch(`${cites[0].snippet}${cites[0].text}`, /Title page/);
 });
 
 test("QA: What is the field code listed under Section B? does not cite a note that lacks 312", async () => {

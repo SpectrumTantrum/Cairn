@@ -550,6 +550,13 @@ button {
   white-space: pre-wrap;
   word-wrap: break-word;
 }
+.assistant-text strong {
+  font-weight: 650;
+  color: var(--text-strong);
+}
+.assistant-text em {
+  font-style: italic;
+}
 .assistant-text.unsupported {
   color: var(--text-muted);
   font-style: italic;

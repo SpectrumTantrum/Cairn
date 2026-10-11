@@ -8,6 +8,8 @@ This repo has the desktop app and the headless engine `@cairn/engine` ([ADR-0001
 
 With agentic Ask on, the desktop app shows each search and tool step live. Clicking a citation opens the cited note, at the matched heading when Ask located the passage. Otherwise the chip says 'file' and opens the top of the note.
 
+With agentic Ask on, Ask can also read the text in PDFs in your vault. When it matches the answer to a page, the citation names that page (`report.pdf p.3`) and opens the PDF there. Otherwise the chip says 'file'. Scanned PDFs with no text layer aren't read, and Ask says your notes don't cover them.
+
 An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
 
 ## Enable agentic Ask
