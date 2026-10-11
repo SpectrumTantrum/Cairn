@@ -140,6 +140,42 @@ test("read returns the txt fact and refuses junk with no source", async () => {
   }
 });
 
+function sectionBNeighbor(text) {
+  return new FakeModelProvider({
+    models: ["qwen3:4b"],
+    chatWithTools: async (_model, _messages, _tools, turn) => {
+      if (turn === 1) {
+        return {
+          content: "",
+          toolCalls: [
+            { name: "read", arguments: { path: "section-b.txt" } },
+            { name: "open", arguments: { path: "section-b.txt", line: 1 } },
+          ],
+        };
+      }
+      return { content: text, toolCalls: [] };
+    },
+  });
+}
+
+function seedSectionB(index, text) {
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "section-b.txt",
+        ordinal: 0,
+        line: 1,
+        heading: "Field report",
+        text,
+        hash: "section-b",
+      },
+    ],
+  });
+}
+
 test("an invented answer after an unreadable txt is refused and has no chip source", async () => {
   setModelProvider(
     new FakeModelProvider({
@@ -168,6 +204,87 @@ test("an invented answer after an unreadable txt is refused and has no chip sour
     assert.deepEqual(result.sources, []);
     assert.equal(result.grounded, false);
   } finally {
+    index.close();
+  }
+});
+
+test('QA: "What does junk.txt say?" is an honest miss and does not cite the neighbor', async () => {
+  const section = await readFile(join(fixtures, "section-b.txt"), "utf8");
+  const index = new InMemoryIndex();
+  seedSectionB(index, section);
+  setModelProvider(sectionBNeighbor(section));
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does junk.txt say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "junk.txt") throw new Error(INVALID_UTF8_MESSAGE);
+        if (path === "section-b.txt") return section;
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer, UNCOVERED);
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.equal(result.answer.includes("Field report"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
+    assert.equal(result.stopReason, "done");
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
+test('naming a readable txt still answers from that file', async () => {
+  const section = await readFile(join(fixtures, "section-b.txt"), "utf8");
+  const index = new InMemoryIndex();
+  seedSectionB(index, section);
+  setModelProvider(sectionBNeighbor(section));
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does section-b.txt say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "section-b.txt") return section;
+        if (path === "junk.txt") throw new Error(INVALID_UTF8_MESSAGE);
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer.includes("COPPER FINCH, 312"), true);
+    assert.notEqual(result.answer, UNCOVERED);
+    assert.equal(result.sources.some((source) => source.file === "section-b.txt"), true);
+    assert.equal(result.sources.some((source) => source.file === "junk.txt"), false);
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
+test("a named txt that is missing from the index but readable is not refused", async () => {
+  const section = await readFile(join(fixtures, "section-b.txt"), "utf8");
+  const index = new InMemoryIndex();
+  setModelProvider(sectionBNeighbor(section));
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does section-b.txt say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "section-b.txt") return section;
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer.includes("COPPER FINCH, 312"), true);
+    assert.notEqual(result.answer, UNCOVERED);
+    assert.equal(result.sources.some((source) => source.file === "section-b.txt"), true);
+  } finally {
+    resetModelProvider();
     index.close();
   }
 });

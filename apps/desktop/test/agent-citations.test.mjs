@@ -1183,7 +1183,9 @@ test("(b) an empty PDF open does not become a chip", () => {
 });
 
 const txtFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/txt");
-const { decodeUtf8Text, INVALID_UTF8_MESSAGE } = await import("@cairn/engine");
+const { decodeUtf8Text, INVALID_UTF8_MESSAGE, runAskAgent, setModelProvider, resetModelProvider } =
+  await import("@cairn/engine");
+const { FakeModelProvider } = await import("@cairn/engine/testing");
 
 function headingLineIn(text, heading) {
   const at = text.split(/\n/).findIndex((line) => line.trim() === `## ${heading}` || line.trim() === `# ${heading}`);
@@ -1282,6 +1284,65 @@ test("QA: a non-UTF-8 txt read leaves no chip", async () => {
     const cites = chipsFor("The field code is COPPER FINCH, 312 under Section B.", state);
     assert.deepEqual(cites, []);
   } finally {
+    index.close();
+  }
+});
+
+test('QA: "What does junk.txt say?" is an honest miss with zero chips', async () => {
+  const section = await readTxtFixture("section-b.txt");
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "section-b.txt",
+        ordinal: 0,
+        line: 1,
+        heading: "Field report",
+        text: section,
+        hash: "section-b",
+      },
+    ],
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [
+              { name: "read", arguments: { path: "section-b.txt" } },
+              { name: "open", arguments: { path: "section-b.txt", line: 1 } },
+            ],
+          };
+        }
+        return { content: section, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does junk.txt say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "junk.txt") throw new Error(INVALID_UTF8_MESSAGE);
+        if (path === "section-b.txt") return section;
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.equal(result.answer.includes("Field report"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.deepEqual(citationsFromAskAgent(result), []);
+  } finally {
+    resetModelProvider();
     index.close();
   }
 });

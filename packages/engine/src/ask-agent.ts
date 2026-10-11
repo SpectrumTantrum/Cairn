@@ -20,6 +20,7 @@ import {
   type AskSearchToolState,
   type OpenAnchor,
 } from "./agent-search-tools.js";
+import { INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
 /** Incremental progress for long agentic Ask runs (tool steps / status). */
 export type AskAgentProgress =
@@ -99,12 +100,82 @@ const ASK_AGENT_SYSTEM = [
   "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
   "Cite Markdown and plain text as [path:line]. Cite a PDF by its page.",
   "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. Do not invent their contents.",
+  "If the question names a file that cannot be read, do not answer from any other file.",
   `If the vault does not contain the answer after searching, reply exactly: "${UNCOVERED}"`,
   "When finished, stop calling tools and give a concise, direct answer.",
 ].join("\n");
 
 function isPdfFile(file: string): boolean {
   return file.toLowerCase().endsWith(".pdf");
+}
+
+function normalizeVaultPath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/** File paths written in the question, in order, without duplicates. */
+function filesNamedInQuestion(question: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const named = /[\w./\\-]+\.(?:markdown|txt|pdf|md)\b/gi;
+  for (const match of question.matchAll(named)) {
+    const norm = normalizeVaultPath(match[0]);
+    const key = norm.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(norm);
+  }
+  return out;
+}
+
+function indexContainsFile(index: Index, name: string): boolean {
+  const key = normalizeVaultPath(name).toLowerCase();
+  for (const file of index.listFiles()) {
+    const norm = normalizeVaultPath(file).toLowerCase();
+    if (norm === key || norm.endsWith(`/${key}`)) return true;
+  }
+  return false;
+}
+
+/**
+ * The question names a file the index skipped: invalid UTF-8 text, or a PDF
+ * with no text layer. A readable indexed file does not count.
+ */
+async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boolean> {
+  for (const name of filesNamedInQuestion(opts.question)) {
+    if (indexContainsFile(opts.index, name)) continue;
+    const lower = name.toLowerCase();
+    if (lower.endsWith(".pdf")) {
+      if (!opts.readPdf) continue;
+      try {
+        const pages = await opts.readPdf(name);
+        if (pages.length === 0) return true;
+      } catch {
+        // A missing path is not a skipped file.
+      }
+      continue;
+    }
+    if (!lower.endsWith(".txt")) continue;
+    try {
+      await opts.readNote(name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message === INVALID_UTF8_MESSAGE) return true;
+    }
+  }
+  return false;
+}
+
+function honestMiss(): AskAgentResult {
+  return {
+    answer: UNCOVERED,
+    sources: [],
+    opened: [],
+    seedHits: [],
+    steps: 0,
+    stopReason: "done",
+    grounded: false,
+  };
 }
 
 function sourceHasBody(hit: SearchHit): boolean {
@@ -157,6 +228,9 @@ function buildUserTurn(question: string, seedBlock: string | null): string {
  * Run agentic Ask: tool loop with read-only vault tools. Does not write; does not call propose_edit.
  */
 export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult> {
+  // A named skipped file is the whole question. Do not let a neighbor note answer it.
+  if (await questionNamesUnreadableFile(opts)) return honestMiss();
+
   const provider = getModelProvider();
   const stepCap = opts.stepCap ?? DEFAULT_ASK_AGENT_STEP_CAP;
   const wallMs = opts.wallMs ?? DEFAULT_ASK_AGENT_WALL_MS;
