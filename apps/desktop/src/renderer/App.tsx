@@ -15,7 +15,7 @@ import type {
 } from "../shared/types.js";
 import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { isPdfPath, isReadOnlyEditorPath, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { isImagePath, isPdfPath, isReadOnlyEditorPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
@@ -165,6 +165,8 @@ export function App() {
   const navigatingRef = useRef(false);
   /** Vault PDF currently shown in the main-process viewer. `page` is 1-based. */
   const [pdfTarget, setPdfTarget] = useState<{ path: string; page: number } | null>(null);
+  /** Data URL for the open image. Chromium draws it; the main process only reads bytes. */
+  const [imageSrc, setImageSrc] = useState<string | null>(null);
 
   // Engine status
   const [indexStats, setIndexStats] = useState<IndexStats | null>(null);
@@ -401,6 +403,8 @@ export function App() {
       setDocKey(null);
       setBuffer("");
       setSavedContent("");
+      setImageSrc(null);
+      setPdfTarget(null);
       setIndexStats(null);
       setIndexState("none");
       // Invalidate any in-flight chat and drop the server-side thread for the old vault.
@@ -480,6 +484,7 @@ export function App() {
       const saved = await savePendingNavigation();
       if (!saved) return;
       setPdfTarget(null);
+      setImageSrc(null);
       setActiveNode(node);
       setLoading(true);
       setLoadError(null);
@@ -513,6 +518,7 @@ export function App() {
         if (!saved) return;
         const nextPage = page > 0 ? page : 1;
         setPdfTarget((cur) => (cur && cur.path === path && cur.page === nextPage ? cur : { path, page: nextPage }));
+        setImageSrc(null);
         setActiveNode({ name: basename(path), path, type: "other" });
         setDocKey(null);
         setBuffer("");
@@ -557,10 +563,45 @@ export function App() {
     };
   }, [pdfTarget]);
 
+  const openImage = useCallback(
+    async (node: TreeNode) => {
+      if (navigatingRef.current) return;
+      navigatingRef.current = true;
+      try {
+        const saved = await savePendingNavigation();
+        if (!saved) return;
+        setPdfTarget(null);
+        setActiveNode(node);
+        setDocKey(null);
+        setBuffer("");
+        setSavedContent("");
+        setImageSrc(null);
+        setLoadError(null);
+        setLoading(true);
+        setFlash(null);
+        try {
+          const image = await window.cairn.readImage(node.path);
+          setImageSrc(image.dataUrl);
+        } catch (err) {
+          setLoadError(errorMessage(err));
+        } finally {
+          setLoading(false);
+        }
+      } finally {
+        navigatingRef.current = false;
+      }
+    },
+    [savePendingNavigation],
+  );
+
   const openNode = useCallback(
     (node: TreeNode) => {
       if (isPdfPath(node.path)) {
         void openPdf(node.path, 1);
+        return;
+      }
+      if (isImagePath(node.path)) {
+        void openImage(node);
         return;
       }
       if (node.type === "markdown" || opensInEditor(node.path)) {
@@ -568,16 +609,18 @@ export function App() {
       } else {
         // Non-Markdown: generic read-only host, no editor (ADR-0009).
         setPdfTarget(null);
+        setImageSrc(null);
         setActiveNode(node);
         setDocKey(null);
         setLoadError(null);
       }
     },
-    [openMarkdown, openPdf],
+    [openImage, openMarkdown, openPdf],
   );
 
   const closeTab = useCallback(() => {
     setPdfTarget(null);
+    setImageSrc(null);
     setActiveNode(null);
     setDocKey(null);
     setBuffer("");
@@ -741,6 +784,7 @@ export function App() {
           closeTab();
         } else if (activeNode && (activeNode.path === node.path || activeNode.path.startsWith(`${node.path}/`))) {
           setPdfTarget(null);
+          setImageSrc(null);
           setActiveNode(null);
         }
         setExpanded((prev) => {
@@ -778,6 +822,10 @@ export function App() {
         void openPdf(source.file, source.page && source.page > 0 ? source.page : 1);
         return;
       }
+      if (isImagePath(source.file)) {
+        void openImage({ name: basename(source.file), path: source.file, type: "other" });
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(source);
         if (!rightRailOpen) setRightRailOpen(true);
@@ -796,7 +844,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openMarkdown, openPdf, rightRailOpen],
+    [docKey, resolveOpenLine, openImage, openMarkdown, openPdf, rightRailOpen],
   );
 
   function submitChat(): void {
@@ -1123,6 +1171,10 @@ export function App() {
         void openPdf(hit.file, hit.page && hit.page > 0 ? hit.page : 1);
         return;
       }
+      if (isImagePath(hit.file)) {
+        void openImage({ name: basename(hit.file), path: hit.file, type: "other" });
+        return;
+      }
       void (async () => {
         const line = await resolveOpenLine(hit);
         if (docKey !== null && vaultPathsEqual(docKey, hit.file)) {
@@ -1137,7 +1189,7 @@ export function App() {
         }
       })();
     },
-    [docKey, resolveOpenLine, openMarkdown, openPdf],
+    [docKey, resolveOpenLine, openImage, openMarkdown, openPdf],
   );
 
   const composerReason = useMemo(
@@ -1296,6 +1348,7 @@ export function App() {
           dirty={dirty}
           loading={loading}
           loadError={loadError}
+          imageSrc={imageSrc}
           flash={flash}
           cursor={cursor}
           rightRailOpen={rightRailOpen}

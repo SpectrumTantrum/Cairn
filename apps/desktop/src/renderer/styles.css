@@ -354,6 +354,23 @@ button {
   min-width: 0;
 }
 
+.editor-image-host {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.editor-image-host img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
 /* CodeMirror host fills the body; padding 26x34 lives inside CM content. */
 .cm-host {
   flex: 1;

@@ -18,6 +18,7 @@ const {
   isPlainTextPath,
   isHtmlPath,
   isTablePath,
+  isImagePath,
   isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
@@ -118,6 +119,20 @@ test("csv and tsv open in the editor at a line and are not a write target", () =
   assert.equal(citationTitle("notes/section-b.csv", 3), "Open notes/section-b.csv at line 3");
   assert.equal(citationTitle("notes/section-b.csv", 0), "Open notes/section-b.csv (file)");
   assert.equal(citationTitle("notes/rows.tsv", 2), "Open notes/rows.tsv at line 2");
+});
+
+test("images open in the viewer and not in the editor", () => {
+  assert.equal(isImagePath("notes/section-b.png"), true);
+  assert.equal(isImagePath("notes/field.JPG"), true);
+  assert.equal(isImagePath("notes/field.jpeg"), true);
+  assert.equal(isImagePath("notes/mark.webp"), true);
+  assert.equal(isImagePath("notes/badge.GIF"), true);
+  assert.equal(isImagePath("notes/clip.mp4"), false);
+  assert.equal(isImagePath("notes/tone.mp3"), false);
+  assert.equal(isImagePath("notes/field.md"), false);
+  assert.equal(opensInEditor("notes/section-b.png"), false);
+  assert.equal(opensInEditor("notes/field.jpg"), false);
+  assert.equal(isReadOnlyEditorPath("notes/section-b.png"), false);
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

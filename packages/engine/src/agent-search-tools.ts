@@ -8,6 +8,7 @@ import type { Index } from "./vault-index.js";
 import type { ToolSchema } from "./model-provider.js";
 import { pdfPageHeading } from "./pdf-text.js";
 import { HTML_NO_TEXT } from "./html-text.js";
+import { IMAGE_NO_TEXT, isImagePath } from "./image-files.js";
 import { isIndexableVaultPath } from "./indexer.js";
 import { EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
@@ -51,6 +52,8 @@ export interface AskSearchToolState {
   unreadableText?: boolean;
   /** A read or open touched an HTML file with no visible text. */
   textlessHtml?: boolean;
+  /** A read or open touched an image. Images have no text layer. */
+  textlessImage?: boolean;
 }
 
 const MAX_READ_CHARS_DEFAULT = 8000;
@@ -78,7 +81,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "list",
     description:
-      "List Markdown, plain text, CSV, TSV, HTML, and PDF paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
+      "List Markdown, plain text, CSV, TSV, HTML, PDF, and image paths in the vault. Images are path-only and cannot be read. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
     parameters: {
       type: "object",
       properties: {
@@ -116,7 +119,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "read",
     description:
-      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. Use after find/grep to read surrounding context.",
+      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image cannot be read. Use after find/grep to read surrounding context.",
     parameters: {
       type: "object",
       properties: {
@@ -264,6 +267,26 @@ function matchInsideChunk(
 }
 
 /**
+ * Images have no text layer. A present image is an error with no source.
+ * A missing path keeps the reader's own message and is not marked textless.
+ */
+async function refuseImageRead(
+  ctx: AskSearchToolContext,
+  state: AskSearchToolState,
+  path: string,
+): Promise<string | null> {
+  if (!isImagePath(path)) return null;
+  try {
+    await ctx.readNote(path);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message !== IMAGE_NO_TEXT) return `ERROR: ${message}`;
+  }
+  state.textlessImage = true;
+  return `ERROR: ${IMAGE_NO_TEXT}`;
+}
+
+/**
  * Run one read-only search tool. Mutates `state` (sources/opened) and returns the tool message string.
  */
 export async function runAskSearchTool(
@@ -362,6 +385,8 @@ export async function runAskSearchTool(
     const path = asString(args.path);
     if (!path) return "ERROR: read requires a string 'path'.";
     const norm = normalizePath(path);
+    const imageRefusal = await refuseImageRead(ctx, state, norm);
+    if (imageRefusal) return imageRefusal;
     if (isPdfPath(norm)) {
       const pages = await loadPdfPages(ctx, norm);
       if (typeof pages === "string") {
@@ -410,6 +435,8 @@ export async function runAskSearchTool(
     const path = asString(args.path);
     if (!path) return "ERROR: open requires a string 'path'.";
     const norm = normalizePath(path);
+    const imageRefusal = await refuseImageRead(ctx, state, norm);
+    if (imageRefusal) return imageRefusal;
     if (isPdfPath(norm)) {
       const pages = await loadPdfPages(ctx, norm);
       if (typeof pages === "string") {
