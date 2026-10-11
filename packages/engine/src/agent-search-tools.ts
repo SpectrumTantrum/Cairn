@@ -9,7 +9,7 @@ import type { ToolSchema } from "./model-provider.js";
 import { pdfPageHeading } from "./pdf-text.js";
 import { HTML_NO_TEXT } from "./html-text.js";
 import { isIndexableVaultPath } from "./indexer.js";
-import { INVALID_UTF8_MESSAGE } from "./utf8-text.js";
+import { EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
 export const ASK_SEARCH_TOOL_NAMES = ["list", "find", "grep", "read", "open"] as const;
 export type AskSearchToolName = (typeof ASK_SEARCH_TOOL_NAMES)[number];
@@ -65,16 +65,20 @@ function isHtmlPath(path: string): boolean {
   return /\.html?$/i.test(path);
 }
 
+function isTablePath(path: string): boolean {
+  return /\.(csv|tsv)$/i.test(path);
+}
+
 function isUtf8TextPath(path: string): boolean {
   const lower = path.toLowerCase();
-  return lower.endsWith(".txt") || isHtmlPath(lower);
+  return lower.endsWith(".txt") || isTablePath(lower) || isHtmlPath(lower);
 }
 
 export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "list",
     description:
-      "List Markdown, plain text, HTML, and PDF paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
+      "List Markdown, plain text, CSV, TSV, HTML, and PDF paths in the vault. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
     parameters: {
       type: "object",
       properties: {
@@ -112,7 +116,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "read",
     description:
-      "Read a Markdown note, a plain text file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An HTML file with no visible text cannot be read. Use after find/grep to read surrounding context.",
+      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. Use after find/grep to read surrounding context.",
     parameters: {
       type: "object",
       properties: {
@@ -374,6 +378,10 @@ export async function runAskSearchTool(
         state.textlessHtml = true;
         return `ERROR: ${HTML_NO_TEXT}`;
       }
+      if (isTablePath(norm) && !content.trim()) {
+        state.unreadableText = true;
+        return `ERROR: ${EMPTY_TABLE_MESSAGE}`;
+      }
       const clipped =
         content.length > maxRead ? `${content.slice(0, maxRead)}\n…(truncated at ${maxRead} chars)` : content;
       mergeSource(state, {
@@ -392,6 +400,7 @@ export async function runAskSearchTool(
       if (isUtf8TextPath(norm) && message === INVALID_UTF8_MESSAGE) {
         state.unreadableText = true;
       }
+      if (isTablePath(norm) && message === EMPTY_TABLE_MESSAGE) state.unreadableText = true;
       if (isHtmlPath(norm) && message === HTML_NO_TEXT) state.textlessHtml = true;
       return `ERROR: ${message}`;
     }
@@ -418,6 +427,21 @@ export async function runAskSearchTool(
       }
       mergeSource(state, { ...pageHit(norm, page, "open"), heading });
       return JSON.stringify({ recorded: anchor });
+    }
+    if (isTablePath(norm)) {
+      try {
+        const content = await ctx.readNote(norm);
+        if (!content.trim()) {
+          state.unreadableText = true;
+          return `ERROR: ${EMPTY_TABLE_MESSAGE}`;
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === EMPTY_TABLE_MESSAGE || message === INVALID_UTF8_MESSAGE) {
+          state.unreadableText = true;
+          return `ERROR: ${message}`;
+        }
+      }
     }
     if (isHtmlPath(norm)) {
       try {

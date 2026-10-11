@@ -1183,8 +1183,16 @@ test("(b) an empty PDF open does not become a chip", () => {
 });
 
 const txtFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/txt");
-const { decodeUtf8Text, extractHtmlText, HTML_NO_TEXT, INVALID_UTF8_MESSAGE, runAskAgent, setModelProvider, resetModelProvider } =
-  await import("@cairn/engine");
+const {
+  decodeUtf8Text,
+  extractHtmlText,
+  EMPTY_TABLE_MESSAGE,
+  HTML_NO_TEXT,
+  INVALID_UTF8_MESSAGE,
+  runAskAgent,
+  setModelProvider,
+  resetModelProvider,
+} = await import("@cairn/engine");
 const { FakeModelProvider } = await import("@cairn/engine/testing");
 
 function headingLineIn(text, heading) {
@@ -1491,6 +1499,225 @@ test('QA: "What does empty.html say?" is an honest miss with zero chips', async 
       readNote: async (path) => {
         if (path === "empty.html") throw new Error(HTML_NO_TEXT);
         if (path === "section-b.html") return section;
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.deepEqual(citationsFromAskAgent(result), []);
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
+const csvFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/csv");
+const CSV_FACT = "The field code is COPPER FINCH, 312 under Section B.";
+
+async function readCsvFixture(path) {
+  const bytes = await readFile(join(csvFixtures, path));
+  const text = decodeUtf8Text(bytes);
+  if (text === null) throw new Error(INVALID_UTF8_MESSAGE);
+  if (/\.(csv|tsv)$/i.test(path) && !text.trim()) throw new Error(EMPTY_TABLE_MESSAGE);
+  return text;
+}
+
+function lineContaining(text, needle) {
+  const at = text.split(/\n/).findIndex((line) => line.includes(needle));
+  assert.ok(at >= 0, needle);
+  return at + 1;
+}
+
+async function scriptedCsvAsk(calls) {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  const ctx = {
+    index,
+    listNotes: async () => ["project-heron.md", "section-b.csv", "rows.tsv"],
+    readNote: async (path) => readCsvFixture(path),
+  };
+  try {
+    for (const [name, args] of calls) await runAskSearchTool(name, args, ctx, state);
+    return state;
+  } finally {
+    index.close();
+  }
+}
+
+test("QA: a csv fact cites the matched row, not a heading", async () => {
+  const text = await readCsvFixture("section-b.csv");
+  const line = lineContaining(text, CSV_FACT);
+  const state = await scriptedCsvAsk([
+    ["list", {}],
+    ["read", { path: "section-b.csv" }],
+  ]);
+  const cites = chipsFor(CSV_FACT, state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.csv");
+  assert.equal(cites[0].line, line);
+  assert.equal(line, 3);
+  assert.equal(cites[0].heading, "");
+  assert.equal(citationTitle(cites[0].file, citationLandingLine(cites[0]), cites[0].heading), "Open section-b.csv at line 3");
+});
+
+test("QA: a short csv answer cites the file rather than nothing", async () => {
+  const state = await scriptedCsvAsk([
+    ["list", {}],
+    ["read", { path: "section-b.csv" }],
+  ]);
+  const cites = chipsFor("COPPER FINCH", state);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.csv");
+  assert.equal(cites[0].line, FILE_CITE_LINE);
+  assert.equal(cites[0].heading, "");
+  assert.equal(citationLineLabel(cites[0].line), "file");
+  assert.equal(citationTitle(cites[0].file, cites[0].line), "Open section-b.csv (file)");
+});
+
+test("QA: a shared codename does not cite the markdown note that lacks 312", async () => {
+  const state = await scriptedCsvAsk([
+    ["list", {}],
+    ["read", { path: "section-b.csv" }],
+    ["read", { path: "project-heron.md" }],
+  ]);
+  const text = await readCsvFixture("section-b.csv");
+  const line = lineContaining(text, CSV_FACT);
+  const cites = chipsFor("The field code is COPPER FINCH and the number is 312.", state);
+  assert.equal(cites.some((cite) => cite.file === "project-heron.md"), false);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "section-b.csv");
+  assert.equal(cites[0].line, line);
+  assert.equal(cites[0].heading, "");
+});
+
+test("QA: an empty csv read leaves no chip", async () => {
+  const index = new InMemoryIndex();
+  const state = { sources: [], opened: [] };
+  try {
+    const message = await runAskSearchTool(
+      "read",
+      { path: "empty.csv" },
+      {
+        index,
+        readNote: async () => {
+          throw new Error(EMPTY_TABLE_MESSAGE);
+        },
+      },
+      state,
+    );
+    assert.equal(message, `ERROR: ${EMPTY_TABLE_MESSAGE}`);
+    assert.deepEqual(state.sources, []);
+    const cites = chipsFor(CSV_FACT, state);
+    assert.deepEqual(cites, []);
+  } finally {
+    index.close();
+  }
+});
+
+test('QA: "What does junk.csv say?" is an honest miss with zero chips', async () => {
+  const section = await readCsvFixture("section-b.csv");
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "section-b.csv",
+        ordinal: 0,
+        line: 1,
+        heading: "",
+        text: section,
+        hash: "section-b-csv",
+      },
+    ],
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [
+              { name: "read", arguments: { path: "section-b.csv" } },
+              { name: "open", arguments: { path: "section-b.csv", line: 1 } },
+            ],
+          };
+        }
+        return { content: section, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does junk.csv say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "junk.csv") throw new Error(INVALID_UTF8_MESSAGE);
+        if (path === "section-b.csv") return section;
+        throw new Error(`missing ${path}`);
+      },
+      retrievalSeed: false,
+    });
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("COPPER FINCH"), false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.deepEqual(citationsFromAskAgent(result), []);
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
+test('QA: "What does empty.csv say?" is an honest miss with zero chips', async () => {
+  const section = await readCsvFixture("section-b.csv");
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "section-b.csv",
+        ordinal: 0,
+        line: 1,
+        heading: "",
+        text: section,
+        hash: "section-b-csv",
+      },
+    ],
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        if (turn === 1) {
+          return {
+            content: "",
+            toolCalls: [
+              { name: "read", arguments: { path: "section-b.csv" } },
+              { name: "open", arguments: { path: "section-b.csv", line: 1 } },
+            ],
+          };
+        }
+        return { content: section, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const result = await runAskAgent({
+      index,
+      question: "What does empty.csv say?",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "empty.csv") return "\n";
+        if (path === "section-b.csv") return section;
         throw new Error(`missing ${path}`);
       },
       retrievalSeed: false,

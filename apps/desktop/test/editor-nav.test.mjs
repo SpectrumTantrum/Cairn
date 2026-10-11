@@ -70,6 +70,27 @@ test("html open in the editor is not written", () => {
   );
 });
 
+test("csv and tsv open in the editor are not written", () => {
+  assert.equal(
+    pendingSaveBeforeNavigate({
+      activeNode: { path: "notes/section-b.csv", name: "section-b.csv", type: "other" },
+      docKey: "notes/section-b.csv",
+      buffer: "edited",
+      savedContent: "original",
+    }),
+    null,
+  );
+  assert.equal(
+    pendingSaveBeforeNavigate({
+      activeNode: { path: "notes/rows.tsv", name: "rows.tsv", type: "markdown" },
+      docKey: "notes/rows.tsv",
+      buffer: "edited",
+      savedContent: "original",
+    }),
+    null,
+  );
+});
+
 test("plain text open in the editor is not written", () => {
   assert.equal(
     pendingSaveBeforeNavigate({

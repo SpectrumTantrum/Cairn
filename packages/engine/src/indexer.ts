@@ -64,7 +64,7 @@ export function discoverMarkdownFiles(root: string): string[] {
   return discoverFiles(root, /\.(md|markdown)$/i);
 }
 
-const INDEXABLE_EXT = /\.(md|markdown|txt|html|htm|pdf)$/i;
+const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|pdf)$/i;
 
 function isHtmlPath(path: string): boolean {
   return /\.html?$/i.test(path);
@@ -74,7 +74,11 @@ function isPlainTextPath(path: string): boolean {
   return path.toLowerCase().endsWith(".txt");
 }
 
-/** Markdown, plain UTF-8 text, HTML, and PDF. Images, audio, and other types stay out. */
+function isTablePath(path: string): boolean {
+  return /\.(csv|tsv)$/i.test(path);
+}
+
+/** Markdown, plain UTF-8 text, CSV, TSV, HTML, and PDF. Images, audio, and other types stay out. */
 export function isIndexableVaultPath(path: string): boolean {
   return INDEXABLE_EXT.test(path);
 }
@@ -88,13 +92,13 @@ function readUtf8TextFile(abs: string): string | null {
 }
 
 /**
- * Markdown notes, UTF-8 `.txt`, UTF-8 `.html` / `.htm`, and PDF files.
- * A text or HTML file that is not valid UTF-8 is skipped.
+ * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, and PDF files.
+ * A text, table, or HTML file that is not valid UTF-8 is skipped.
  * Images, audio, and other types stay out.
  */
 export function discoverIndexableFiles(root: string): string[] {
   return discoverFiles(root, INDEXABLE_EXT).filter((abs) => {
-    if (!isPlainTextPath(abs) && !isHtmlPath(abs)) return true;
+    if (!isPlainTextPath(abs) && !isTablePath(abs) && !isHtmlPath(abs)) return true;
     return readUtf8TextFile(abs) !== null;
   });
 }
@@ -132,9 +136,9 @@ export async function chunkVaultFiles(root: string, files: string[]): Promise<Pe
       pending.push(...(await chunkPdfFile(rel, abs)));
       continue;
     }
-    if (/\.txt$/i.test(rel)) {
+    if (/\.txt$/i.test(rel) || isTablePath(rel)) {
       const text = readUtf8TextFile(abs);
-      // Invalid UTF-8 and blank files contribute no chunks.
+      // Invalid UTF-8 and blank files contribute no chunks. A table keeps its header row.
       if (!text?.trim()) continue;
       const chunks = await chunkMarkdown(text);
       for (const ch of chunks) pending.push({ file: rel, chunk: ch, hash: chunkHash(ch.text) });

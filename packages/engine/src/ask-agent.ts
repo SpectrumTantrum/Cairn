@@ -21,7 +21,7 @@ import {
   type OpenAnchor,
 } from "./agent-search-tools.js";
 import { HTML_NO_TEXT } from "./html-text.js";
-import { INVALID_UTF8_MESSAGE } from "./utf8-text.js";
+import { EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
 /** Incremental progress for long agentic Ask runs (tool steps / status). */
 export type AskAgentProgress =
@@ -89,18 +89,18 @@ export interface AskAgentResult {
 const UNCOVERED = "Your notes don't cover this.";
 
 const ASK_AGENT_SYSTEM = [
-  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, HTML files, and text PDFs.",
+  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, CSV and TSV files, HTML files, and text PDFs.",
   "Answer using ONLY information you gather with your tools — do not invent facts.",
   "Tools (read-only):",
-  "- list(prefix?): list Markdown, plain text, HTML, and PDF paths in the vault.",
+  "- list(prefix?): list Markdown, plain text, CSV, TSV, HTML, and PDF paths in the vault.",
   "- find(query, k?): search indexed chunks (hybrid or keyword). PDF chunks are keyword-only and include a page.",
   "- grep(pattern, path?, limit?): substring search over indexed chunks. PDF hits include a page.",
-  "- read(path): read a Markdown note, a plain text file, the visible text of an HTML file, or the text of each PDF page.",
-  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text or HTML file opens at a line, like a note.",
+  "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, or the text of each PDF page.",
+  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text, CSV, TSV, or HTML file opens at a line, like a note.",
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
   "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
-  "Cite Markdown, plain text, and HTML as [path:line]. Cite a PDF by its page.",
-  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An HTML file with no visible text cannot be read. Do not invent their contents.",
+  "Cite Markdown, plain text, CSV, TSV, and HTML as [path:line]. Cite a PDF by its page.",
+  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. Do not invent their contents.",
   "If the question names a file that cannot be read, do not answer from any other file.",
   `If the vault does not contain the answer after searching, reply exactly: "${UNCOVERED}"`,
   "When finished, stop calling tools and give a concise, direct answer.",
@@ -118,7 +118,7 @@ function normalizeVaultPath(path: string): string {
 function filesNamedInQuestion(question: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  const named = /[\w./\\-]+\.(?:markdown|txt|pdf|html|htm|md)\b/gi;
+  const named = /[\w./\\-]+\.(?:markdown|txt|csv|tsv|pdf|html|htm|md)\b/gi;
   for (const match of question.matchAll(named)) {
     const norm = normalizeVaultPath(match[0]);
     const key = norm.toLowerCase();
@@ -142,9 +142,14 @@ function isHtmlFile(file: string): boolean {
   return /\.html?$/i.test(file);
 }
 
+function isTableFile(file: string): boolean {
+  return /\.(csv|tsv)$/i.test(file);
+}
+
 /**
- * The question names a file the index skipped: invalid UTF-8 text, an HTML file
- * with no visible text, or a PDF with no text layer. A readable indexed file does not count.
+ * The question names a file the index skipped: invalid UTF-8 text, an empty CSV or
+ * TSV, an HTML file with no visible text, or a PDF with no text layer.
+ * A readable indexed file does not count.
  */
 async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boolean> {
   for (const name of filesNamedInQuestion(opts.question)) {
@@ -157,6 +162,16 @@ async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boole
         if (pages.length === 0) return true;
       } catch {
         // A missing path is not a skipped file.
+      }
+      continue;
+    }
+    if (isTableFile(lower)) {
+      try {
+        const text = await opts.readNote(name);
+        if (!text.trim()) return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === INVALID_UTF8_MESSAGE || message === EMPTY_TABLE_MESSAGE) return true;
       }
       continue;
     }
@@ -199,8 +214,9 @@ function sourceHasBody(hit: SearchHit): boolean {
 
 /**
  * Drop PDF sources that never yielded a page of text, drop HTML sources with no
- * visible text, and replace an invented answer when the run touched a text-less
- * PDF, an empty HTML file, or an unreadable text file and gathered nothing else.
+ * visible text, drop CSV/TSV sources with no body, and replace an invented answer
+ * when the run touched a text-less PDF, an empty HTML file, an empty or unreadable
+ * table, or an unreadable text file and gathered nothing else.
  * Leaves no-tool-use, timeout, and step-cap messages alone.
  */
 function settleTextlessPdf(
@@ -212,13 +228,16 @@ function settleTextlessPdf(
   const sources = state.sources.filter((hit) => {
     if (isPdfFile(hit.file)) return typeof hit.page === "number" && hit.page > 0 && sourceHasBody(hit);
     if (state.textlessHtml && isHtmlFile(hit.file)) return sourceHasBody(hit);
+    if (state.unreadableText && isTableFile(hit.file)) return sourceHasBody(hit);
     return true;
   });
   const keptPdf = new Set(sources.filter((hit) => isPdfFile(hit.file)).map((hit) => hit.file));
   const keptHtml = new Set(sources.filter((hit) => isHtmlFile(hit.file)).map((hit) => hit.file));
+  const keptTables = new Set(sources.filter((hit) => isTableFile(hit.file)).map((hit) => hit.file));
   const opened = state.opened.filter((anchor) => {
     if (isPdfFile(anchor.path)) return keptPdf.has(anchor.path);
     if (state.textlessHtml && isHtmlFile(anchor.path)) return keptHtml.has(anchor.path);
+    if (state.unreadableText && isTableFile(anchor.path)) return keptTables.has(anchor.path);
     return true;
   });
   const anyBody = sources.some(sourceHasBody) || seedHits.some(sourceHasBody);

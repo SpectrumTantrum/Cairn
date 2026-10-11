@@ -17,6 +17,7 @@ const {
   pdfOpenTitle,
   isPlainTextPath,
   isHtmlPath,
+  isTablePath,
   isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
@@ -104,6 +105,19 @@ test("html opens in the editor at a line and is not a write target", () => {
   assert.equal(opensInEditor("notes/section-b.htm"), true);
   assert.equal(citationTitle("notes/section-b.html", 9, "Section B"), "Open notes/section-b.html at line 9 › Section B");
   assert.equal(citationTitle("notes/section-b.html", 0), "Open notes/section-b.html (file)");
+});
+
+test("csv and tsv open in the editor at a line and are not a write target", () => {
+  assert.equal(isTablePath("notes/section-b.csv"), true);
+  assert.equal(isTablePath("notes/rows.TSV"), true);
+  assert.equal(isTablePath("notes/field.txt"), false);
+  assert.equal(isReadOnlyEditorPath("notes/section-b.csv"), true);
+  assert.equal(isReadOnlyEditorPath("notes/rows.tsv"), true);
+  assert.equal(opensInEditor("notes/section-b.csv"), true);
+  assert.equal(opensInEditor("notes/rows.tsv"), true);
+  assert.equal(citationTitle("notes/section-b.csv", 3), "Open notes/section-b.csv at line 3");
+  assert.equal(citationTitle("notes/section-b.csv", 0), "Open notes/section-b.csv (file)");
+  assert.equal(citationTitle("notes/rows.tsv", 2), "Open notes/rows.tsv at line 2");
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {
