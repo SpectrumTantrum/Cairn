@@ -8,7 +8,7 @@ export {
   chunkNeedsEmbedding,
   isIndexableVaultPath,
 } from "./indexer.js";
-export { decodeUtf8Text, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
+export { decodeUtf8Text, EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 export { extractHtmlText, HTML_NO_TEXT } from "./html-text.js";
 export { extractPdfPages, pdfPageHeading, textFromItems, PdfTextError } from "./pdf-text.js";
 export type { PdfPageText } from "./pdf-text.js";

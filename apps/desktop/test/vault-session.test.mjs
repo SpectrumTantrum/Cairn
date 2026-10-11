@@ -158,6 +158,32 @@ test("readSource returns visible HTML text and refuses empty or non-UTF-8 html",
   }
 });
 
+test("readSource returns raw CSV and TSV rows and refuses empty or non-UTF-8 tables", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(
+      join(vault, "section-b.csv"),
+      'section,code,note\nSection B,COPPER FINCH,"The field code is COPPER FINCH, 312 under Section B."\n',
+    );
+    writeFileSync(join(vault, "rows.tsv"), "section\tnote\nAlias\tThe tsv marker is BLUE JAY.\n");
+    writeFileSync(join(vault, "empty.csv"), "\n");
+    writeFileSync(join(vault, "junk.csv"), Buffer.from([0xff, 0xfe, 0x00, 0x80, 0x41]));
+    const session = createVaultSession();
+    session.setVault(vault);
+    const csv = session.readSource("section-b.csv");
+    assert.match(csv, /^section,code,note/m);
+    assert.match(csv, /COPPER FINCH, 312/);
+    assert.match(session.readSource("rows.tsv"), /BLUE JAY/);
+    assert.match(session.readSource("rows.tsv"), /section\tnote/);
+    assert.throws(() => session.readSource("empty.csv"), /empty, so Cairn cannot read it/);
+    assert.throws(() => session.readSource("junk.csv"), /not valid UTF-8/);
+    assert.throws(() => session.writeSource("section-b.csv", "x"), /Refusing to write a non-Markdown file/);
+    assert.throws(() => session.writeSource("rows.tsv", "x"), /Refusing to write a non-Markdown file/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("readSource returns UTF-8 text and refuses a non-UTF-8 txt", () => {
   const vault = makeVaultDir();
   try {

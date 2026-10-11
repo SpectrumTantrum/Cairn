@@ -1,6 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
-import { isHtmlPath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, opensInEditor } from "../../cite-format";
+import { isHtmlPath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, opensInEditor } from "../../cite-format";
 import { MarkdownEditor } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -85,7 +85,7 @@ export function EditorPane(props: EditorPaneProps) {
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>
             <h2>{activeNode.name}</h2>
-            <p>Markdown, plain text, and HTML open in the editor. This format does not.</p>
+            <p>Markdown, plain text, HTML, CSV, and TSV open in the editor. This format does not.</p>
           </div>
         ) : loading ? (
           <div className="editor-empty">
@@ -114,6 +114,7 @@ export function EditorPane(props: EditorPaneProps) {
         activeIsMarkdown={activeNode?.type === "markdown" && !isReadOnlyEditorPath(activeNode.path)}
         activeIsText={activeNode ? isPlainTextPath(activeNode.path) : false}
         activeIsHtml={activeNode ? isHtmlPath(activeNode.path) : false}
+        activeTableLabel={activeNode ? tableLabel(activeNode.path) : null}
         activeIsPdf={activeNode ? isPdfPath(activeNode.path) : false}
         cursor={cursor}
       />
@@ -130,21 +131,26 @@ function StatusBar({
   activeIsMarkdown,
   activeIsText,
   activeIsHtml,
+  activeTableLabel,
   activeIsPdf,
 }: EditorPaneProps & {
   activeIsMarkdown: boolean;
   activeIsText: boolean;
   activeIsHtml: boolean;
+  activeTableLabel: string | null;
   activeIsPdf: boolean;
 }) {
+  const showLine = activeIsMarkdown || activeIsText || activeIsHtml || activeTableLabel !== null;
   return (
     <div className="editor-statusbar">
-      {activeIsMarkdown || activeIsText || activeIsHtml ? (
+      {showLine ? (
         <>
           <span className="status-item">
             Ln {cursor.line}, Col {cursor.col}
           </span>
-          <span className="status-item">{activeIsHtml ? "HTML" : activeIsText ? "Text" : "Markdown"}</span>
+          <span className="status-item">
+            {activeTableLabel ?? (activeIsHtml ? "HTML" : activeIsText ? "Text" : "Markdown")}
+          </span>
         </>
       ) : activeIsPdf ? (
         <span className="status-item">PDF</span>
@@ -200,6 +206,11 @@ function breadcrumb(path: string): string {
   const parts = path.split("/");
   parts.pop();
   return parts.join(" › ");
+}
+
+function tableLabel(path: string): string | null {
+  if (!isTablePath(path)) return null;
+  return /\.tsv$/i.test(path) ? "TSV" : "CSV";
 }
 
 function hostType(name: string): string {

@@ -4,6 +4,7 @@ import {
   decodeUtf8Text,
   diffLines,
   discoverIndexableFiles,
+  EMPTY_TABLE_MESSAGE,
   extractHtmlText,
   extractPdfPages,
   HTML_NO_TEXT,
@@ -378,7 +379,7 @@ export class VaultSession {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
     }
     const lower = target.toLowerCase();
-    if (lower.endsWith(".txt") || /\.html?$/i.test(lower)) {
+    if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
       if (text === null) throw new Error(INVALID_UTF8_MESSAGE);
       if (/\.html?$/i.test(lower)) {
@@ -386,6 +387,7 @@ export class VaultSession {
         if (!visible.trim()) throw new Error(HTML_NO_TEXT);
         return visible;
       }
+      if (/\.(csv|tsv)$/i.test(lower) && !text.trim()) throw new Error(EMPTY_TABLE_MESSAGE);
       return text;
     }
     return readFileSync(target, "utf8");

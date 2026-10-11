@@ -18,7 +18,7 @@ USAGE
   cairn ask    <question...> [--in <folder>] [-k <n>] [--model <tag>] [--lexical]
 
 COMMANDS
-  index   Chunk + index every .md/.markdown/.txt/.html/.htm file and text PDF under <folder> into <folder>/.cairn/.
+  index   Chunk + index every .md/.markdown/.txt/.csv/.tsv/.html/.htm file and text PDF under <folder> into <folder>/.cairn/.
           Hybrid (dense + keyword) by default — needs Ollama + an embedder pulled.
           --lexical builds a keyword-only index (no model, zero setup).
   search  Return ranked, cited chunks (file:line › heading) for a query. Auto-uses
