@@ -13,7 +13,7 @@ import type {
   TreeNode,
   TreeSortMode,
 } from "../shared/types.js";
-import { citationsFromAskAgent, resolveCitationLine } from "./agent-citations";
+import { citationOpenTarget, citationsFromAskAgent } from "./agent-citations";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
 import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
@@ -21,6 +21,7 @@ import { composerDisabledReason } from "./ask-availability";
 import { VaultRail } from "./components/shell/VaultRail";
 import { EditorPane } from "./components/shell/EditorPane";
 import type { IndexState } from "./components/shell/EditorPane";
+import type { CitationFlash } from "./components/shell/MarkdownEditor";
 import { RightRail } from "./components/shell/RightRail";
 import type { RightTab } from "./components/shell/RightRail";
 import type { AskAgentProgress } from "@cairn/engine";
@@ -157,7 +158,7 @@ export function App() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
-  const [flash, setFlash] = useState<{ line: number; nonce: number } | null>(null);
+  const [flash, setFlash] = useState<CitationFlash | null>(null);
   const flashNonce = useRef(0);
   // Re-entrancy guard for openMarkdown (issue #40): a navigation that may autosave the
   // current buffer is in flight. Rapid double-clicks are dropped until it resolves so we
@@ -483,7 +484,7 @@ export function App() {
     }
   }, [activeNode, docKey, buffer, savedContent]);
 
-  const openMarkdown = useCallback(async (node: TreeNode, flashLine?: number) => {
+  const openMarkdown = useCallback(async (node: TreeNode, flashTarget?: { line: number; highlight: boolean }) => {
     if (navigatingRef.current) return;
     navigatingRef.current = true;
     try {
@@ -502,9 +503,9 @@ export function App() {
         setBuffer(content);
         setDocKey(node.path);
         setCursor({ line: 1, col: 1 });
-        if (flashLine !== undefined) {
+        if (flashTarget) {
           flashNonce.current += 1;
-          setFlash({ line: flashLine, nonce: flashNonce.current });
+          setFlash({ line: flashTarget.line, highlight: flashTarget.highlight, nonce: flashNonce.current });
         }
       } catch (err) {
         setDocKey(null);
@@ -891,60 +892,48 @@ export function App() {
     [refreshTree, docKey, activeNode, closeTab],
   );
 
-  /** Resolve a cited line/heading against note text (heading wins over a stale line 1). */
-  const resolveOpenLine = useCallback(
-    async (source: SearchHit): Promise<number> => {
-      try {
-        const content =
-          docKey !== null && vaultPathsEqual(docKey, source.file)
-            ? buffer
-            : await window.cairn.readSource(source.file);
-        return resolveCitationLine(content, source);
-      } catch {
-        return source.line > 0 ? source.line : 1;
+  /** Open an editor file at the chip's line. `revealRail` is the citation path. */
+  const revealCitedEditor = useCallback(
+    (node: TreeNode, open: { line: number; highlight: boolean }, revealRail: boolean) => {
+      if (revealRail && !rightRailOpen) setRightRailOpen(true);
+      if (docKey !== null && vaultPathsEqual(docKey, node.path)) {
+        flashNonce.current += 1;
+        setFlash({ line: open.line, highlight: open.highlight, nonce: flashNonce.current });
+        return;
       }
+      void openMarkdown(node, open);
     },
-    [docKey, buffer],
+    [docKey, openMarkdown, rightRailOpen],
   );
 
-  /** Citation click-through: open the cited file in the center pane and flash the line (or heading). */
+  /** Citation click-through: open the cited file on the line the chip shows. */
   const openCitation = useCallback(
     (source: SearchHit) => {
-      if (isPdfPath(source.file)) {
-        void openPdf(source.file, source.page && source.page > 0 ? source.page : 1);
+      const target = citationOpenTarget(source);
+      const node = { name: basename(source.file), path: source.file, type: "other" as const };
+      if (target.kind === "pdf") {
+        void openPdf(source.file, target.page);
         return;
       }
-      if (isImagePath(source.file)) {
-        void openImage({ name: basename(source.file), path: source.file, type: "other" });
+      if (target.kind === "image") {
+        void openImage(node);
         return;
       }
-      if (isAudioPath(source.file)) {
-        void openAudio({ name: basename(source.file), path: source.file, type: "other" });
+      if (target.kind === "audio") {
+        void openAudio(node);
         return;
       }
-      if (isVideoPath(source.file)) {
-        void openVideo({ name: basename(source.file), path: source.file, type: "other" });
+      if (target.kind === "video") {
+        void openVideo(node);
         return;
       }
-      void (async () => {
-        const line = await resolveOpenLine(source);
-        if (!rightRailOpen) setRightRailOpen(true);
-        if (docKey !== null && vaultPathsEqual(docKey, source.file)) {
-          flashNonce.current += 1;
-          setFlash({ line, nonce: flashNonce.current });
-        } else {
-          void openMarkdown(
-            {
-              name: basename(source.file),
-              path: source.file,
-              type: isReadOnlyEditorPath(source.file) ? "other" : "markdown",
-            },
-            line,
-          );
-        }
-      })();
+      revealCitedEditor(
+        { ...node, type: isReadOnlyEditorPath(source.file) ? "other" : "markdown" },
+        target,
+        true,
+      );
     },
-    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf, openVideo, rightRailOpen],
+    [openAudio, openImage, openPdf, openVideo, revealCitedEditor],
   );
 
   function submitChat(): void {
@@ -1268,40 +1257,31 @@ export function App() {
     });
   }, []);
 
-  /** Open a search result in the editor and flash its line (same path as citation pills). */
+  /** Open a search result on the line its row shows (same landing rule as citation chips). */
   const openSearchResult = useCallback(
     (hit: SearchHit) => {
-      if (isPdfPath(hit.file)) {
-        void openPdf(hit.file, hit.page && hit.page > 0 ? hit.page : 1);
+      const target = citationOpenTarget(hit);
+      const node = { name: basename(hit.file), path: hit.file, type: "other" as const };
+      if (target.kind === "pdf") {
+        void openPdf(hit.file, target.page);
         return;
       }
-      if (isImagePath(hit.file)) {
-        void openImage({ name: basename(hit.file), path: hit.file, type: "other" });
+      if (target.kind === "image") {
+        void openImage(node);
         return;
       }
-      if (isAudioPath(hit.file)) {
-        void openAudio({ name: basename(hit.file), path: hit.file, type: "other" });
+      if (target.kind === "audio") {
+        void openAudio(node);
         return;
       }
-      if (isVideoPath(hit.file)) {
-        void openVideo({ name: basename(hit.file), path: hit.file, type: "other" });
+      if (target.kind === "video") {
+        void openVideo(node);
         return;
       }
-      void (async () => {
-        const line = await resolveOpenLine(hit);
-        if (docKey !== null && vaultPathsEqual(docKey, hit.file)) {
-          flashNonce.current += 1;
-          setFlash({ line, nonce: flashNonce.current });
-        } else {
-          const isMd = hit.file.toLowerCase().endsWith(".md");
-          void openMarkdown(
-            { name: basename(hit.file), path: hit.file, type: isMd ? "markdown" : "other" },
-            line,
-          );
-        }
-      })();
+      const isMd = hit.file.toLowerCase().endsWith(".md");
+      revealCitedEditor({ ...node, type: isMd ? "markdown" : "other" }, target, false);
     },
-    [docKey, resolveOpenLine, openAudio, openImage, openMarkdown, openPdf, openVideo],
+    [openAudio, openImage, openPdf, openVideo, revealCitedEditor],
   );
 
   const composerReason = useMemo(

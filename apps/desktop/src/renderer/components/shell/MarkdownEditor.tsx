@@ -18,14 +18,22 @@ import {
   indentOnInput,
 } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
+import { clampCitationLine } from "../../agent-citations";
+
+/** Citation scroll target. `highlight` is false for a whole-file chip. */
+export interface CitationFlash {
+  line: number;
+  nonce: number;
+  highlight: boolean;
+}
 
 interface MarkdownEditorProps {
   /** Identity of the open document; changing it resets the editor state. */
   docKey: string;
   /** Initial content for this docKey (last-saved buffer). */
   initialDoc: string;
-  /** Citation target: 1-based line to scroll to + flash. `nonce` re-triggers the same line. */
-  flash: { line: number; nonce: number } | null;
+  /** Citation target: 1-based line to scroll to. `nonce` re-triggers the same line. */
+  flash: CitationFlash | null;
   /** Plain text is shown at the cited line and is not a write target. */
   readOnly?: boolean;
   onChange(value: string): void;
@@ -82,12 +90,15 @@ const cairnHighlight = HighlightStyle.define([
 const setFlash = StateEffect.define<number | null>();
 const flashDeco = Decoration.line({ class: "cm-flash-line" });
 
-function applyCitationFlash(view: EditorView, lineNo: number): void {
-  const clamped = Math.max(1, Math.min(lineNo, view.state.doc.lines));
+function applyCitationFlash(view: EditorView, lineNo: number, highlight: boolean): void {
+  const clamped = clampCitationLine(lineNo, view.state.doc.lines);
   const docLine = view.state.doc.line(clamped);
   view.dispatch({
     selection: { anchor: docLine.from },
-    effects: [setFlash.of(lineNo), EditorView.scrollIntoView(docLine.from, { y: "center" })],
+    effects: [
+      setFlash.of(highlight ? clamped : null),
+      EditorView.scrollIntoView(docLine.from, { y: "center" }),
+    ],
   });
   view.focus();
 }
@@ -175,7 +186,8 @@ export function MarkdownEditor({
       }),
     });
     viewRef.current = view;
-    view.focus();
+    // Do not focus here. A fresh view's caret is line 1, and focus() scrolls
+    // that caret into view after a citation flash has moved to a later line.
     return () => {
       view.destroy();
       viewRef.current = null;
@@ -189,22 +201,46 @@ export function MarkdownEditor({
     const view = viewRef.current;
     if (!view || flash === null) return;
     const lineNo = flash.line;
+    const highlight = flash.highlight;
+    let alive = true;
+    let cleared = false;
     const run = () => {
-      if (viewRef.current) applyCitationFlash(viewRef.current, lineNo);
+      if (!alive || !viewRef.current) return;
+      applyCitationFlash(viewRef.current, lineNo, highlight && !cleared);
     };
     run();
     // Layout may not be ready on first paint after docKey swap (loading → editor).
     const raf = requestAnimationFrame(() => requestAnimationFrame(run));
+    const measure = (attempts: number) => {
+      const current = viewRef.current;
+      if (!alive || !current) return;
+      current.requestMeasure({
+        key: "citation-flash",
+        read: (v) => v.scrollDOM.clientHeight,
+        write: (height, v) => {
+          if (!alive || viewRef.current !== v) return;
+          if (height > 0) {
+            requestAnimationFrame(run);
+            return;
+          }
+          if (attempts >= 8) return;
+          requestAnimationFrame(() => measure(attempts + 1));
+        },
+      });
+    };
+    measure(0);
     const timer = window.setTimeout(() => {
-      viewRef.current?.dispatch({ effects: setFlash.of(null) });
+      cleared = true;
+      if (alive) viewRef.current?.dispatch({ effects: setFlash.of(null) });
     }, 1400);
     return () => {
+      alive = false;
       cancelAnimationFrame(raf);
       window.clearTimeout(timer);
     };
     // Re-run when either the target changes or the nonce bumps (same-line re-cite).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flash?.line, flash?.nonce, docKey]);
+  }, [flash?.line, flash?.nonce, flash?.highlight, docKey]);
 
   return <div className="cm-host" ref={hostRef} />;
 }

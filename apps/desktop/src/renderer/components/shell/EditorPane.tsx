@@ -1,7 +1,7 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
 import { isAudioPath, isHtmlPath, isImagePath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, isVideoPath, opensInEditor } from "../../cite-format";
-import { MarkdownEditor } from "./MarkdownEditor";
+import { MarkdownEditor, type CitationFlash } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
 
@@ -18,7 +18,7 @@ interface EditorPaneProps {
   audioSrc: string | null;
   /** Data URL for the in-app video player. Null unless a video file is open. */
   videoSrc: string | null;
-  flash: { line: number; nonce: number } | null;
+  flash: CitationFlash | null;
   cursor: { line: number; col: number };
   rightRailOpen: boolean;
   indexState: IndexState;

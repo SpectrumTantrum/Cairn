@@ -3,7 +3,9 @@ import { test } from "node:test";
 
 const {
   citationLandingLine,
+  citationOpenTarget,
   citationsFromAskAgent,
+  clampCitationLine,
   lineForMarkdownHeading,
   resolveCitationLine,
   splitInlineCites,
@@ -1974,4 +1976,74 @@ test("an empty txt read is not a chip", () => {
     ...agentShell,
   });
   assert.deepEqual(cites, []);
+});
+
+function openHit(file, line, extra = {}) {
+  return {
+    file,
+    line,
+    heading: extra.heading ?? "",
+    text: extra.text ?? "",
+    snippet: extra.snippet ?? extra.text ?? "",
+    ...(extra.page !== undefined ? { page: extra.page } : {}),
+  };
+}
+
+test("a :5 chip opens at line 5 when the note heading is line 1", () => {
+  const full = ["# Field notes", "", "", "", "The unique cairn-alpha phrase is COPPER FINCH, 312."].join("\n");
+  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  const hit = openHit("alpha-notes.md", 5, { heading: "Field notes", text: fact });
+  assert.equal(resolveCitationLine(full, hit), 1);
+  assert.equal(citationLandingLine(hit), 5);
+  assert.deepEqual(citationOpenTarget(hit), { kind: "editor", line: 5, highlight: true });
+});
+
+test("a :1 chip opens at line 1 with a highlight", () => {
+  const fact = "The badge code is stored at the top of the note.";
+  const hit = openHit("alpha-notes.md", 1, { text: fact });
+  assert.deepEqual(citationOpenTarget(hit), { kind: "editor", line: 1, highlight: true });
+});
+
+test("a file chip opens at line 1 with no highlight", () => {
+  const hit = openHit("alpha-notes.md", FILE_CITE_LINE);
+  assert.equal(citationLineLabel(hit.line), "file");
+  assert.deepEqual(citationOpenTarget(hit), { kind: "editor", line: 1, highlight: false });
+  assert.deepEqual(citationOpenTarget(openHit("alpha-notes.md", -3)), {
+    kind: "editor",
+    line: 1,
+    highlight: false,
+  });
+});
+
+test("clampCitationLine keeps an in-range line and clamps past the end", () => {
+  assert.equal(clampCitationLine(5, 10), 5);
+  assert.equal(clampCitationLine(999, 10), 10);
+  assert.equal(clampCitationLine(0, 10), 1);
+  assert.equal(clampCitationLine(-4, 10), 1);
+  assert.equal(clampCitationLine(3, 0), 1);
+});
+
+test("media and PDF chips do not open as an editor line", () => {
+  for (const file of ["shot.png", "shot.jpg", "shot.jpeg", "shot.webp", "shot.gif"]) {
+    assert.deepEqual(citationOpenTarget(openHit(file, 5)), { kind: "image" });
+  }
+  for (const file of ["clip.mp3", "clip.wav", "clip.m4a"]) {
+    assert.deepEqual(citationOpenTarget(openHit(file, 5)), { kind: "audio" });
+  }
+  for (const file of ["clip.mp4", "clip.webm", "clip.mov"]) {
+    assert.deepEqual(citationOpenTarget(openHit(file, 5)), { kind: "video" });
+  }
+  assert.deepEqual(citationOpenTarget(openHit("report.pdf", 4, { page: 3 })), { kind: "pdf", page: 3 });
+  assert.deepEqual(citationOpenTarget(openHit("report.pdf", 4)), { kind: "pdf", page: 1 });
+  const fact = "The orphan fact lives on this exact line.";
+  assert.deepEqual(citationOpenTarget(openHit("notes/a.md", 5, { text: fact })), {
+    kind: "editor",
+    line: 5,
+    highlight: true,
+  });
+  assert.deepEqual(citationOpenTarget(openHit("notes/a.txt", 5, { text: fact })), {
+    kind: "editor",
+    line: 5,
+    highlight: true,
+  });
 });
