@@ -18,7 +18,7 @@ import {
   indentOnInput,
 } from "@codemirror/language";
 import { tags as t } from "@lezer/highlight";
-import { clampCitationLine } from "../../agent-citations";
+import { focusEditorOnMount, landCitation } from "../../citation-editor-focus";
 
 /** Citation scroll target. `highlight` is false for a whole-file chip. */
 export interface CitationFlash {
@@ -91,16 +91,10 @@ const setFlash = StateEffect.define<number | null>();
 const flashDeco = Decoration.line({ class: "cm-flash-line" });
 
 function applyCitationFlash(view: EditorView, lineNo: number, highlight: boolean): void {
-  const clamped = clampCitationLine(lineNo, view.state.doc.lines);
-  const docLine = view.state.doc.line(clamped);
-  view.dispatch({
-    selection: { anchor: docLine.from },
-    effects: [
-      setFlash.of(highlight ? clamped : null),
-      EditorView.scrollIntoView(docLine.from, { y: "center" }),
-    ],
-  });
-  view.focus();
+  landCitation(view, lineNo, highlight, (landed, hl) => [
+    setFlash.of(hl ? landed.line : null),
+    EditorView.scrollIntoView(landed.from, { y: "center" }),
+  ]);
 }
 
 const flashField = StateField.define<DecorationSet>({
@@ -136,6 +130,10 @@ export function MarkdownEditor({
   // Keep latest callbacks without re-creating the editor.
   const cbs = useRef({ onChange, onSave, onCursor });
   cbs.current = { onChange, onSave, onCursor };
+  // The create effect only re-runs when docKey changes. Read the flash from
+  // this render so a citation open in the same commit is not focused at line 1.
+  const flashRef = useRef(flash);
+  flashRef.current = flash;
 
   // Build a fresh EditorView whenever the open document changes.
   useEffect(() => {
@@ -186,8 +184,11 @@ export function MarkdownEditor({
       }),
     });
     viewRef.current = view;
-    // Do not focus here. A fresh view's caret is line 1, and focus() scrolls
-    // that caret into view after a citation flash has moved to a later line.
+    // Tree opens have no flash: focus so the caret is ready to type.
+    // A chip, Sources, or search open already has a flash. Focusing now would
+    // scroll the fresh line-1 caret into view over the landed line. That path
+    // focuses inside landCitation, after the caret has moved.
+    focusEditorOnMount(view, flashRef.current);
     return () => {
       view.destroy();
       viewRef.current = null;

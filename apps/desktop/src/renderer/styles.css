@@ -1100,10 +1100,15 @@ button {
   color: var(--text-strong);
 }
 
-/* ---- CodeMirror citation flash ---- */
-.cm-flash-line {
-  background: var(--accent-fill);
-  transition: background 0.4s ease;
+/* ---- CodeMirror citation flash ----
+   The landed line is also the active line. CodeMirror paints that with a
+   two-class rule in each theme (light id + .cm-activeLine, dark id +
+   .cm-activeLine), and the editor theme adds another faint wash. A single
+   class loses, so the flash never shows. Four classes beat both themes, and
+   the wash is strong enough to read over either active-line tint. */
+.cm-editor .cm-line.cm-activeLine.cm-flash-line {
+  background-color: rgba(111, 155, 239, 0.5);
+  transition: background-color 0.4s ease;
 }
 
 /* ---- Streaming + error chat turns ---- */
