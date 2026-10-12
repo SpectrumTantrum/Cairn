@@ -1,8 +1,13 @@
 # @cairn/engine — local-first grounded retrieval
 
 The headless indexing & retrieval engine behind [Cairn](../../CONTEXT.md).
-Point it at a folder of Markdown; it chunks, indexes, and answers **grounded, cited** queries
-over your own notes — fully local, no telemetry, no cloud. This is the spine the desktop app
+Point it at a vault folder. It chunks and indexes Markdown, plain UTF-8 `.txt`, visible text in
+`.html` / `.htm`, plain UTF-8 `.csv` / `.tsv`, and PDF text-layer pages, and it answers
+**grounded, cited** queries over that text — fully local, no telemetry, no cloud. Images
+(`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`), audio (`.mp3`, `.wav`, `.m4a`), and video
+(`.mp4`, `.webm`, `.mov`) are indexed by path only: no OCR, no transcript, and no embedding.
+The desktop app opens those images and plays that audio and video. If you ask what one of them
+says, the answer is `Your notes don't cover this.` This package is the spine the desktop app
 sits on (ADR-0001: the engine is headless and CLI-testable by design).
 
 > **Status.** Hybrid retrieval (sqlite-vec dense KNN + FTS5 keyword, fused with RRF) backs both
@@ -63,8 +68,9 @@ cairn ask "your question" --in /path/to/notes
 *"Your notes don't cover this"* rather than guess when retrieval comes up empty.
 
 The index lives in `/path/to/notes/.cairn/index.db` — **disposable and per-machine**; the
-Markdown files are the source of truth. Re-running `index` rebuilds it, re-embedding only the
-chunks whose content changed (content-addressed embedding cache).
+vault files are the source of truth. Re-running `index` rebuilds it, re-embedding only the
+text chunks whose content changed (content-addressed embedding cache). Images, audio, and
+video produce no chunks and no embeddings.
 
 ## Programmatic API (beyond the CLI)
 
@@ -101,9 +107,15 @@ work unchanged (new fields are optional).
   embedding cache (G7); sqlite-vec dense KNN + FTS5 keyword, fused with RRF (G10);
   Qwen3 query instruction-prefixing while stored chunks stay un-prefixed; fuzzy citation
   anchors back to `file:line › heading` (ADR-0007); `ask` — grounded, cited answers from a
-  local chat model, with a "not in your notes" refusal gate.
-- **Doesn't (yet):** PDFs, the graph, the GUI, agent write-modes — those are the wider v1 in
-  [`docs/v1-scope.md`](../../docs/v1-scope.md).
+  local chat model, with a "not in your notes" refusal gate. Text it can cite: Markdown,
+  plain UTF-8 `.txt`, visible `.html` / `.htm`, plain UTF-8 `.csv` / `.tsv`, and PDF
+  text-layer pages (a page citation, not a line). Path-only index entries for the image,
+  audio, and video extensions above.
+- **Doesn't:** OCR (no text from images or from scanned PDFs), Office documents (DOCX, PPTX),
+  EPUB, and audio or video transcription. Dense-retrieval *quality* is not independently
+  validated (see the status note above). The graph and agent write-modes are still the wider
+  v1 in [`docs/v1-scope.md`](../../docs/v1-scope.md). This package does not ship the GUI;
+  that is `apps/desktop`.
 
 ## Layout
 
