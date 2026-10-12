@@ -1014,9 +1014,13 @@ export function App() {
         result.reason = "This model does not support tool-calling, which agentic Ask needs.";
       }
       if (raw.stopReason === "no-tool-use") {
-        result.reason =
-          "The model did not call search tools in time — agentic Ask needs qwen3:8b (or classic Ask). qwen3:4b usually times out here.";
         result.covered = false;
+        if (raw.answer === "This model couldn't complete the search. Try qwen3:8b.") {
+          result.sources = [];
+        } else {
+          result.reason =
+            "The model did not call search tools in time — agentic Ask needs qwen3:8b (or classic Ask). qwen3:4b usually times out here.";
+        }
       }
       if (raw.stopReason === "timeout") {
         result.reason =

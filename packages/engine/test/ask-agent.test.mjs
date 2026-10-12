@@ -505,8 +505,9 @@ test("runAskAgent fails fast when the first turn returns no tool calls", async (
     });
     assert.equal(result.stopReason, "no-tool-use");
     assert.equal(result.steps, 1);
-    assert.match(result.answer, /I know the answer/);
+    assert.equal(result.answer, "I know the answer.");
     assert.equal(result.sources.length, 0);
+    assert.equal(result.opened.length, 0);
   } finally {
     index.close();
   }
@@ -545,13 +546,13 @@ test("runAskAgent passes a bounded timeoutMs on the first tool turn", async () =
   }
 });
 
-test("runAskAgent maps first-turn Ollama timeout to no-tool-use when nothing was gathered", async () => {
+test("runAskAgent maps first-turn Ollama timeout to the plain try-8b message", async () => {
   const { OllamaTimeoutError } = await import("../dist/index.js");
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
       chatWithTools: async () => {
-        throw new OllamaTimeoutError("chat-with-tools", 180_000);
+        throw new OllamaTimeoutError("chat-with-tools", 90_000);
       },
     }),
   );
@@ -567,7 +568,38 @@ test("runAskAgent maps first-turn Ollama timeout to no-tool-use when nothing was
     });
     assert.equal(result.stopReason, "no-tool-use");
     assert.equal(result.steps, 1);
-    assert.match(result.answer, /timed out waiting for the model to call search tools/i);
+    assert.equal(result.answer, "This model couldn't complete the search. Try qwen3:8b.");
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+  } finally {
+    index.close();
+  }
+});
+
+test("runAskAgent caps the first tool-call timeout at 90s", async () => {
+  let sawTimeout;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_m, _msg, _t, _turn, options) => {
+        sawTimeout = options?.timeoutMs;
+        return { content: "ok", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    await runAskAgent({
+      index,
+      question: "food?",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(typeof sawTimeout, "number");
+    assert.ok(sawTimeout <= 90_000, `timeoutMs ${sawTimeout} exceeds 90000`);
+    assert.ok(sawTimeout > 89_000, `timeoutMs ${sawTimeout} is not the 90s first-turn cap`);
   } finally {
     index.close();
   }

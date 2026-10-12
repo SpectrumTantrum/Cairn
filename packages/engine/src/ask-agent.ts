@@ -45,8 +45,14 @@ export const DEFAULT_ASK_AGENT_WALL_MS = 480_000;
 /**
  * First tool-calling turn budget — fail faster than the 600s undici ceiling when a small
  * model ignores tools and burns the full generation budget (common on qwen3 under load).
+ * A full qwen3:8b agentic answer is about 2 to 3 minutes; this cap only bounds the wait
+ * before the first tool call. The 480s wall and 16-step cap still cover the rest of the run.
  */
-export const DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS = 180_000;
+export const DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS = 90_000;
+
+/** Shown when the first tool-calling turn times out before any search tool runs. */
+const ASK_AGENT_FIRST_TURN_TIMEOUT_ANSWER =
+  "This model couldn't complete the search. Try qwen3:8b.";
 
 export type RetrievalSeedOption = boolean | { k?: number; mode?: Mode };
 
@@ -432,8 +438,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       if (firstTurn && noGroundingYet && err instanceof OllamaTimeoutError) {
         steps++;
         stopReason = "no-tool-use";
-        answer =
-          "Agentic Ask timed out waiting for the model to call search tools (often qwen3:4b or Qwen3 thinking+tools on older Ollama). Try qwen3:8b, upgrade Ollama, use classic Ask, or retry when the machine is quieter.";
+        answer = ASK_AGENT_FIRST_TURN_TIMEOUT_ANSWER;
         break;
       }
       throw err;
