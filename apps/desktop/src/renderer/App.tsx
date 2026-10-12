@@ -14,6 +14,7 @@ import type {
   TreeSortMode,
 } from "../shared/types.js";
 import { citationOpenTarget, citationsFromAskAgent } from "./agent-citations";
+import { nextEditorFlash } from "./citation-editor-focus";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
 import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
@@ -503,10 +504,8 @@ export function App() {
         setBuffer(content);
         setDocKey(node.path);
         setCursor({ line: 1, col: 1 });
-        if (flashTarget) {
-          flashNonce.current += 1;
-          setFlash({ line: flashTarget.line, highlight: flashTarget.highlight, nonce: flashNonce.current });
-        }
+        if (flashTarget) flashNonce.current += 1;
+        setFlash(nextEditorFlash(flashTarget, flashNonce.current));
       } catch (err) {
         setDocKey(null);
         setLoadError(errorMessage(err));

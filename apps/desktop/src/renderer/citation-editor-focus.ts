@@ -8,6 +8,26 @@
 import type { EditorView } from "@codemirror/view";
 import { clampCitationLine } from "./agent-citations.js";
 
+export interface EditorFlash {
+  line: number;
+  nonce: number;
+  highlight: boolean;
+}
+
+/**
+ * Flash stored for this editor open.
+ * A citation open records its own line. A vault-tree open has no target and
+ * returns null, dropping a leftover chip flash so the new note does not land
+ * on the previous line.
+ */
+export function nextEditorFlash(
+  flashTarget: { line: number; highlight: boolean } | undefined,
+  nonce: number,
+): EditorFlash | null {
+  if (!flashTarget) return null;
+  return { line: flashTarget.line, highlight: flashTarget.highlight, nonce };
+}
+
 /** True when this open is not a citation land, so the new editor may focus immediately. */
 export function focusEditorOnMount(view: { focus(): void }, flash: { line: number } | null): void {
   if (flash == null) view.focus();

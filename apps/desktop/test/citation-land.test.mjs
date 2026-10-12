@@ -6,7 +6,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const { focusEditorOnMount, landCitation } = await import("../out-test/citation-editor-focus.js");
+const { focusEditorOnMount, landCitation, nextEditorFlash } = await import(
+  "../out-test/citation-editor-focus.js"
+);
 
 function fakeEditor(docLines) {
   let line = 1;
@@ -34,6 +36,16 @@ function fakeEditor(docLines) {
 test("a tree open focuses the editor", () => {
   const view = fakeEditor(80);
   focusEditorOnMount(view, null);
+  assert.deepEqual(view.ops, [{ op: "focus", line: 1 }]);
+});
+
+test("a tree open after a citation drops the previous line and focuses the editor", () => {
+  const leftover = nextEditorFlash({ line: 47, highlight: true }, 3);
+  assert.deepEqual(leftover, { line: 47, highlight: true, nonce: 3 });
+  const treeFlash = nextEditorFlash(undefined, leftover.nonce);
+  assert.equal(treeFlash, null);
+  const view = fakeEditor(80);
+  focusEditorOnMount(view, treeFlash);
   assert.deepEqual(view.ops, [{ op: "focus", line: 1 }]);
 });
 
