@@ -32,7 +32,7 @@
 // page is not a default.
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
-import { FILE_CITE_LINE, isPdfPath } from "./cite-format.js";
+import { FILE_CITE_LINE, isAudioPath, isImagePath, isPdfPath, isVideoPath } from "./cite-format.js";
 
 /** Answer prose split around inline `[path:line]` cites. */
 export type InlineAnswerSegment = { kind: "text"; text: string } | { kind: "cite"; hit: SearchHit };
@@ -927,4 +927,35 @@ export function citationLandingLine(
     if (start > 1) return resolveCitationLine(`${"\n".repeat(start - 1)}${text}`, hit);
   }
   return hit.line;
+}
+
+/**
+ * Where a citation chip click opens. The editor line is the number on the
+ * chip (`citationLandingLine`). A `file` chip (line <= 0) opens at line 1
+ * with no highlight. PDF and media stay on their own viewers.
+ */
+export type CitationOpenTarget =
+  | { kind: "pdf"; page: number }
+  | { kind: "image" }
+  | { kind: "audio" }
+  | { kind: "video" }
+  | { kind: "editor"; line: number; highlight: boolean };
+
+export function citationOpenTarget(
+  hit: Pick<SearchHit, "file" | "line" | "heading" | "text" | "snippet" | "page">,
+): CitationOpenTarget {
+  if (isPdfPath(hit.file)) return { kind: "pdf", page: hit.page && hit.page > 0 ? hit.page : 1 };
+  if (isImagePath(hit.file)) return { kind: "image" };
+  if (isAudioPath(hit.file)) return { kind: "audio" };
+  if (isVideoPath(hit.file)) return { kind: "video" };
+  const landing = citationLandingLine(hit);
+  if (landing > 0) return { kind: "editor", line: landing, highlight: true };
+  return { kind: "editor", line: 1, highlight: false };
+}
+
+/** 1-based editor line clamped into the open buffer. Past-the-end lands on the last line. */
+export function clampCitationLine(line: number, docLines: number): number {
+  const last = Number.isFinite(docLines) && docLines >= 1 ? Math.floor(docLines) : 1;
+  if (!Number.isFinite(line) || line < 1) return 1;
+  return Math.min(Math.floor(line), last);
 }
