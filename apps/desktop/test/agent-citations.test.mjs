@@ -1845,6 +1845,116 @@ test('QA: "What does empty.csv say?" is an honest miss with zero chips', async (
   }
 });
 
+const COPPER_QUESTION = "What is the COPPER FINCH number?";
+const ALPHA_FACT = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+
+function alphaFindHit(line, heading, text) {
+  return {
+    file: "alpha-notes.md",
+    line,
+    heading,
+    score: 1,
+    cosine: NaN,
+    snippet: text,
+    text,
+    arms: "fts",
+  };
+}
+
+test("COPPER FINCH number keeps the alpha-notes.md find hit", () => {
+  const cites = citationsFromAskAgent({
+    answer: "312. See alpha-notes.md.",
+    question: COPPER_QUESTION,
+    sources: [
+      alphaFindHit(4, "Field notes", ALPHA_FACT),
+      {
+        file: "project-heron.md",
+        line: 3,
+        heading: "Project Heron",
+        score: 1,
+        cosine: NaN,
+        snippet: "The notebook codename is COPPER FINCH and the badge is 999.",
+        text: "The notebook codename is COPPER FINCH and the badge is 999.",
+        arms: "fts",
+      },
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "alpha-notes.md");
+  assert.equal(cites[0].line, 4);
+  assert.equal(cites[0].heading, "Field notes");
+});
+
+test("a retrieved hit the answer does not use gets no chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: "The kettle is boiling.",
+    question: "Where is the kettle?",
+    sources: [alphaFindHit(4, "Field notes", ALPHA_FACT)],
+    opened: [],
+    ...agentShell,
+  });
+  assert.deepEqual(cites, []);
+});
+
+test("a hit sharing only question words or stopwords gets no chip", () => {
+  const cites = citationsFromAskAgent({
+    answer: "The COPPER FINCH number is the one in your notes.",
+    question: COPPER_QUESTION,
+    sources: [
+      alphaFindHit(1, "", "The notebook codename is COPPER FINCH and the badge is 999."),
+    ],
+    opened: [],
+    ...agentShell,
+  });
+  assert.deepEqual(cites, []);
+});
+
+test("badge-code ask still cites alpha-notes.md at line 1", () => {
+  const fact = "The badge code is stored at the top of the note.";
+  const cites = citationsFromAskAgent({
+    answer: fact,
+    question: "What is the badge code?",
+    sources: [alphaFindHit(1, "", fact)],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].file, "alpha-notes.md");
+  assert.equal(cites[0].line, 1);
+  assert.equal(cites[0].heading, "");
+});
+
+test("honest miss has zero chips", () => {
+  assert.deepEqual(
+    citationsFromAskAgent({
+      answer: "Your notes don't cover this.",
+      question: COPPER_QUESTION,
+      sources: [],
+      opened: [],
+      ...agentShell,
+      grounded: false,
+    }),
+    [],
+  );
+});
+
+test("first-turn timeout string has zero chips", () => {
+  assert.deepEqual(
+    citationsFromAskAgent({
+      answer: "This model couldn't complete the search. Try qwen3:8b.",
+      question: COPPER_QUESTION,
+      sources: [],
+      opened: [],
+      ...agentShell,
+      stopReason: "no-tool-use",
+      grounded: false,
+    }),
+    [],
+  );
+});
+
 test("an empty txt read is not a chip", () => {
   const cites = citationsFromAskAgent({
     answer: "The field code is COPPER FINCH, 312 under Section B.",

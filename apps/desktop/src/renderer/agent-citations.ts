@@ -11,7 +11,9 @@
 // agent read and answered from. A cite is an `open` anchor or an inline `[path:line]`.
 // A match is the 4-word passage overlap below: the chip points at that heading line.
 // A read that contains the answer but shares no 4-word run is labeled "file".
-// It is not dropped. Search and grep hits the answer did not use are still omitted.
+// It is not dropped. A find or grep hit the answer did not use is still omitted.
+// One such hit is kept, at its own line and heading, when the answer shares a
+// distinctive token from that hit and that file is not already cited.
 // A single grep hit already located past line 1 still shows when nothing else was
 // cited or matched, so #66's Section B chip stays on that line. The 4-word
 // threshold is unchanged.
@@ -548,6 +550,80 @@ function pdfAnswerPage(answer: string, pages: readonly SearchHit[]): SearchHit |
   return winners.length === 1 ? winners[0].page : undefined;
 }
 
+/** Interrogatives and other words that are not a retrieved fact. */
+const EXTRA_STOP = new Set([
+  "what", "how", "where", "when", "who", "which", "why",
+  "your", "you", "our", "their", "there", "they", "them", "we",
+  "can", "could", "would", "should", "have", "has", "had", "will",
+  "just", "also", "than", "then", "too", "very",
+  "notes", "note", "file", "files", "say", "says", "said", "does", "do", "did", "about",
+]);
+
+function isStopword(word: string): boolean {
+  return CLOSED_CLASS.has(word) || EXTRA_STOP.has(word);
+}
+
+function askedWords(result: AskAgentResult): Set<string> {
+  const question = (result as AskAgentResult & { question?: string }).question ?? "";
+  return new Set(wordSpans(question).map((span) => span.word));
+}
+
+function isNumberOrCode(word: string): boolean {
+  return /\d/.test(word) || /[-_]/.test(word);
+}
+
+function filesWithToken(word: string, sources: readonly SearchHit[]): Set<string> {
+  const files = new Set<string>();
+  for (const hit of sources) {
+    const blob = `${hit.text ?? ""}\n${hit.snippet ?? ""}`;
+    if (wordSpans(blob).some((span) => span.word === word)) files.add(vaultFileKey(hit.file));
+  }
+  return files;
+}
+
+/** A content word that shows up in exactly one retrieved file. */
+function isRareWord(word: string, file: string, sources: readonly SearchHit[]): boolean {
+  if (word.length < 4 || isStopword(word) || isNumberOrCode(word)) return false;
+  const files = filesWithToken(word, sources);
+  return files.size === 1 && files.has(vaultFileKey(file));
+}
+
+function isDistinctiveToken(
+  word: string,
+  file: string,
+  sources: readonly SearchHit[],
+  asked: ReadonlySet<string>,
+): boolean {
+  if (isStopword(word) || asked.has(word)) return false;
+  return isNumberOrCode(word) || isRareWord(word, file, sources);
+}
+
+function isRetrievalHit(hit: SearchHit): boolean {
+  return (
+    hit.arms === "grep" ||
+    hit.arms === "find" ||
+    hit.arms === "fts" ||
+    hit.arms === "dense" ||
+    hit.arms === "dense+fts"
+  );
+}
+
+/** The hit's own text shares a number, code, or rare word with the answer. */
+function hitSharesDistinctive(
+  answer: string,
+  hit: SearchHit,
+  sources: readonly SearchHit[],
+  asked: ReadonlySet<string>,
+): boolean {
+  const answerWords = new Set(wordSpans(answer).map((span) => span.word));
+  const blob = `${hit.text ?? ""}\n${hit.snippet ?? ""}`;
+  for (const span of wordSpans(blob)) {
+    if (!answerWords.has(span.word)) continue;
+    if (isDistinctiveToken(span.word, hit.file, sources, asked)) return true;
+  }
+  return false;
+}
+
 /**
  * A file the agent read and answered from always yields a chip. A matched
  * passage is already in `kept`. What remains is labeled "file".
@@ -557,6 +633,11 @@ function pdfAnswerPage(answer: string, pages: readonly SearchHit[]): SearchHit |
  * fact suppresses a file whose overlap is only the shared token.
  * A PDF file chip quotes the unique read page that contains the answer, or
  * nothing when that page cannot be determined.
+ * A find or grep hit that did not already match still yields its own line and
+ * heading when the answer shares a distinctive token from that hit: a number,
+ * a code or ID-like token, or a rare word. Stopwords and words from the
+ * question do not count. A filename written only in the answer does not.
+ * A file the read fallback already cited stays that chip.
  */
 function citeAnsweredReads(kept: SearchHit[], result: AskAgentResult): SearchHit[] {
   const cited = new Set(kept.map((hit) => vaultFileKey(hit.file)));
@@ -582,6 +663,25 @@ function citeAnsweredReads(kept: SearchHit[], result: AskAgentResult): SearchHit
       fileHit.text = body;
     }
     out.push(fileHit);
+    cited.add(key);
+  }
+
+  const asked = askedWords(result);
+  const seenRetrieval = new Set<string>();
+  for (const source of result.sources) {
+    if (!isRetrievalHit(source)) continue;
+    const key = vaultFileKey(source.file);
+    if (seenRetrieval.has(key) || cited.has(key)) continue;
+    seenRetrieval.add(key);
+    const corpus = corpusForFile(key, result.sources);
+    const others = otherCorpora({ file: source.file }, result.sources);
+    if (suppressedByOtherRead(result.answer, corpus, others)) continue;
+    const matched = result.sources.filter(
+      (hit) => isRetrievalHit(hit) && vaultFileKey(hit.file) === key && hitSharesDistinctive(result.answer, hit, result.sources, asked),
+    );
+    if (matched.length === 0) continue;
+    out.push(matched.find((hit) => hit.line > 1) ?? matched[0]);
+    cited.add(key);
   }
   return out;
 }
