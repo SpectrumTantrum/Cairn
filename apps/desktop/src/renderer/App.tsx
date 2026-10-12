@@ -996,7 +996,7 @@ export function App() {
         scope: scopeActive ? includedFiles : undefined,
       });
       if (activeRequestId.current !== requestId) return;
-      const sources = citationsFromAskAgent(raw);
+      const sources = citationsFromAskAgent(Object.assign(raw, { question }));
       const uncovered = raw.answer.includes("don't cover");
       const result: DesktopChatSendResult = {
         answer: raw.answer,
