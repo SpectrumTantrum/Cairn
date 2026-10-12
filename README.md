@@ -20,6 +20,8 @@ With agentic Ask on, images in your vault (`.png`, `.jpg`, `.jpeg`, `.webp`, `.g
 
 With agentic Ask on, audio files in your vault (`.mp3`, `.wav`, `.m4a`) can be opened and played in the app. Ask does not transcribe audio. If you ask what an audio file says, Ask says your notes don't cover them.
 
+With agentic Ask on, video files in your vault (`.mp4`, `.webm`, `.mov`) can be opened and played in the app. Ask does not transcribe video. If you ask what a video file says, Ask says your notes don't cover them.
+
 An agentic Ask answer takes a few minutes on `qwen3:8b` (about 2 to 3 minutes measured on small test vaults).
 
 ## Enable agentic Ask
