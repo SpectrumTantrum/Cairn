@@ -5,6 +5,8 @@ const {
   citationLandingLine,
   citationOpenTarget,
   citationsFromAskAgent,
+  classicAskTurn,
+  classicChipBadge,
   clampCitationLine,
   lineForMarkdownHeading,
   resolveCitationLine,
@@ -2046,4 +2048,68 @@ test("media and PDF chips do not open as an editor line", () => {
     line: 5,
     highlight: true,
   });
+});
+
+function classicFtsHit(file, line, text, heading = "") {
+  return {
+    file,
+    line,
+    heading,
+    score: 1,
+    cosine: NaN,
+    snippet: text,
+    text,
+    arms: "fts",
+  };
+}
+
+const CLASSIC_QUESTION = "What is the COPPER FINCH number?";
+const FINCH_ROSTER = classicFtsHit(
+  "finch-roster.md",
+  2,
+  "COPPER FINCH is listed on the field roster beside other codenames.",
+  "Roster",
+);
+const ALPHA_312 = classicFtsHit(
+  "alpha-notes.md",
+  5,
+  "The unique cairn-alpha phrase is COPPER FINCH, 312.",
+  "Field notes",
+);
+
+test("the 312 question shows only the alpha-notes chip", () => {
+  const { chips, lastSources } = classicAskTurn("312.", [FINCH_ROSTER, ALPHA_312], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 5);
+  assert.equal(lastSources.length, 2);
+  assert.equal(lastSources[0].file, "finch-roster.md");
+  assert.equal(lastSources[1].file, "alpha-notes.md");
+});
+
+test("the line-1 answer still chips alpha-notes.md:1", () => {
+  const fact = "The badge code is stored at the top of the note.";
+  const { chips } = classicAskTurn(fact, [classicFtsHit("alpha-notes.md", 1, fact)], "What is the badge code?");
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 1);
+  assert.equal(chips[0].heading, "");
+});
+
+test("an honest miss shows zero chips", () => {
+  const { chips, lastSources } = classicAskTurn("Your notes don't cover this.", [], CLASSIC_QUESTION);
+  assert.deepEqual(chips, []);
+  assert.deepEqual(lastSources, []);
+});
+
+test("when hit 1 is dropped, the remaining chip badge is 2 and matches [2] in the prose", () => {
+  const answer = "The number is 312 [2].";
+  const { chips } = classicAskTurn(answer, [FINCH_ROSTER, ALPHA_312], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].citeIndex, 2);
+  const badge = classicChipBadge(chips[0], 1);
+  assert.equal(badge, 2);
+  const marker = Number(answer.match(/\[(\d+)\]/)?.[1]);
+  assert.equal(badge, marker);
 });

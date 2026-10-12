@@ -6,6 +6,7 @@ import type {
   ProviderMeta,
   SearchHit,
 } from "../../../shared/types.js";
+import { classicChipBadge } from "../../agent-citations";
 import { buildProgressView, type AgenticProgressState } from "../../agentic-progress";
 import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
@@ -261,7 +262,7 @@ function AssistantTurn({
                 key={`${s.file}:${s.line}:${i}`}
                 hit={s}
                 variant="pill"
-                index={i + 1}
+                index={result.agenticAsk ? i + 1 : classicChipBadge(s, i + 1)}
                 showSnippet={result.agenticAsk ? !!s.snippet : undefined}
                 onOpen={onCite}
               />

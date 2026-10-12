@@ -39,6 +39,11 @@ export interface SearchHit {
   arms: string; // "dense+fts" | "dense" | "fts"
   /** 1-based PDF page. Absent for Markdown. */
   page?: number;
+  /**
+   * 1-based place of this hit in the retrieval list classic Ask showed the model.
+   * Classic chips keep it so the badge matches the prose `[n]`. Unset on agentic chips.
+   */
+  citeIndex?: number;
 }
 
 export type Mode = "auto" | "hybrid" | "lexical";

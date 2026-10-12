@@ -763,6 +763,43 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
   return collapsePdfPages(citeAnsweredReads(located, result));
 }
 
+/**
+ * Classic Ask chips for one turn.
+ * Uses the same filter as agentic Ask, with no opened anchors and the question
+ * attached, so a retrieved neighbor the answer does not use is dropped.
+ * Each chip keeps the 1-based index it had in `sources` (the `[n]` the model saw).
+ * `lastSources` is that full list, for the Sources tab.
+ */
+export function classicAskTurn(
+  answer: string,
+  sources: SearchHit[],
+  question: string,
+): { chips: SearchHit[]; lastSources: SearchHit[] } {
+  const indexed = sources.map((hit, i) => ({ ...hit, citeIndex: i + 1 }));
+  const chips = citationsFromAskAgent(
+    Object.assign(
+      {
+        answer,
+        sources: indexed,
+        opened: [] as AskAgentResult["opened"],
+        seedHits: [] as SearchHit[],
+        steps: 0,
+        stopReason: "done" as const,
+        grounded: true,
+      },
+      { question },
+    ),
+  );
+  return { chips, lastSources: sources };
+}
+
+/** Classic chip badge: the retrieval number, so it matches prose `[n]`. */
+export function classicChipBadge(hit: Pick<SearchHit, "citeIndex">, position: number): number {
+  const n = hit.citeIndex;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 1) return Math.floor(n);
+  return position;
+}
+
 const INLINE_PATH_CITE = /\[([^\[\]\n]+?):(\d+)\]/g;
 
 /** `[path:line]` — a path has a slash or extension. Bracket numbers like `[1]` are prose. */
