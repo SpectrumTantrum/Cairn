@@ -764,9 +764,20 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
 }
 
 /**
+ * Classic hits are `fts` / `dense`, not reads, so the agentic neighbor veto
+ * never sees them. Drop a chip when another retrieved hit holds the answer's
+ * fact and this one only shares the passage.
+ */
+function classicSharedNeighbor(answer: string, chip: SearchHit, sources: readonly SearchHit[]): boolean {
+  return sharedTokenNeighbor(answer, corpusForFile(chip.file, sources), otherCorpora(chip, sources));
+}
+
+/**
  * Classic Ask chips for one turn.
  * Uses the same filter as agentic Ask, with no opened anchors and the question
  * attached, so a retrieved neighbor the answer does not use is dropped.
+ * A neighbor that only shares a 4-word passage is dropped too: classic hits are
+ * not reads, so that veto does not run inside the shared filter.
  * Each chip keeps the 1-based index it had in `sources` (the `[n]` the model saw).
  * `lastSources` is that full list, for the Sources tab.
  */
@@ -789,7 +800,7 @@ export function classicAskTurn(
       },
       { question },
     ),
-  );
+  ).filter((chip) => !classicSharedNeighbor(answer, chip, indexed));
   return { chips, lastSources: sources };
 }
 

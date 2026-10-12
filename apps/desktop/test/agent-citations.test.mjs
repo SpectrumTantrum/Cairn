@@ -2102,6 +2102,40 @@ test("an honest miss shows zero chips", () => {
   assert.deepEqual(lastSources, []);
 });
 
+test("a four-word overlap with an unused neighbor does not chip that note", () => {
+  const answer = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  const neighbor = classicFtsHit(
+    "finch-roster.md",
+    2,
+    "The unique cairn-alpha phrase is listed beside other codenames.",
+    "Roster",
+  );
+  const { chips, lastSources } = classicAskTurn(answer, [neighbor, ALPHA_312], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 5);
+  assert.equal(chips[0].citeIndex, 2);
+  assert.equal(classicChipBadge(chips[0], 1), 2);
+  assert.equal(lastSources.length, 2);
+  assert.equal(lastSources[0].file, "finch-roster.md");
+  assert.equal(lastSources[0].citeIndex, undefined);
+});
+
+test("classic chips keep both notes when each holds a fact the answer uses", () => {
+  const answer = "The badge code is stored at the top. The field number is 312.";
+  const badge = classicFtsHit("alpha-notes.md", 1, "The badge code is stored at the top of the note.");
+  const field = classicFtsHit("field-notes.md", 4, "The field number is 312.");
+  const { chips } = classicAskTurn(answer, [badge, field], "What do the notes say?");
+  assert.deepEqual(
+    chips.map((chip) => chip.file),
+    ["alpha-notes.md", "field-notes.md"],
+  );
+  assert.equal(chips[0].citeIndex, 1);
+  assert.equal(chips[1].citeIndex, 2);
+  assert.equal(classicChipBadge(chips[0], 9), 1);
+  assert.equal(classicChipBadge(chips[1], 9), 2);
+});
+
 test("when hit 1 is dropped, the remaining chip badge is 2 and matches [2] in the prose", () => {
   const answer = "The number is 312 [2].";
   const { chips } = classicAskTurn(answer, [FINCH_ROSTER, ALPHA_312], CLASSIC_QUESTION);
