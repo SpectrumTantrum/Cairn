@@ -72,15 +72,59 @@ test("qwen3:4b tool-capable agentic on is Settings text only", () => {
   assert.equal(state.composerWarning, null);
 });
 
-test("no tools capability warns in Settings and above the composer", () => {
-  const state = guidance({ model: "llama3.2:3b", capability: "incapable" });
-  assert.equal(state.settingsLine, TESTED_AGENTIC_LINE);
-  assert.equal(state.settingsWarning, AGENTIC_TOOLS_WARNING);
-  assert.equal(state.composerWarning, AGENTIC_TOOLS_WARNING);
-  assert.equal(
-    AGENTIC_TOOLS_WARNING,
-    "This model can't use tools, so Agentic Ask won't work with it. Pick qwen3:8b or turn Agentic Ask off.",
-  );
+test("stubbed /api/show without tools warns in Settings and above the composer, and Ask still sends", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method, body: JSON.parse(String(init.body)) });
+    return new Response(JSON.stringify({ capabilities: ["completion"] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  try {
+    const engine = await import("@cairn/engine");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const capability = await client.modelInfo("llama3.2:3b");
+    assert.equal(capability, "incapable");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "http://ollama.test/api/show");
+    assert.equal(calls[0].method, "POST");
+    assert.deepEqual(calls[0].body, { model: "llama3.2:3b" });
+
+    const state = agenticGuidanceText({
+      agentic: true,
+      ollamaUp: true,
+      model: "llama3.2:3b",
+      capability,
+    });
+    assert.equal(state.settingsLine, TESTED_AGENTIC_LINE);
+    assert.equal(state.settingsWarning, AGENTIC_TOOLS_WARNING);
+    assert.equal(state.composerWarning, AGENTIC_TOOLS_WARNING);
+    assert.equal(state.settingsWarning, state.composerWarning);
+    assert.equal(
+      AGENTIC_TOOLS_WARNING,
+      "This model can't use tools, so Agentic Ask won't work with it. Pick qwen3:8b or turn Agentic Ask off.",
+    );
+    assert.match(dialog, /<p className="field-note warn">\{guidanceWarning\}<\/p>/);
+    const warningAt = chatTab.indexOf('className="composer-model-warning"');
+    const composerAt = chatTab.indexOf("<Composer");
+    assert.ok(warningAt !== -1 && composerAt !== -1 && warningAt < composerAt);
+    assert.match(chatTab, /\{props\.composerWarning\}/);
+
+    const ask = app.slice(app.indexOf("async function runAgenticAskChat"), app.indexOf("async function runChat"));
+    assert.match(ask, /askAgentVault\(question/);
+    assert.match(ask, /model: selectedModel \?\? undefined/);
+    assert.doesNotMatch(ask, /modelInfo|shownModelInfo|guidance|composerWarning|settingsWarning/);
+    assert.match(app, /const composerDisabled = !vaultPath \|\| !indexed \|\| !ollama\.up;/);
+    assert.doesNotMatch(composer, /composerWarning|guidanceWarning|modelInfo/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("@cairn/engine");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
 });
 
 test("unknown, capable, or agentic off shows no warning", () => {
