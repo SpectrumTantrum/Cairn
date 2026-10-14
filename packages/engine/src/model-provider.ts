@@ -304,13 +304,18 @@ export interface ModelProvider {
   ): Promise<ToolTurn>;
   /**
    * Prime one chat model's prompt cache and hold it. Embedders are refused as
-   * the chat model. The prime body matches the real Ask (no extra keep_alive,
-   * num_ctx, or num_predict). A fresh process, and a warm after the primed
-   * model was forgotten, also embeds a tiny string with the same body as
-   * `embed()` so the first search does not load the embedder. A model this
-   * process already primed, that `/api/ps` still lists, is skipped. A different
-   * chat model is unloaded (`keep_alive: 0`) first. Failures resolve as
-   * `"failed"` and are not remembered, so a later call can retry.
+   * the chat model. The prime body matches the real Ask except the 1-token
+   * output cap (`max_tokens` on `/v1/chat/completions`, `options.num_predict`
+   * on `/api/chat`). A newer model or Ask mode aborts the in-flight warm.
+   * When the chat model changed, that warm's model is unloaded
+   * (`keep_alive: 0`) before the new prime; the same model is not unloaded.
+   * The same model and mode join the in-flight warm instead of starting
+   * another. A fresh process, and a warm after the primed model was forgotten,
+   * also embeds a tiny string with the same body as `embed()` so the first
+   * search does not load the embedder. A model this process already primed,
+   * that `/api/ps` still lists, is skipped. A different chat model is unloaded
+   * first. Failures resolve as `"failed"` and are not remembered, so a later
+   * call can retry.
    */
   warmChatModel?(model: string, request: ChatWarmRequest): Promise<ChatWarmResult>;
   /** Drop the primed prompt so the next warm sends it again. */
@@ -505,6 +510,19 @@ function nativeAskBody(
 }
 
 /**
+ * The only field a warm may add. `max_tokens` is the OpenAI-compat form of
+ * `options.num_predict`. keep_alive and num_ctx stay off this body: a mismatch
+ * there misses the prompt cache the next Ask needs.
+ */
+function withPrimeOutputCap(
+  body: Record<string, unknown>,
+  cap: "max_tokens" | "num_predict",
+): Record<string, unknown> {
+  if (cap === "max_tokens") return { ...body, max_tokens: 1 };
+  return { ...body, options: { num_predict: 1 } };
+}
+
+/**
  * Older Ollama builds 400 when they do not know `think`. Any other failure
  * must keep `think: false`: omitting it turns thinking on for Qwen3.
  */
@@ -606,20 +624,62 @@ export class OllamaClient implements ModelProvider {
   private lastProbeSawHeld = false;
   private wasUp = false;
   private instanceToken = "";
-  /** Serializes primes so a mode switch cannot load a second model mid-warm. */
-  private warmChain: Promise<void> = Promise.resolve();
+  /** In-flight prime. A newer pick aborts this instead of waiting behind it. */
+  private warmAbort: AbortController | null = null;
+  private warmingKey: string | null = null;
+  private warmingKind: ChatWarmKind | null = null;
+  private warmTicket = 0;
+  private warmInflight: Promise<ChatWarmResult> | null = null;
+  /** Unloads already on the wire, keyed by chat model, so a newer pick can cancel one. */
+  private readonly releaseAborts = new Map<string, AbortController>();
 
   constructor(private readonly baseUrl = process.env.OLLAMA_HOST || "http://localhost:11434") {}
 
   async warmChatModel(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
     const name = model.trim();
     if (!name || isEmbedModelName(name)) return "skipped";
-    const run = this.warmChain.then(() => this.primeAndEmbed(name, request));
-    this.warmChain = run.then(
-      () => undefined,
-      () => undefined,
-    );
+    const key = chatModelKey(name);
+    if (this.warmInflight && this.warmingKey === key && this.warmingKind === request.kind) {
+      return this.warmInflight;
+    }
+
+    const previousKey = this.warmingKey;
+    this.warmAbort?.abort();
+    // The model the newest pick wants must stay loaded.
+    this.stopRelease(key);
+    const ticket = ++this.warmTicket;
+    const controller = new AbortController();
+    this.warmAbort = controller;
+    this.warmingKey = key;
+    this.warmingKind = request.kind;
+
+    const run = (async (): Promise<ChatWarmResult> => {
+      if (previousKey && previousKey !== key) {
+        await this.releaseChatModel(previousKey);
+      }
+      if (!this.warmIsCurrent(ticket, controller.signal)) return "failed";
+      return this.primeAndEmbed(name, request, controller.signal, ticket);
+    })();
+    this.warmInflight = run;
+    void run.finally(() => {
+      if (ticket !== this.warmTicket) return;
+      this.warmInflight = null;
+      if (this.warmAbort === controller) this.warmAbort = null;
+      this.warmingKey = null;
+      this.warmingKind = null;
+    });
     return run;
+  }
+
+  private warmIsCurrent(ticket: number, signal: AbortSignal): boolean {
+    return ticket === this.warmTicket && !signal.aborted;
+  }
+
+  private stopRelease(key: string): void {
+    const controller = this.releaseAborts.get(key);
+    if (!controller) return;
+    controller.abort();
+    this.releaseAborts.delete(key);
   }
 
   /** Ollama restarted or dropped the model: the primed prompt is gone. */
@@ -672,9 +732,16 @@ export class OllamaClient implements ModelProvider {
     return { up: true, models, recovered };
   }
 
-  private async primeAndEmbed(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
-    const chat = await this.primeChatModel(model, request);
-    await this.warmSearchEmbedder();
+  private async primeAndEmbed(
+    model: string,
+    request: ChatWarmRequest,
+    signal: AbortSignal,
+    ticket: number,
+  ): Promise<ChatWarmResult> {
+    const chat = await this.primeChatModel(model, request, signal, ticket);
+    if (!this.warmIsCurrent(ticket, signal)) return "failed";
+    await this.warmSearchEmbedder(signal, ticket);
+    if (!this.warmIsCurrent(ticket, signal)) return "failed";
     return chat;
   }
 
@@ -683,14 +750,15 @@ export class OllamaClient implements ModelProvider {
    * `input`, no keep_alive). Once per process while `/api/ps` still lists it,
    * and again after a restart forgets that prime.
    */
-  private async warmSearchEmbedder(): Promise<void> {
+  private async warmSearchEmbedder(signal: AbortSignal, ticket: number): Promise<void> {
+    if (!this.warmIsCurrent(ticket, signal)) return;
     let model: string | null = null;
     try {
       model = pickedEmbedder(await this.listModels());
     } catch {
       return;
     }
-    if (!model) return;
+    if (!model || !this.warmIsCurrent(ticket, signal)) return;
     const key = chatModelKey(model);
     let running: string[] | null = null;
     try {
@@ -698,25 +766,34 @@ export class OllamaClient implements ModelProvider {
     } catch {
       running = null;
     }
+    if (!this.warmIsCurrent(ticket, signal)) return;
     const resident = running?.some((name) => chatModelKey(name) === key) ?? false;
     if (this.embedKey === key && resident) return;
     try {
-      await this.embed(model, ["."]);
+      await this.embed(model, ["."], signal);
+      if (!this.warmIsCurrent(ticket, signal)) return;
       this.embedKey = key;
     } catch {
       // A failed embed warm must not surface, and must not block the chat prime.
     }
   }
 
-  private async primeChatModel(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
+  private async primeChatModel(
+    model: string,
+    request: ChatWarmRequest,
+    signal: AbortSignal,
+    ticket: number,
+  ): Promise<ChatWarmResult> {
     const key = chatModelKey(model);
     try {
+      if (!this.warmIsCurrent(ticket, signal)) return "failed";
       let running: string[] = [];
       try {
         running = await this.runningModelNames();
       } catch {
         running = [];
       }
+      if (!this.warmIsCurrent(ticket, signal)) return "failed";
       const resident = running.some((listed) => chatModelKey(listed) === key);
       // Skip only when this process already primed this prefix and the weights
       // are still resident. A resident model with a cold prompt still gets primed.
@@ -726,14 +803,17 @@ export class OllamaClient implements ModelProvider {
       }
       if (this.heldKey && this.heldKey !== key) {
         await this.releaseChatModel(this.heldKey);
+        if (!this.warmIsCurrent(ticket, signal)) return "failed";
         this.heldKey = null;
         this.primedKind = null;
         this.lastProbeSawHeld = false;
       }
+      if (!this.warmIsCurrent(ticket, signal)) return "failed";
       const primed =
         request.kind === "agentic"
-          ? await this.primeAgentic(model, request)
-          : await this.primeClassic(model, request);
+          ? await this.primeAgentic(model, request, signal)
+          : await this.primeClassic(model, request, signal);
+      if (!this.warmIsCurrent(ticket, signal)) return "failed";
       if (!primed) return "failed";
       this.heldKey = key;
       this.primedKind = request.kind;
@@ -744,9 +824,15 @@ export class OllamaClient implements ModelProvider {
     }
   }
 
-  /** Unload the previous chat model so two of them are not resident. */
+  /** Unload one chat model so two of them are not resident. Never an embedder. */
   private async releaseChatModel(model: string): Promise<void> {
+    const key = chatModelKey(model);
+    if (!key || isEmbedModelName(key) || this.warmingKey === key) return;
+    if (this.releaseAborts.has(key)) return;
+    const controller = new AbortController();
+    this.releaseAborts.set(key, controller);
     try {
+      if (this.warmingKey === key || controller.signal.aborted) return;
       const r = await ollamaFetch(
         `${this.baseUrl}/api/chat`,
         {
@@ -761,19 +847,28 @@ export class OllamaClient implements ModelProvider {
         },
         OLLAMA_WARM_TIMEOUT_MS,
         "warm-release",
+        controller.signal,
       );
       await r.text().catch(() => "");
     } catch {
       // A failed unload must not block priming the model the next Ask uses.
+    } finally {
+      if (this.releaseAborts.get(key) === controller) this.releaseAborts.delete(key);
     }
   }
 
-  private async primeAgentic(model: string, request: ChatWarmRequest): Promise<boolean> {
+  private async primeAgentic(
+    model: string,
+    request: ChatWarmRequest,
+    signal: AbortSignal,
+  ): Promise<boolean> {
     const tools = ollamaToolDefs(request.tools ?? []);
-    // Identical to the first agentic turn. Extra keep_alive / max_tokens become
-    // a different Ollama request (max_tokens → options.num_predict) and the
-    // follow-up Ask misses this prefill.
-    const openAiBody = openAiAskBody(model, request.messages, tools, false, true);
+    // Same JSON as the first agentic turn, plus the 1-token cap. keep_alive
+    // and num_ctx stay absent so the follow-up Ask hits this prefill.
+    const openAiBody = withPrimeOutputCap(
+      openAiAskBody(model, request.messages, tools, false, true),
+      "max_tokens",
+    );
     const openAi = await ollamaFetch(
       `${this.baseUrl}/v1/chat/completions`,
       {
@@ -783,6 +878,7 @@ export class OllamaClient implements ModelProvider {
       },
       OLLAMA_WARM_TIMEOUT_MS,
       "warm-chat",
+      signal,
     );
     if (openAi.ok) {
       await openAi.text().catch(() => "");
@@ -793,12 +889,16 @@ export class OllamaClient implements ModelProvider {
       return false;
     }
     await openAi.text().catch(() => "");
-    return this.postNativePrime(model, request.messages, tools, false);
+    return this.postNativePrime(model, request.messages, tools, false, signal);
   }
 
-  private async primeClassic(model: string, request: ChatWarmRequest): Promise<boolean> {
-    // Desktop classic Ask streams. Same fields: model, messages, stream, think.
-    return this.postNativePrime(model, request.messages, undefined, true);
+  private async primeClassic(
+    model: string,
+    request: ChatWarmRequest,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    // Desktop classic Ask streams. Same fields, plus the 1-token cap.
+    return this.postNativePrime(model, request.messages, undefined, true, signal);
   }
 
   private async postNativePrime(
@@ -806,8 +906,9 @@ export class OllamaClient implements ModelProvider {
     messages: ChatMessage[],
     tools: Record<string, unknown>[] | undefined,
     stream: boolean,
+    signal: AbortSignal,
   ): Promise<boolean> {
-    const body = nativeAskBody(model, messages, stream, tools);
+    const body = withPrimeOutputCap(nativeAskBody(model, messages, stream, tools), "num_predict");
     let r: Response;
     try {
       r = await ollamaFetch(
@@ -819,6 +920,7 @@ export class OllamaClient implements ModelProvider {
         },
         OLLAMA_WARM_TIMEOUT_MS,
         "warm-chat",
+        signal,
       );
     } catch {
       return false;
@@ -831,8 +933,8 @@ export class OllamaClient implements ModelProvider {
       await r.text().catch(() => "");
       return true;
     }
-    // Stop after the first generated token. The prompt is in the KV cache by
-    // then, and the body stayed identical to a real classic Ask (no num_predict).
+    // The cap stops a thinking model. Cancel still ends the stream once the
+    // first token shows the prompt is in the cache.
     return this.finishStreamingPrime(r);
   }
 
@@ -926,7 +1028,7 @@ export class OllamaClient implements ModelProvider {
     }
   }
 
-  async embed(model: string, input: string[]): Promise<number[][]> {
+  async embed(model: string, input: string[], signal?: AbortSignal): Promise<number[][]> {
     const r = await ollamaFetch(
       `${this.baseUrl}/api/embed`,
       {
@@ -936,6 +1038,7 @@ export class OllamaClient implements ModelProvider {
       },
       OLLAMA_EMBED_TIMEOUT_MS,
       "embed",
+      signal,
     );
     if (!r.ok) {
       const body = await r.text().catch(() => "");
