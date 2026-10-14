@@ -179,9 +179,10 @@ export interface ChatWithToolsOptions {
    */
   requireToolCall?: boolean;
   /**
-   * When set, this turn streams answer text from native `/api/chat`.
-   * Tool-call turns stay non-streaming unless this is set. Ollama's OpenAI
-   * stream+tools path is not used (#15497).
+   * When set, this turn streams from `/v1/chat/completions` using the same
+   * request shape as a non-streaming tool turn. A required tool call stays
+   * non-streaming. Malformed streamed tool-call JSON falls back to that
+   * non-streaming call (#15497).
    */
   onToken?: (token: string) => void;
   /** Cancels the HTTP call. A timeout abort is separate and still raises `OllamaTimeoutError`. */
@@ -259,9 +260,11 @@ export interface ModelProvider {
   ): Promise<string>;
   /**
    * Optional tool-calling turn for the agent write-loop (ADR-0008). A required
-   * tool call stays non-streaming: Ollama's OpenAI stream+tools path is buggy
-   * (#15497). When `onToken` is set and a tool call is not required, answer text
-   * streams from native `/api/chat`. Providers that cannot call tools omit this.
+   * tool call stays non-streaming. When `onToken` is set and a tool call is not
+   * required, answer text streams from the same `/v1/chat/completions` request
+   * the tool turns use, so the prompt cache stays warm. Malformed streamed
+   * tool-call JSON falls back to the non-streaming call (#15497). Providers
+   * that cannot call tools omit this.
    */
   chatWithTools?(
     model: string,
@@ -283,28 +286,37 @@ function parseToolCallArguments(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
 }
 
-type OllamaToolCallChunk = {
+type OpenAiToolDelta = {
+  index?: number;
   id?: string;
-  type?: string;
-  function?: { index?: number; name?: string; arguments?: unknown };
+  function?: { name?: string; arguments?: string };
 };
 
-/**
- * Native `/api/chat` streams each completed tool call in its own chunk.
- * A later chunk may repeat an earlier `function.index` with the finished
- * arguments, so that index is replaced. A new index is appended.
- */
-function mergeStreamToolCalls(acc: OllamaToolCallChunk[], next: OllamaToolCallChunk[]): void {
-  for (const call of next) {
-    const index = call.function?.index;
-    if (typeof index === "number") {
-      const at = acc.findIndex((existing) => existing.function?.index === index);
-      if (at >= 0) {
-        acc[at] = call;
-        continue;
-      }
-    }
-    acc.push(call);
+type OpenAiToolAcc = { id?: string; name: string; arguments: string };
+
+/** OpenAI streams one tool call as an id/name chunk plus later argument fragments. */
+function mergeOpenAiToolDelta(acc: Map<number, OpenAiToolAcc>, call: OpenAiToolDelta): void {
+  const index = typeof call.index === "number" ? call.index : acc.size;
+  const cur = acc.get(index) ?? { name: "", arguments: "" };
+  if (typeof call.id === "string" && call.id) cur.id = call.id;
+  const name = call.function?.name;
+  if (typeof name === "string" && name) {
+    if (!cur.name || name.startsWith(cur.name)) cur.name = name;
+    else if (!cur.name.endsWith(name)) cur.name += name;
+  }
+  if (typeof call.function?.arguments === "string") cur.arguments += call.function.arguments;
+  acc.set(index, cur);
+}
+
+/** #15497 can split tool-call JSON into something that is not an object. */
+function toolArgumentsMalformed(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return parsed === null || typeof parsed !== "object" || Array.isArray(parsed);
+  } catch {
+    return true;
   }
 }
 
@@ -536,8 +548,8 @@ export class OllamaClient implements ModelProvider {
     tools: ToolSchema[],
     options?: ChatWithToolsOptions,
   ): Promise<ToolTurn> {
-    // Answer turns stream on native `/api/chat`. Tool-required turns stay
-    // non-streaming: Ollama's OpenAI stream+tools path is buggy (#15497).
+    // Answer turns stream on the same `/v1/chat/completions` body as tool turns.
+    // A required tool call stays non-streaming.
     if (options?.onToken && !options.requireToolCall) {
       return this.chatWithToolsStream(model, messages, tools, options);
     }
@@ -633,9 +645,12 @@ export class OllamaClient implements ModelProvider {
   }
 
   /**
-   * Stream one tool-capable turn on native `/api/chat`. Content deltas are
-   * forwarded until a tool call appears. An empty stream (no text, no tool
-   * call) retries once on the non-streaming path.
+   * Stream one tool-capable turn on `/v1/chat/completions`. The body matches
+   * the non-streaming tool turn (`reasoning_effort: "none"`, `think: false`,
+   * `temperature: 0`, OpenAI messages) so Ollama can reuse that prompt cache.
+   * Content deltas are forwarded until a tool call appears. An empty stream,
+   * or tool-call JSON that does not parse (#15497), retries once on the
+   * non-streaming path.
    */
   private async chatWithToolsStream(
     model: string,
@@ -664,15 +679,14 @@ export class OllamaClient implements ModelProvider {
     const body: Record<string, unknown> = {
       model,
       stream: true,
-      think: false,
-      // The OpenAI-compat path these turns used forces temperature 0. Native
-      // `/api/chat` otherwise samples at the model's default (~0.8).
-      options: { temperature: 0 },
+      temperature: 0,
+      messages: agentMessagesToOpenAI(messages),
       tools: ollamaTools,
-      messages: nativeAgentMessages(messages),
+      reasoning_effort: "none",
+      think: false,
     };
     const r = await ollamaFetch(
-      `${this.baseUrl}/api/chat`,
+      `${this.baseUrl}/v1/chat/completions`,
       {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -688,31 +702,36 @@ export class OllamaClient implements ModelProvider {
     }
 
     let content = "";
-    const rawToolCalls: OllamaToolCallChunk[] = [];
+    const toolAcc = new Map<number, OpenAiToolAcc>();
     let sawTool = false;
     const take = (raw: string): void => {
       const trimmed = raw.trim();
-      if (!trimmed) return;
+      if (!trimmed.startsWith("data:")) return;
+      const data = trimmed.slice(5).trim();
+      if (!data || data === "[DONE]") return;
       let obj: {
-        message?: {
-          content?: string;
-          tool_calls?: OllamaToolCallChunk[];
-        };
+        choices?: {
+          delta?: { content?: string | null; tool_calls?: OpenAiToolDelta[] };
+          message?: { content?: string | null; tool_calls?: OpenAiToolDelta[] };
+        }[];
       };
       try {
-        obj = JSON.parse(trimmed);
+        obj = JSON.parse(data);
       } catch {
         return;
       }
-      const calls = obj.message?.tool_calls;
+      const choice = obj.choices?.[0];
+      const delta = choice?.delta ?? choice?.message;
+      if (!delta) return;
+      const calls = delta.tool_calls;
       if (calls && calls.length > 0) {
         sawTool = true;
-        mergeStreamToolCalls(rawToolCalls, calls);
+        for (const call of calls) mergeOpenAiToolDelta(toolAcc, call);
       }
-      const delta = obj.message?.content ?? "";
-      if (!delta) return;
-      content += delta;
-      if (!sawTool) options.onToken?.(delta);
+      const text = typeof delta.content === "string" ? delta.content : "";
+      if (!text) return;
+      content += text;
+      if (!sawTool) options.onToken?.(text);
     };
 
     try {
@@ -738,6 +757,15 @@ export class OllamaClient implements ModelProvider {
       throw err;
     }
     if (options.signal?.aborted) throw abortError();
+    const rawToolCalls = [...toolAcc.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, call]) => ({
+        id: call.id,
+        function: { name: call.name, arguments: call.arguments },
+      }));
+    if (rawToolCalls.some((call) => toolArgumentsMalformed(String(call.function.arguments ?? "")))) {
+      return retryNonStreaming();
+    }
     const toolCalls = normalizeOllamaToolCalls(rawToolCalls);
     if (content.length === 0 && toolCalls.length === 0) {
       return retryNonStreaming();
