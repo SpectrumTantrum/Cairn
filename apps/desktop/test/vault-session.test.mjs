@@ -798,6 +798,105 @@ test("chatSend threads the source scope into retrieval", async () => {
   }
 });
 
+test("reindex does not cancel an in-flight agentic ask", async () => {
+  const vault = makeIndexedVaultDir();
+  writeFileSync(join(vault, "notes.md"), "Spaced repetition schedules reviews.\n");
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_model, _messages, _tools, turn, options) => {
+        if (turn === 1) {
+          entered();
+          await gate;
+          if (options?.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "reviews" } }] };
+        }
+        return { content: "Reviews happen at intervals.", toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (v) =>
+        buildLexicalIndex(v, [{ file: "notes.md", text: "Spaced repetition schedules reviews." }]),
+    });
+    session.setVault(vault);
+    const pending = session.askAgent("When are reviews scheduled?");
+    await enteredGate;
+    const stats = await session.index({ lexical: true });
+    assert.equal(stats.mode, "lexical");
+    assert.ok(stats.files >= 1);
+    release();
+    const result = await pending;
+    assert.equal(result.stopReason, "done");
+    assert.equal(result.answer, "Reviews happen at intervals.");
+    assert.ok(result.sources.length > 0);
+  } finally {
+    release();
+    resetModelProvider();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("resetChat cancels an in-flight agentic ask", async () => {
+  const vault = makeIndexedVaultDir();
+  writeFileSync(join(vault, "notes.md"), "Spaced repetition schedules reviews.\n");
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_model, _messages, _tools, turn, options) => {
+        if (turn === 1) {
+          entered();
+          await gate;
+          if (options?.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "reviews" } }] };
+        }
+        return { content: "Reviews happen at intervals.", toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (v) =>
+        buildLexicalIndex(v, [{ file: "notes.md", text: "Spaced repetition schedules reviews." }]),
+    });
+    session.setVault(vault);
+    const pending = session.askAgent("When are reviews scheduled?");
+    await enteredGate;
+    session.resetChat();
+    release();
+    const result = await pending;
+    assert.equal(result.stopReason, "cancelled");
+    assert.equal(result.answer, "");
+    assert.equal(result.sources.length, 0);
+    assert.deepEqual(result.opened, []);
+  } finally {
+    release();
+    resetModelProvider();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("chat history grows across turns and resets after resetChat", async () => {
   const vault = makeIndexedVaultDir();
   const calls = [];
