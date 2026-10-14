@@ -635,3 +635,162 @@ test("runAskAgent stops with timeout when wallMs elapses before the model answer
     index.close();
   }
 });
+
+test("answer tokens are delivered before the turn resolves", async () => {
+  const events = [];
+  let settled = false;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_m, _msg, _t, turn, options) => {
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "cooking" } }] };
+        }
+        assert.equal(settled, false);
+        options?.onToken?.("The ");
+        assert.equal(settled, false);
+        options?.onToken?.("note says intervals.");
+        return { content: "The note says intervals.", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "food?",
+      mode: "lexical",
+      readNote: makeReader({}),
+      onProgress: (event) => events.push(event),
+    });
+    settled = true;
+    assert.equal(result.answer, "The note says intervals.");
+    assert.equal(result.stopReason, "done");
+    assert.deepEqual(
+      events.filter((event) => event.kind === "token").map((event) => event.token),
+      ["The ", "note says intervals."],
+    );
+  } finally {
+    index.close();
+  }
+});
+
+test("a tool turn clears streamed preamble and the answer is the later text", async () => {
+  const events = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_m, _msg, _t, turn, options) => {
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "cooking" } }] };
+        }
+        if (turn === 2) {
+          options?.onToken?.("Looking. ");
+          return {
+            content: "Looking. ",
+            toolCalls: [{ name: "read", arguments: { path: "notes/topic.md" } }],
+          };
+        }
+        options?.onToken?.("Intervals.");
+        return { content: "Intervals.", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "food?",
+      mode: "lexical",
+      readNote: makeReader({
+        "notes/topic.md": "Spaced repetition schedules reviews at increasing intervals.",
+      }),
+      onProgress: (event) => events.push(event.kind === "token" ? `token:${event.token}` : event.kind),
+    });
+    assert.equal(result.answer, "Intervals.");
+    assert.equal(events.includes("token:Looking. "), true);
+    assert.equal(events.includes("clear-answer"), true);
+    assert.equal(events.indexOf("token:Looking. ") < events.indexOf("clear-answer"), true);
+    assert.equal(events.indexOf("clear-answer") < events.indexOf("token:Intervals."), true);
+  } finally {
+    index.close();
+  }
+});
+
+test("a streamed answer that ends as a miss leaves only the miss text and 0 chips", async () => {
+  const { VIDEO_NO_TEXT } = await import("../dist/index.js");
+  const streamed = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_m, _msg, _t, turn, options) => {
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "read", arguments: { path: "clip.mp4" } }] };
+        }
+        options?.onToken?.("The clip says hello.");
+        return { content: "The clip says hello.", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "Summarize the vault",
+      mode: "lexical",
+      readNote: async (path) => {
+        if (path === "clip.mp4") throw new Error(VIDEO_NO_TEXT);
+        throw new Error(`missing ${path}`);
+      },
+      onProgress: (event) => {
+        if (event.kind === "token") streamed.push(event.token);
+      },
+    });
+    assert.deepEqual(streamed, ["The clip says hello."]);
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.equal(result.answer.includes("hello"), false);
+    assert.equal(result.sources.length, 0);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
+    assert.equal(result.stopReason, "done");
+  } finally {
+    index.close();
+  }
+});
+
+test("cancelling mid-stream stops the loop with no answer and no chips", async () => {
+  const ac = new AbortController();
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_m, _msg, _t, turn, options) => {
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "cooking" } }] };
+        }
+        options?.onToken?.("Partial ");
+        ac.abort();
+        throw new DOMException("The operation was aborted.", "AbortError");
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "food?",
+      mode: "lexical",
+      readNote: makeReader({}),
+      signal: ac.signal,
+    });
+    assert.equal(result.stopReason, "cancelled");
+    assert.equal(result.answer, "");
+    assert.equal(result.sources.length, 0);
+    assert.deepEqual(result.opened, []);
+  } finally {
+    index.close();
+  }
+});

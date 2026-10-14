@@ -166,7 +166,14 @@ function StreamingTurn({
       </span>
       <div className="chat-assistant-body">
         {showAgentic ? (
-          <AgenticProgressPanel state={agentic} now={now} />
+          <>
+            <AgenticProgressPanel state={agentic} now={now} />
+            {text.length > 0 ? (
+              <div className="assistant-text drafting">
+                <AnswerMarkdown text={text} />
+              </div>
+            ) : null}
+          </>
         ) : text.length === 0 ? (
           <span className="chat-thinking">
             <span className="dot-pulse" /> {status}

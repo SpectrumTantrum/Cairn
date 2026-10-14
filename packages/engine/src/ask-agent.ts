@@ -26,10 +26,12 @@ import { IMAGE_NO_TEXT, isImagePath } from "./image-files.js";
 import { VIDEO_NO_TEXT, isVideoPath } from "./video-files.js";
 import { EMPTY_TABLE_MESSAGE, INVALID_UTF8_MESSAGE } from "./utf8-text.js";
 
-/** Incremental progress for long agentic Ask runs (tool steps / status). */
+/** Incremental progress for long agentic Ask runs (tool steps / status / answer draft). */
 export type AskAgentProgress =
   | { kind: "status"; message: string }
-  | { kind: "tool"; step: number; name: string; label: string };
+  | { kind: "tool"; step: number; name: string; label: string }
+  | { kind: "token"; token: string }
+  | { kind: "clear-answer" };
 
 /** Default hard step cap for read-only Ask agent loops (lower than write Agent ADR-0008). */
 export const DEFAULT_ASK_AGENT_STEP_CAP = 16;
@@ -79,6 +81,8 @@ export interface AskAgentOptions {
   retrievalSeed?: RetrievalSeedOption;
   /** Fired during the loop so UIs can show tool-step progress instead of a silent spinner. */
   onProgress?: (event: AskAgentProgress) => void;
+  /** Aborts the in-flight model call and ends the loop. The result is not an answer. */
+  signal?: AbortSignal;
 }
 
 export interface AskAgentResult {
@@ -90,7 +94,7 @@ export interface AskAgentResult {
   /** Seed hits when retrievalSeed was enabled (not counted as "opened" by default). */
   seedHits: SearchHit[];
   steps: number;
-  stopReason: "done" | "step-cap" | "timeout" | "no-tool-support" | "no-tool-use";
+  stopReason: "done" | "step-cap" | "timeout" | "no-tool-support" | "no-tool-use" | "cancelled";
   grounded: boolean;
   model?: string;
 }
@@ -259,6 +263,19 @@ async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boole
   return false;
 }
 
+function cancelledAsk(seedHits: SearchHit[], steps: number, model?: string): AskAgentResult {
+  return {
+    answer: "",
+    sources: [],
+    opened: [],
+    seedHits,
+    steps,
+    stopReason: "cancelled",
+    grounded: false,
+    model,
+  };
+}
+
 function honestMiss(): AskAgentResult {
   return {
     answer: UNCOVERED,
@@ -402,6 +419,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   progress({ kind: "status", message: "Starting agentic search…" });
 
   for (;;) {
+    if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
     if (steps >= stepCap) {
       stopReason = "step-cap";
       break;
@@ -428,12 +446,24 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       Math.max(1, remainingWallMs),
     );
     let turn;
+    let streamed = false;
     try {
       turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS, {
         timeoutMs: turnBudget,
         requireToolCall: firstTurn,
+        signal: opts.signal,
+        onToken: firstTurn
+          ? undefined
+          : (token) => {
+              if (!streamed) {
+                streamed = true;
+                progress({ kind: "status", message: "Composing answer…" });
+              }
+              progress({ kind: "token", token });
+            },
       });
     } catch (err) {
+      if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
       const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
       if (firstTurn && noGroundingYet && err instanceof OllamaTimeoutError) {
         steps++;
@@ -443,7 +473,10 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       }
       throw err;
     }
+    if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
     steps++;
+
+    if (turn.toolCalls.length > 0 && streamed) progress({ kind: "clear-answer" });
 
     if (turn.toolCalls.length === 0) {
       progress({ kind: "status", message: "Composing answer…" });

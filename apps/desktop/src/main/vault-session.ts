@@ -199,13 +199,18 @@ export class VaultSession {
 
   // The active multi-turn chat. The thread holds conversation history, so its
   // backing Index stays open for the thread's lifetime (retrieval runs per turn).
-  // Reset on new-thread, vault switch, or reindex; the token stream flows out via
+  // Dropped on new-thread, vault switch, or reindex; the token stream flows out via
   // the per-send `onToken` callback the IPC bridge forwards to the renderer.
+  // Reindex drops this thread only. It does not abort an in-flight agentic Ask,
+  // which holds its own Index and whose renderer still expects the answer.
   private chatThread: ChatThread | null = null;
   private chatIndex: Index | null = null;
 
   // The single in-flight Agent run (ADR-0008). Reset on vault switch / reindex.
   private activeRun: ActiveRun | null = null;
+
+  /** Aborts the in-flight agentic Ask HTTP call. Cleared when that call finishes. */
+  private askAbort: AbortController | null = null;
 
   constructor(deps: VaultSessionDeps) {
     this.openIndexFn = deps.openIndex;
@@ -231,8 +236,19 @@ export class VaultSession {
     this.selectedVaultPath = null;
   }
 
-  /** Drop the active thread and close its Index. Called on new-thread / vault switch / reindex. */
+  /** Cancel the in-flight agentic Ask and drop the classic thread. New thread, vault switch, load, delete. */
   resetChat(): void {
+    this.cancelInFlightAsk();
+    this.dropChatThread();
+  }
+
+  private cancelInFlightAsk(): void {
+    this.askAbort?.abort();
+    this.askAbort = null;
+  }
+
+  /** Close the classic chat Index so the next turn rebinds. Does not touch an in-flight Ask. */
+  private dropChatThread(): void {
     if (this.chatIndex) {
       try {
         this.chatIndex.close();
@@ -296,10 +312,11 @@ export class VaultSession {
   async index(opts: { lexical?: boolean } = {}): Promise<IndexStats> {
     const vaultPath = this.requireVault();
     const stats = await indexVault(vaultPath, { lexical: !!opts.lexical });
-    // The index changed on disk; drop any live thread so the next turn rebinds
-    // to the freshly-built index rather than a stale open connection. A live Agent
-    // run's proposals were derived from the pre-reindex vault, so drop it too.
-    this.resetChat();
+    // The index changed on disk; drop the classic chat Index so the next turn
+    // rebinds. Leave an in-flight agentic Ask running: it holds its own Index,
+    // and the renderer still expects that answer. A live Agent run's proposals
+    // were derived from the pre-reindex vault, so drop that run.
+    this.dropChatThread();
     this.activeRun = null;
     return stats;
   }
@@ -362,6 +379,9 @@ export class VaultSession {
       return rel.filter((p) => p === norm || p.startsWith(`${norm}/`));
     };
 
+    this.askAbort?.abort();
+    const abort = new AbortController();
+    this.askAbort = abort;
     return this.withIndex(vaultPath, (index) =>
       runAskAgent({
         index,
@@ -373,8 +393,11 @@ export class VaultSession {
         readPdf: async (rel) => extractPdfPages(this.resolveSourcePath(rel)),
         listNotes,
         onProgress: opts.onProgress,
+        signal: abort.signal,
       }),
-    );
+    ).finally(() => {
+      if (this.askAbort === abort) this.askAbort = null;
+    });
   }
 
   resolveSourcePath(file: string): string {

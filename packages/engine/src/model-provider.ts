@@ -4,8 +4,9 @@
 
 // ---- Ollama HTTP budgets ----------------------------------------------------
 // Node/Electron `fetch` is undici. Undici defaults `headersTimeout`/`bodyTimeout` to
-// 300_000 ms (5 min). Non-streaming `/api/chat` (used by `chatWithTools`) does not
-// send response headers until generation finishes, so a slow local model under load
+// 300_000 ms (5 min). Non-streaming `/api/chat` (tool-required `chatWithTools`,
+// and one-shot `chat`) does not send response headers until generation finishes,
+// so a slow local model under load
 // hits HeadersTimeoutError and surfaces as opaque "fetch failed" → "Local Ollama
 // request failed". Streaming classic Ask resets body timeouts on each token, so it
 // survives the same load. Raise the undici ceilings and pair them with AbortSignal
@@ -114,15 +115,28 @@ export class OllamaTimeoutError extends Error {
   }
 }
 
-async function ollamaFetch(url: string, init: RequestInit | undefined, timeoutMs: number, label: string): Promise<Response> {
+function abortError(): Error {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
+async function ollamaFetch(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number,
+  label: string,
+  userSignal?: AbortSignal,
+): Promise<Response> {
+  if (userSignal?.aborted) throw abortError();
   const dispatcher = await ollamaDispatcher(timeoutMs);
-  const signal = AbortSignal.timeout(timeoutMs);
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = userSignal ? AbortSignal.any([timeout, userSignal]) : timeout;
   const opts: Record<string, unknown> = { ...(init ?? {}), signal };
   if (dispatcher !== undefined) opts.dispatcher = dispatcher;
   const fetchFn = await ollamaFetchImpl();
   try {
     return await fetchFn(url, opts as RequestInit);
   } catch (err) {
+    if (userSignal?.aborted) throw err;
     if (isTimeoutError(err)) throw new OllamaTimeoutError(label, timeoutMs, err);
     throw err;
   }
@@ -161,8 +175,17 @@ export interface ChatWithToolsOptions {
   /**
    * When true, ask Ollama OpenAI-compat to require a tool call this turn (`tool_choice: "required"`).
    * Use on the first agentic Ask turn so Qwen3 cannot emit a long thinking-only reply with no tools.
+   * A required tool call stays non-streaming.
    */
   requireToolCall?: boolean;
+  /**
+   * When set, this turn streams answer text from native `/api/chat`.
+   * Tool-call turns stay non-streaming unless this is set. Ollama's OpenAI
+   * stream+tools path is not used (#15497).
+   */
+  onToken?: (token: string) => void;
+  /** Cancels the HTTP call. A timeout abort is separate and still raises `OllamaTimeoutError`. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -233,10 +256,10 @@ export interface ModelProvider {
     think?: boolean,
   ): Promise<string>;
   /**
-   * Optional tool-calling turn for the agent write-loop (ADR-0008). Runs
-   * NON-STREAMING deliberately: Ollama's stream+tools path is buggy (#15497), and
-   * the loop only needs the final tool-call batch, not token deltas. Providers that
-   * cannot call tools omit this; the agent loop feature-detects and refuses cleanly.
+   * Optional tool-calling turn for the agent write-loop (ADR-0008). A required
+   * tool call stays non-streaming: Ollama's OpenAI stream+tools path is buggy
+   * (#15497). When `onToken` is set and a tool call is not required, answer text
+   * streams from native `/api/chat`. Providers that cannot call tools omit this.
    */
   chatWithTools?(
     model: string,
@@ -258,6 +281,31 @@ function parseToolCallArguments(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
 }
 
+type OllamaToolCallChunk = {
+  id?: string;
+  type?: string;
+  function?: { index?: number; name?: string; arguments?: unknown };
+};
+
+/**
+ * Native `/api/chat` streams each completed tool call in its own chunk.
+ * A later chunk may repeat an earlier `function.index` with the finished
+ * arguments, so that index is replaced. A new index is appended.
+ */
+function mergeStreamToolCalls(acc: OllamaToolCallChunk[], next: OllamaToolCallChunk[]): void {
+  for (const call of next) {
+    const index = call.function?.index;
+    if (typeof index === "number") {
+      const at = acc.findIndex((existing) => existing.function?.index === index);
+      if (at >= 0) {
+        acc[at] = call;
+        continue;
+      }
+    }
+    acc.push(call);
+  }
+}
+
 function normalizeOllamaToolCalls(
   rawCalls: { id?: string; type?: string; function?: { name?: string; arguments?: unknown } }[],
 ): ToolCall[] {
@@ -273,6 +321,30 @@ function normalizeOllamaToolCalls(
     });
   }
   return toolCalls;
+}
+
+/** Native `/api/chat` history, including tool calls and tool results. */
+function nativeAgentMessages(messages: AgentMessage[]): Record<string, unknown>[] {
+  return messages.map((m) => {
+    if (m.role === "assistant" && m.toolCalls?.length) {
+      return {
+        role: "assistant",
+        content: m.content,
+        tool_calls: m.toolCalls.map((c, i) => ({
+          type: "function",
+          function: {
+            index: i,
+            name: c.name,
+            arguments: c.arguments,
+          },
+        })),
+      };
+    }
+    if (m.role === "tool") {
+      return { role: "tool", content: m.content, tool_name: m.toolName };
+    }
+    return { role: m.role, content: m.content };
+  });
 }
 
 /** Map Cairn agent history to OpenAI-compat messages (Ollama `/v1/chat/completions`). */
@@ -452,7 +524,11 @@ export class OllamaClient implements ModelProvider {
     tools: ToolSchema[],
     options?: ChatWithToolsOptions,
   ): Promise<ToolTurn> {
-    // Non-streaming on purpose (ADR-0008 §5: Ollama #15497 stream+tools bug).
+    // Answer turns stream on native `/api/chat`. Tool-required turns stay
+    // non-streaming: Ollama's OpenAI stream+tools path is buggy (#15497).
+    if (options?.onToken && !options.requireToolCall) {
+      return this.chatWithToolsStream(model, messages, tools, options);
+    }
     const timeoutMs = options?.timeoutMs ?? OLLAMA_CHAT_TOOLS_TIMEOUT_MS;
     const ollamaTools = tools.map((t) => ({
       type: "function",
@@ -482,6 +558,7 @@ export class OllamaClient implements ModelProvider {
       },
       timeoutMs,
       "chat-with-tools",
+      options?.signal,
     );
     if (openAi.ok) {
       const j = (await openAi.json()) as {
@@ -508,26 +585,7 @@ export class OllamaClient implements ModelProvider {
       stream: false,
       think: false,
       tools: ollamaTools,
-      messages: messages.map((m) => {
-        if (m.role === "assistant" && m.toolCalls?.length) {
-          return {
-            role: "assistant",
-            content: m.content,
-            tool_calls: m.toolCalls.map((c, i) => ({
-              type: "function",
-              function: {
-                index: i,
-                name: c.name,
-                arguments: c.arguments,
-              },
-            })),
-          };
-        }
-        if (m.role === "tool") {
-          return { role: "tool", content: m.content, tool_name: m.toolName };
-        }
-        return { role: m.role, content: m.content };
-      }),
+      messages: nativeAgentMessages(messages),
     };
 
     const postNative = async (body: Record<string, unknown>) =>
@@ -540,6 +598,7 @@ export class OllamaClient implements ModelProvider {
         },
         timeoutMs,
         "chat-with-tools",
+        options?.signal,
       );
 
     let r = await postNative(nativeBody);
@@ -559,6 +618,119 @@ export class OllamaClient implements ModelProvider {
     };
     const toolCalls = normalizeOllamaToolCalls(j.message?.tool_calls ?? []);
     return { content: j.message?.content ?? "", toolCalls };
+  }
+
+  /**
+   * Stream one tool-capable turn on native `/api/chat`. Content deltas are
+   * forwarded until a tool call appears. An empty stream (no text, no tool
+   * call) retries once on the non-streaming path.
+   */
+  private async chatWithToolsStream(
+    model: string,
+    messages: AgentMessage[],
+    tools: ToolSchema[],
+    options: ChatWithToolsOptions,
+  ): Promise<ToolTurn> {
+    const timeoutMs = options.timeoutMs ?? OLLAMA_CHAT_TOOLS_TIMEOUT_MS;
+    const startedAt = Date.now();
+    // The empty-stream retry shares this turn's deadline. `runAskAgent` passes
+    // the remaining wall budget as `timeoutMs`, so a fresh full budget would
+    // let one turn run past the 480s wall.
+    const retryNonStreaming = (): Promise<ToolTurn> => {
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      if (remaining <= 0) throw new OllamaTimeoutError("chat-with-tools-stream", timeoutMs);
+      return this.chatWithTools(model, messages, tools, {
+        ...options,
+        onToken: undefined,
+        timeoutMs: remaining,
+      });
+    };
+    const ollamaTools = tools.map((t) => ({
+      type: "function",
+      function: { name: t.name, description: t.description, parameters: t.parameters },
+    }));
+    const body: Record<string, unknown> = {
+      model,
+      stream: true,
+      think: false,
+      // The OpenAI-compat path these turns used forces temperature 0. Native
+      // `/api/chat` otherwise samples at the model's default (~0.8).
+      options: { temperature: 0 },
+      tools: ollamaTools,
+      messages: nativeAgentMessages(messages),
+    };
+    const r = await ollamaFetch(
+      `${this.baseUrl}/api/chat`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      timeoutMs,
+      "chat-with-tools-stream",
+      options.signal,
+    );
+    if (!r.ok) {
+      if (options.signal?.aborted) throw abortError();
+      return retryNonStreaming();
+    }
+
+    let content = "";
+    const rawToolCalls: OllamaToolCallChunk[] = [];
+    let sawTool = false;
+    const take = (raw: string): void => {
+      const trimmed = raw.trim();
+      if (!trimmed) return;
+      let obj: {
+        message?: {
+          content?: string;
+          tool_calls?: OllamaToolCallChunk[];
+        };
+      };
+      try {
+        obj = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+      const calls = obj.message?.tool_calls;
+      if (calls && calls.length > 0) {
+        sawTool = true;
+        mergeStreamToolCalls(rawToolCalls, calls);
+      }
+      const delta = obj.message?.content ?? "";
+      if (!delta) return;
+      content += delta;
+      if (!sawTool) options.onToken?.(delta);
+    };
+
+    try {
+      if (r.body) {
+        const decoder = new TextDecoder();
+        let buf = "";
+        for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
+          if (options.signal?.aborted) throw abortError();
+          buf += decoder.decode(chunk, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) !== -1) {
+            take(buf.slice(0, nl));
+            buf = buf.slice(nl + 1);
+          }
+        }
+        take(buf);
+      }
+    } catch (err) {
+      // A user cancel must stay an abort. A budget abort during the body is the
+      // same timeout the non-streaming path reports from `ollamaFetch`.
+      if (options.signal?.aborted) throw err;
+      if (isTimeoutError(err)) throw new OllamaTimeoutError("chat-with-tools-stream", timeoutMs, err);
+      throw err;
+    }
+    if (options.signal?.aborted) throw abortError();
+    const toolCalls = normalizeOllamaToolCalls(rawToolCalls);
+    if (content.length === 0 && toolCalls.length === 0) {
+      return retryNonStreaming();
+    }
+    return { content, toolCalls };
   }
 }
 
