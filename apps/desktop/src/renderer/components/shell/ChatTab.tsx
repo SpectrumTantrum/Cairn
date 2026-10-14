@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, Cloud, HardDrive, Sparkles } from "lucide-react";
 import type {
   DesktopChatSendResult,
@@ -8,7 +8,7 @@ import type {
 } from "../../../shared/types.js";
 import { classicChipBadge } from "../../agent-citations";
 import { buildProgressView, type AgenticProgressState } from "../../agentic-progress";
-import { chatFollowScrollTop } from "../../chat-scroll";
+import { chatDistanceFromBottom, chatFollowScrollTop } from "../../chat-scroll";
 import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
@@ -64,31 +64,37 @@ export function ChatTab(props: ChatTabProps) {
   const showWorking = busy && lastRole === "user";
   const scrollerRef = useRef<HTMLDivElement>(null);
   const turnCountRef = useRef(thread.length);
-  // Follow a newly appended turn. Stop drops the streaming draft and leaves the
-  // view on the previous question, so the next Ask would otherwise sit below the fold.
-  useEffect(() => {
+  // Gap above the bottom before the next update. onScroll records a scroll-up
+  // before tokens or chips grow scrollHeight and make the reader look far away.
+  const distanceRef = useRef(0);
+  useLayoutEffect(() => {
     const scroller = scrollerRef.current;
     const previousCount = turnCountRef.current;
+    const distanceFromBottom = distanceRef.current;
     if (!scroller) {
       turnCountRef.current = thread.length;
       return;
     }
-    const turns = scroller.querySelectorAll<HTMLElement>("[data-chat-turn='user']");
-    const turn = turns[turns.length - 1];
-    const turnTop = turn
-      ? turn.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
-      : scroller.scrollHeight - scroller.clientHeight;
     scroller.scrollTop = chatFollowScrollTop({
       previousCount,
       nextCount: thread.length,
       scrollTop: scroller.scrollTop,
-      turnTop,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
+      distanceFromBottom,
     });
     turnCountRef.current = thread.length;
-  }, [thread.length]);
+    distanceRef.current = chatDistanceFromBottom(scroller);
+  }, [thread]);
+
+  function rememberChatFollow(): void {
+    const scroller = scrollerRef.current;
+    if (!scroller) return;
+    distanceRef.current = chatDistanceFromBottom(scroller);
+  }
   return (
     <>
-      <div className="chat-thread" ref={scrollerRef}>
+      <div className="chat-thread" ref={scrollerRef} onScroll={rememberChatFollow}>
         {thread.length === 0 && !busy ? (
           <p className="chat-empty">
             {mode === "agent"
@@ -99,7 +105,7 @@ export function ChatTab(props: ChatTabProps) {
         {thread.map((turn, i) => {
           if (turn.role === "user") {
             return (
-              <div className="chat-user" data-chat-turn="user" key={i}>
+              <div className="chat-user" key={i}>
                 {turn.text}
               </div>
             );
@@ -223,13 +229,8 @@ function StreamingTurn({
  */
 function AgenticProgressPanel({ state, now }: { state: AgenticAskStreamState; now: number }) {
   const view = buildProgressView(state, now);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const activity = `${state.status}|${state.steps.length}`;
-  useEffect(() => {
-    panelRef.current?.scrollIntoView({ block: "nearest" });
-  }, [activity]);
   return (
-    <div className="agentic-progress" ref={panelRef}>
+    <div className="agentic-progress">
       <div className="agentic-progress-head">
         <span className="dot-pulse" aria-hidden="true" />
         <span className="agentic-progress-working">{view.workingLabel}</span>
