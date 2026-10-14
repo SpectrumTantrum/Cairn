@@ -149,7 +149,7 @@ test("OllamaClient.chatWithTools streams answer tokens and retries an empty stre
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
-    calls.push({ url: String(url), stream: body.stream });
+    calls.push({ url: String(url), stream: body.stream, temperature: body.options?.temperature });
     if (String(url).endsWith("/api/chat") && calls.length === 1) {
       const ndjson = [
         JSON.stringify({ message: { role: "assistant", content: "Hel" }, done: false }),
@@ -179,6 +179,7 @@ test("OllamaClient.chatWithTools streams answer tokens and retries an empty stre
     assert.equal(streamed.toolCalls.length, 0);
     assert.equal(calls[0].url, "http://ollama.test/api/chat");
     assert.equal(calls[0].stream, true);
+    assert.equal(calls[0].temperature, 0);
 
     tokens.length = 0;
     const retried = await client.chatWithTools("qwen3:8b", [{ role: "user", content: "q" }], tools, {
@@ -236,6 +237,99 @@ test("a streamed tool turn maps a body timeout to OllamaTimeoutError and a user 
     );
   } finally {
     clearInterval(keepAlive);
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("streamed tool calls from separate chunks are all kept", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const ndjson = [
+      JSON.stringify({ message: { role: "assistant", content: "Looking. " }, done: false }),
+      JSON.stringify({
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [{ function: { index: 0, name: "grep", arguments: { pattern: "old" } } }],
+        },
+        done: false,
+      }),
+      JSON.stringify({
+        message: {
+          role: "assistant",
+          content: "",
+          tool_calls: [
+            { function: { index: 0, name: "grep", arguments: { pattern: "finch" } } },
+            { function: { index: 1, name: "read", arguments: { path: "notes/a.md" } } },
+          ],
+        },
+        done: true,
+      }),
+    ].join("\n");
+    return new Response(ndjson, { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const tokens = [];
+    const tools = [{ name: "find", description: "search", parameters: { type: "object", properties: {} } }];
+    const turn = await client.chatWithTools("qwen3:8b", [{ role: "user", content: "q" }], tools, {
+      onToken: (token) => tokens.push(token),
+    });
+    assert.deepEqual(tokens, ["Looking. "]);
+    assert.deepEqual(
+      turn.toolCalls.map((call) => ({ name: call.name, arguments: call.arguments })),
+      [
+        { name: "grep", arguments: { pattern: "finch" } },
+        { name: "read", arguments: { path: "notes/a.md" } },
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("an empty tool stream retries with the time left on the turn deadline", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalTimeout = AbortSignal.timeout;
+  const budgets = [];
+  AbortSignal.timeout = (ms) => {
+    budgets.push(ms);
+    return originalTimeout.call(AbortSignal, ms);
+  };
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/api/chat") && body.stream === true) {
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      return new Response("", { status: 200 });
+    }
+    return new Response(
+      JSON.stringify({ choices: [{ message: { role: "assistant", content: "retried", tool_calls: [] } }] }),
+      { status: 200 },
+    );
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const tools = [{ name: "find", description: "search", parameters: { type: "object", properties: {} } }];
+    const turn = await client.chatWithTools("qwen3:8b", [{ role: "user", content: "q" }], tools, {
+      onToken() {},
+      timeoutMs: 500,
+    });
+    assert.equal(turn.content, "retried");
+    assert.equal(budgets[0], 500);
+    assert.ok(budgets[1] < 500);
+    assert.ok(budgets[1] <= 470);
+  } finally {
+    AbortSignal.timeout = originalTimeout;
     globalThis.fetch = originalFetch;
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();

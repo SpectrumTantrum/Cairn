@@ -281,6 +281,31 @@ function parseToolCallArguments(raw: unknown): Record<string, unknown> {
   return raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
 }
 
+type OllamaToolCallChunk = {
+  id?: string;
+  type?: string;
+  function?: { index?: number; name?: string; arguments?: unknown };
+};
+
+/**
+ * Native `/api/chat` streams each completed tool call in its own chunk.
+ * A later chunk may repeat an earlier `function.index` with the finished
+ * arguments, so that index is replaced. A new index is appended.
+ */
+function mergeStreamToolCalls(acc: OllamaToolCallChunk[], next: OllamaToolCallChunk[]): void {
+  for (const call of next) {
+    const index = call.function?.index;
+    if (typeof index === "number") {
+      const at = acc.findIndex((existing) => existing.function?.index === index);
+      if (at >= 0) {
+        acc[at] = call;
+        continue;
+      }
+    }
+    acc.push(call);
+  }
+}
+
 function normalizeOllamaToolCalls(
   rawCalls: { id?: string; type?: string; function?: { name?: string; arguments?: unknown } }[],
 ): ToolCall[] {
@@ -607,6 +632,19 @@ export class OllamaClient implements ModelProvider {
     options: ChatWithToolsOptions,
   ): Promise<ToolTurn> {
     const timeoutMs = options.timeoutMs ?? OLLAMA_CHAT_TOOLS_TIMEOUT_MS;
+    const startedAt = Date.now();
+    // The empty-stream retry shares this turn's deadline. `runAskAgent` passes
+    // the remaining wall budget as `timeoutMs`, so a fresh full budget would
+    // let one turn run past the 480s wall.
+    const retryNonStreaming = (): Promise<ToolTurn> => {
+      const remaining = timeoutMs - (Date.now() - startedAt);
+      if (remaining <= 0) throw new OllamaTimeoutError("chat-with-tools-stream", timeoutMs);
+      return this.chatWithTools(model, messages, tools, {
+        ...options,
+        onToken: undefined,
+        timeoutMs: remaining,
+      });
+    };
     const ollamaTools = tools.map((t) => ({
       type: "function",
       function: { name: t.name, description: t.description, parameters: t.parameters },
@@ -615,6 +653,9 @@ export class OllamaClient implements ModelProvider {
       model,
       stream: true,
       think: false,
+      // The OpenAI-compat path these turns used forces temperature 0. Native
+      // `/api/chat` otherwise samples at the model's default (~0.8).
+      options: { temperature: 0 },
       tools: ollamaTools,
       messages: nativeAgentMessages(messages),
     };
@@ -631,11 +672,11 @@ export class OllamaClient implements ModelProvider {
     );
     if (!r.ok) {
       if (options.signal?.aborted) throw abortError();
-      return this.chatWithTools(model, messages, tools, { ...options, onToken: undefined });
+      return retryNonStreaming();
     }
 
     let content = "";
-    let toolCalls: ToolCall[] = [];
+    const rawToolCalls: OllamaToolCallChunk[] = [];
     let sawTool = false;
     const take = (raw: string): void => {
       const trimmed = raw.trim();
@@ -643,7 +684,7 @@ export class OllamaClient implements ModelProvider {
       let obj: {
         message?: {
           content?: string;
-          tool_calls?: { id?: string; function?: { name?: string; arguments?: unknown } }[];
+          tool_calls?: OllamaToolCallChunk[];
         };
       };
       try {
@@ -654,7 +695,7 @@ export class OllamaClient implements ModelProvider {
       const calls = obj.message?.tool_calls;
       if (calls && calls.length > 0) {
         sawTool = true;
-        toolCalls = normalizeOllamaToolCalls(calls);
+        mergeStreamToolCalls(rawToolCalls, calls);
       }
       const delta = obj.message?.content ?? "";
       if (!delta) return;
@@ -685,8 +726,9 @@ export class OllamaClient implements ModelProvider {
       throw err;
     }
     if (options.signal?.aborted) throw abortError();
+    const toolCalls = normalizeOllamaToolCalls(rawToolCalls);
     if (content.length === 0 && toolCalls.length === 0) {
-      return this.chatWithTools(model, messages, tools, { ...options, onToken: undefined });
+      return retryNonStreaming();
     }
     return { content, toolCalls };
   }
