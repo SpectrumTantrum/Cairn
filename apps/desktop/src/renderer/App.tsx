@@ -1238,6 +1238,20 @@ export function App() {
     [activeNode, docKey],
   );
 
+  function stopAsk(): void {
+    if (!asking) return;
+    // Same cancel as New chat: invalidate the in-flight result and abort Ollama.
+    // Keep the question and every earlier turn; drop only the streaming draft.
+    activeRequestId.current = -1;
+    void window.cairn.stopAsk();
+    setAsking(false);
+    setThread((prev) => {
+      const last = prev[prev.length - 1];
+      if (last?.role === "assistant" && last.streaming) return prev.slice(0, -1);
+      return prev;
+    });
+  }
+
   function newThread(): void {
     // Invalidate any in-flight request and drop the server-side thread.
     activeRequestId.current = -1;
@@ -1517,6 +1531,7 @@ export function App() {
               onSelectEscalation={setEscalateTarget}
               onOpenSettings={() => setSettingsOpen(true)}
               onSubmit={onSubmit}
+              onStop={stopAsk}
               onClearScope={clearScope}
               onCite={openCitation}
               onAgentApply={onAgentApply}

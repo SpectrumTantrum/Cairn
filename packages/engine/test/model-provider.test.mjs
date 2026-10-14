@@ -337,6 +337,40 @@ test("an empty tool stream retries with the time left on the turn deadline", asy
   }
 });
 
+test("classic chatStream forwards a user abort as AbortError", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const stream = new ReadableStream({
+      start(controller) {
+        const signal = init?.signal;
+        const fail = () => {
+          controller.error(signal?.reason ?? new DOMException("The operation was aborted.", "AbortError"));
+        };
+        if (signal?.aborted) fail();
+        else signal?.addEventListener("abort", fail, { once: true });
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const ac = new AbortController();
+    const pending = client.chatStream("qwen3:4b", [{ role: "user", content: "q" }], { signal: ac.signal });
+    setTimeout(() => ac.abort(), 10);
+    await assert.rejects(
+      pending,
+      (err) => err instanceof DOMException && err.name === "AbortError" && !(err instanceof engine.OllamaTimeoutError),
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
 test("OllamaClient and embed delegate through the same provider seam", async () => {
   setModelProvider(
     new FakeModelProvider({

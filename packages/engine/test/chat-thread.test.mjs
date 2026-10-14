@@ -240,3 +240,57 @@ test("thread-level model default applies, and unavailable model rejects", async 
     index.close();
   }
 });
+
+test("aborting a classic turn drops it from history and the next turn still answers", async () => {
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let n = 0;
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatStream: async (_model, messages, callbacks) => {
+        n += 1;
+        seen.push(messages.map((m) => m.content).join("\n"));
+        if (n === 2) {
+          entered();
+          await gate;
+          if (callbacks?.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return "should not finish";
+        }
+        return "Grounded answer [1].";
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const thread = new ChatThread(index, { mode: "lexical" });
+    const first = await thread.send("What is a vault?", { onToken() {} });
+    assert.equal(first.answer, "Grounded answer [1].");
+    const ac = new AbortController();
+    const pending = thread.send("CANCEL ME vault", { onToken() {}, signal: ac.signal });
+    await enteredGate;
+    ac.abort();
+    release();
+    await assert.rejects(pending, (err) => err instanceof DOMException && err.name === "AbortError");
+    assert.equal(thread.messages.length, 2);
+    assert.equal(thread.messages[1].content, "Grounded answer [1].");
+    const next = await thread.send("What is cache invalidation?", { onToken() {} });
+    assert.equal(next.answer, "Grounded answer [1].");
+    assert.equal(seen[2].includes("CANCEL ME"), false);
+    assert.match(seen[2], /What is a vault/);
+    assert.match(seen[2], /cache invalidation/);
+  } finally {
+    release();
+    index.close();
+  }
+});

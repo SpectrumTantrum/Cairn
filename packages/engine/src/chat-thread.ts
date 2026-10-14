@@ -50,6 +50,8 @@ export interface ChatSendOptions {
    * grounding stays local. The turn is flagged `escalated` and reports `usage`/`sent`.
    */
   provider?: ModelProvider;
+  /** Cancels the model call. Retrieval may finish; the turn is not recorded. */
+  signal?: AbortSignal;
 }
 
 /** What an escalated turn actually transmitted — surfaced for the "what was sent" disclosure. */
@@ -101,12 +103,40 @@ export class ChatThread {
     const history: ChatMessage[] = this.turns.map((t) => ({ role: t.role, content: t.content }));
     this.turns.push({ role: "user", content: userText });
 
+    try {
+      return await this.completeSend(userText, history, send, k, mode, scope, coverageThreshold);
+    } catch (err) {
+      if (send.signal?.aborted) {
+        const last = this.turns[this.turns.length - 1];
+        if (last?.role === "user" && last.content === userText) this.turns.pop();
+      }
+      throw err;
+    }
+  }
+
+  private async completeSend(
+    userText: string,
+    history: ChatMessage[],
+    send: ChatSendOptions,
+    k: number,
+    mode: Mode | undefined,
+    scope: string[] | undefined,
+    coverageThreshold: number | undefined,
+  ): Promise<ChatSendResult> {
+    if (send.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
+
     const { hits, mode: usedMode, coverage } = await search(this.index, userText, {
       k,
       mode,
       scope,
       coverageThreshold,
     });
+
+    if (send.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
 
     if (!coverage.covered) {
       const answer = "Your notes don't cover this.";
@@ -150,6 +180,7 @@ export class ChatThread {
               onUsage: (u) => {
                 usage = u;
               },
+              signal: send.signal,
             },
             false,
             provider,

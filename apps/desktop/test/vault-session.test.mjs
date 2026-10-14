@@ -897,6 +897,161 @@ test("resetChat cancels an in-flight agentic ask", async () => {
   }
 });
 
+test("stopGenerating cancels a classic stream without keeping it in history, and the next ask works", async () => {
+  const vault = makeIndexedVaultDir();
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const seen = [];
+  let n = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatStream: async (_model, messages, callbacks) => {
+        n += 1;
+        seen.push(messages.map((m) => m.content).join("\n"));
+        if (n === 2) {
+          entered();
+          await gate;
+          if (callbacks?.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return "should not finish";
+        }
+        return "Grounded answer [1].";
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (v) => buildLexicalIndex(v, [{ file: "a.md", text: "markdown vault notes" }]),
+    });
+    session.setVault(vault);
+    const first = await session.chatSend("markdown vault one", { onToken() {} });
+    assert.equal(first.answer, "Grounded answer [1].");
+    const pending = session.chatSend("markdown vault two", { onToken() {} });
+    await enteredGate;
+    session.stopGenerating();
+    release();
+    await assert.rejects(pending, (err) => err instanceof DOMException && err.name === "AbortError");
+    const next = await session.chatSend("markdown vault three", { onToken() {} });
+    assert.equal(next.answer, "Grounded answer [1].");
+    assert.equal(next.sources.length > 0, true);
+    assert.match(seen[2], /markdown vault one/);
+    assert.match(seen[2], /Grounded answer/);
+    assert.match(seen[2], /markdown vault three/);
+    assert.equal(seen[2].includes("markdown vault two"), false);
+  } finally {
+    release();
+    resetModelProvider();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("resetChat cancels an in-flight classic stream", async () => {
+  const vault = makeIndexedVaultDir();
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatStream: async (_model, _messages, callbacks) => {
+        entered();
+        await gate;
+        if (callbacks?.signal?.aborted) {
+          throw new DOMException("The operation was aborted.", "AbortError");
+        }
+        return "Grounded answer [1].";
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (v) => buildLexicalIndex(v, [{ file: "a.md", text: "markdown vault notes" }]),
+    });
+    session.setVault(vault);
+    const pending = session.chatSend("markdown vault", { onToken() {} });
+    await enteredGate;
+    session.resetChat();
+    release();
+    await assert.rejects(pending, (err) => err instanceof DOMException && err.name === "AbortError");
+    const next = await session.chatSend("markdown vault", {
+      onToken() {},
+    });
+    assert.equal(next.answer, "Grounded answer [1].");
+  } finally {
+    release();
+    resetModelProvider();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("stopGenerating cancels an in-flight agentic ask and the next ask works", async () => {
+  const vault = makeIndexedVaultDir();
+  writeFileSync(join(vault, "notes.md"), "Spaced repetition schedules reviews.\n");
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let n = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:8b"],
+      chatWithTools: async (_model, _messages, _tools, _turn, options) => {
+        n += 1;
+        if (n === 1) {
+          entered();
+          await gate;
+          if (options?.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "reviews" } }] };
+        }
+        if (n === 2) return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "reviews" } }] };
+        return { content: "Reviews happen at intervals.", toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (v) =>
+        buildLexicalIndex(v, [{ file: "notes.md", text: "Spaced repetition schedules reviews." }]),
+    });
+    session.setVault(vault);
+    const pending = session.askAgent("When are reviews scheduled?");
+    await enteredGate;
+    session.stopGenerating();
+    release();
+    const cancelled = await pending;
+    assert.equal(cancelled.stopReason, "cancelled");
+    assert.equal(cancelled.answer, "");
+    assert.equal(cancelled.sources.length, 0);
+    const next = await session.askAgent("When are reviews scheduled?");
+    assert.equal(next.stopReason, "done");
+    assert.equal(next.answer, "Reviews happen at intervals.");
+    assert.ok(next.sources.length > 0);
+  } finally {
+    release();
+    resetModelProvider();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("chat history grows across turns and resets after resetChat", async () => {
   const vault = makeIndexedVaultDir();
   const calls = [];

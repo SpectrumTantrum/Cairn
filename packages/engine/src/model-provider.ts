@@ -223,6 +223,8 @@ export interface ChatStreamCallbacks {
    * invariant is satisfied by forwarding this to the UI after an escalated turn.
    */
   onUsage?: (usage: ChatUsage) => void;
+  /** Cancels the HTTP call. A timeout abort is separate and still raises `OllamaTimeoutError`. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -455,6 +457,7 @@ export class OllamaClient implements ModelProvider {
   ): Promise<string> {
     const body: Record<string, unknown> = { model, messages, stream: true };
     if (think === false) body.think = false;
+    const signal = callbacks?.signal;
 
     const post = () =>
       ollamaFetch(
@@ -466,6 +469,7 @@ export class OllamaClient implements ModelProvider {
         },
         OLLAMA_CHAT_STREAM_TIMEOUT_MS,
         "chat-stream",
+        signal,
       );
 
     let r = await post();
@@ -506,14 +510,22 @@ export class OllamaClient implements ModelProvider {
     const acc = { full: "" };
     const decoder = new TextDecoder();
     let buf = "";
-    for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
-      buf += decoder.decode(chunk, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        emit(buf.slice(0, nl), acc);
-        buf = buf.slice(nl + 1);
+    try {
+      for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
+        if (signal?.aborted) throw abortError();
+        buf += decoder.decode(chunk, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          emit(buf.slice(0, nl), acc);
+          buf = buf.slice(nl + 1);
+        }
       }
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (isTimeoutError(err)) throw new OllamaTimeoutError("chat-stream", OLLAMA_CHAT_STREAM_TIMEOUT_MS, err);
+      throw err;
     }
+    if (signal?.aborted) throw abortError();
     emit(buf, acc);
     return acc.full;
   }

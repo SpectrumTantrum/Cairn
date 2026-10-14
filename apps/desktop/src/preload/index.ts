@@ -63,6 +63,8 @@ export interface CairnApi {
   chatSend(payload: ChatSendPayload): Promise<ChatSendResult>;
   /** Reset the active thread (new-thread ⟲). */
   resetChat(): Promise<void>;
+  /** Cancel the in-flight Ask without clearing the thread. */
+  stopAsk(): Promise<void>;
   /** Subscribe to streamed chat tokens. Returns an unsubscribe fn. */
   onChatToken(listener: (event: ChatTokenEvent) => void): () => void;
   /** List the vault tree; `sort` chooses file order (name / mtime / size), default name. */
@@ -157,6 +159,7 @@ const api: CairnApi = {
   askAgentVault: (question, opts) => ipcRenderer.invoke("vault:askAgent", { question, ...opts }),
   chatSend: (payload) => ipcRenderer.invoke("chat:send", payload),
   resetChat: () => ipcRenderer.invoke("chat:reset"),
+  stopAsk: () => ipcRenderer.invoke("chat:stop"),
   onChatToken: (listener) => subscribe<ChatTokenEvent>("chat:token", listener),
   onAskAgentProgress: (listener) => subscribe<AskAgentProgressEvent>("askAgent:progress", listener),
   listTree: (sort) => ipcRenderer.invoke("vault:listTree", sort),

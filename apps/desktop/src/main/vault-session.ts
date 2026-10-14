@@ -280,13 +280,26 @@ export class VaultSession {
     if (!trimmed) {
       throw new Error("Ask needs a question.");
     }
+    this.askAbort?.abort();
+    const abort = new AbortController();
+    this.askAbort = abort;
     const thread = this.ensureChatThread();
-    return thread.send(trimmed, {
-      model: opts.model,
-      scope: opts.scope,
-      onToken: opts.onToken,
-      provider: opts.provider,
-    });
+    return thread
+      .send(trimmed, {
+        model: opts.model,
+        scope: opts.scope,
+        onToken: opts.onToken,
+        provider: opts.provider,
+        signal: abort.signal,
+      })
+      .finally(() => {
+        if (this.askAbort === abort) this.askAbort = null;
+      });
+  }
+
+  /** Abort the in-flight classic or agentic Ask. The classic thread's completed turns stay. */
+  stopGenerating(): void {
+    this.cancelInFlightAsk();
   }
 
   requireVault(): string {

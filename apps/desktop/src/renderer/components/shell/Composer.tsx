@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { ArrowUp, Check, ChevronDown, Cloud, Filter, HardDrive, Settings, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Cloud, Filter, HardDrive, Settings, Square, X } from "lucide-react";
 import type { EscalateTarget, ProviderMeta } from "../../../shared/types.js";
 
 /** Top-level trust mode (ADR-0008). Ask is read-only; Agent runs the write tool loop. */
@@ -28,6 +28,7 @@ interface ComposerProps {
   onSelectEscalation(target: EscalateTarget | null): void;
   onOpenSettings(): void;
   onSubmit(): void;
+  onStop(): void;
   onClearScope(): void;
 }
 
@@ -49,9 +50,17 @@ export function Composer({
   onSelectEscalation,
   onOpenSettings,
   onSubmit,
+  onStop,
   onClearScope,
 }: ComposerProps) {
+  const showStop = busy && mode === "ask";
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (e.key === "Escape" && showStop) {
+      e.preventDefault();
+      onStop();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!disabled && !busy && value.trim()) onSubmit();
@@ -98,15 +107,21 @@ export function Composer({
             onOpenSettings={onOpenSettings}
           />
           <span className="spacer" />
-          <button
-            type="button"
-            className="send-btn"
-            title="Send (Enter)"
-            disabled={!canSend}
-            onClick={onSubmit}
-          >
-            <ArrowUp size={16} />
-          </button>
+          {showStop ? (
+            <button type="button" className="send-btn stop-btn" title="Stop (Esc)" aria-label="Stop" onClick={onStop}>
+              <Square size={12} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="send-btn"
+              title="Send (Enter)"
+              disabled={!canSend}
+              onClick={onSubmit}
+            >
+              <ArrowUp size={16} />
+            </button>
+          )}
         </div>
       </div>
       {disabledReason ? (

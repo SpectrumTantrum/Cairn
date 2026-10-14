@@ -40,6 +40,7 @@ interface RightRailProps {
   onSelectEscalation(target: EscalateTarget | null): void;
   onOpenSettings(): void;
   onSubmit(): void;
+  onStop(): void;
   onClearScope(): void;
   onCite(source: SearchHit): void;
   onAgentApply(runId: string, proposalId: string): void;
@@ -147,6 +148,7 @@ export function RightRail(props: RightRailProps) {
             onSelectEscalation={props.onSelectEscalation}
             onOpenSettings={props.onOpenSettings}
             onSubmit={props.onSubmit}
+            onStop={props.onStop}
             onClearScope={props.onClearScope}
             onCite={props.onCite}
             onAgentApply={props.onAgentApply}

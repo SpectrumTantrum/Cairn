@@ -861,6 +861,10 @@ button {
   color: var(--text-faint);
   cursor: not-allowed;
 }
+.send-btn.stop-btn {
+  background: var(--text);
+  color: #0e1013;
+}
 
 .composer-note {
   margin: 8px 2px 0;
