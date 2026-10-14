@@ -101,8 +101,11 @@ export interface CairnApi {
    * first Ollama tag. Null when Ollama is down or no chat model is pulled.
    */
   resolveChatModel(agentic: boolean): Promise<string | null>;
-  /** Load the chat model in the background. Embedders are ignored. Never rejects. */
-  warmChatModel(model: string): Promise<"warmed" | "skipped" | "failed">;
+  /**
+   * Prime the chat model the next Ask will use. `agentic` selects that mode's
+   * real prompt prefix. Embedders are ignored. Never rejects.
+   */
+  warmChatModel(model: string, agentic: boolean): Promise<"warmed" | "skipped" | "failed">;
   /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
   agentStart(payload: { goal: string; model?: string; scope?: string[] }): Promise<AgentStartResult>;
   /** Approve one proposed edit — the per-hunk gate; the only path to disk. */
@@ -184,7 +187,7 @@ const api: CairnApi = {
   deletePath: (path) => ipcRenderer.invoke("vault:delete", { path }),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
   resolveChatModel: (agentic) => ipcRenderer.invoke("ollama:resolveChatModel", agentic),
-  warmChatModel: (model) => ipcRenderer.invoke("ollama:warm", model),
+  warmChatModel: (model, agentic) => ipcRenderer.invoke("ollama:warm", model, agentic),
   agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
   agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),

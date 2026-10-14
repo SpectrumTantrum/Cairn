@@ -13,7 +13,10 @@ export type { ThreadMeta, ThreadRecord, ThreadSaveInput } from "../main/thread-s
 export interface OllamaStatus {
   up: boolean;
   models: string[];
-  /** True on the check that sees Ollama up after it was down, including the first success. */
+  /**
+   * True when this check should warm again: Ollama came back up, the server
+   * instance changed, or `/api/ps` lost the model that was primed.
+   */
   recovered?: boolean;
 }
 

@@ -101,7 +101,7 @@ export interface AskAgentResult {
 
 const UNCOVERED = "Your notes don't cover this.";
 
-const ASK_AGENT_SYSTEM = [
+export const ASK_AGENT_SYSTEM = [
   "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, CSV and TSV files, HTML files, and text PDFs.",
   "Answer using ONLY information you gather with your tools — do not invent facts.",
   "Tools (read-only):",
@@ -344,11 +344,14 @@ function seedEnabled(opt: RetrievalSeedOption | undefined): boolean {
   return opt !== undefined && opt !== false;
 }
 
-function buildUserTurn(question: string, seedBlock: string | null): string {
+/** Stable start of the no-seed first user turn. Background warm stops here so the tool prompt stays cached. */
+export const AGENTIC_WARM_USER_PREFIX = "QUESTION: ";
+
+export function agenticAskUserContent(question: string, seedBlock: string | null): string {
   if (seedBlock) {
-    return `OPTIONAL SEED (retrieval hints — verify with tools):\n${seedBlock}\n\nQUESTION: ${question}`;
+    return `OPTIONAL SEED (retrieval hints — verify with tools):\n${seedBlock}\n\n${AGENTIC_WARM_USER_PREFIX}${question}`;
   }
-  return `QUESTION: ${question}\n\nNo retrieval seed was injected — use list, find, grep, and read to gather context before answering.`;
+  return `${AGENTIC_WARM_USER_PREFIX}${question}\n\nNo retrieval seed was injected — use list, find, grep, and read to gather context before answering.`;
 }
 
 /**
@@ -406,7 +409,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
 
   const messages: AgentMessage[] = [
     { role: "system", content: ASK_AGENT_SYSTEM },
-    { role: "user", content: buildUserTurn(opts.question, seedBlock) },
+    { role: "user", content: agenticAskUserContent(opts.question, seedBlock) },
   ];
 
   let steps = 0;

@@ -2,9 +2,9 @@ import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
+  chatWarmRequest,
   CloudProvider,
   getModelProvider,
-  nextOllamaWarmGate,
   PROVIDER_PRESETS,
   resolveChatModel,
   studioTemplateMetas,
@@ -549,21 +549,17 @@ export function registerIpcHandlers(): void {
     agenticAskEnvDefault: process.env.CAIRN_AGENTIC_ASK === "1",
   }));
 
-  // Remembered across checks in this process. A down→up edge forgets the warm-set
-  // so the next warm loads again after Ollama restarts while Cairn stays open.
-  let ollamaWasUp = false;
-
+  // The client remembers the primed prompt and the Ollama instance. A restart
+  // that finishes between polls still reports `recovered` when `/api/ps` loses
+  // the model or `/api/version` shows a new process.
   ipcMain.handle("ollama:check", async () => {
     try {
       const provider = getModelProvider();
+      if (provider.probeForWarm) return await provider.probeForWarm();
       const up = await provider.isReachable();
-      const gate = nextOllamaWarmGate(ollamaWasUp, up);
-      ollamaWasUp = gate.wasUp;
       if (!up) return { up: false, models: [], recovered: false };
-      if (gate.recovered) provider.forgetWarmedChatModels?.();
-      return { up: true, models: await provider.listModels(), recovered: gate.recovered };
+      return { up: true, models: await provider.listModels(), recovered: false };
     } catch {
-      ollamaWasUp = false;
       return { up: false, models: [], recovered: false };
     }
   });
@@ -579,12 +575,14 @@ export function registerIpcHandlers(): void {
   });
 
   // Background chat-model preload. Never rejects: a down Ollama stays silent.
-  ipcMain.handle("ollama:warm", async (_event, model: unknown) => {
+  // `agentic` selects that mode's real prompt prefix, not an empty load.
+  ipcMain.handle("ollama:warm", async (_event, model: unknown, agentic: unknown) => {
     if (typeof model !== "string" || !model.trim()) return "skipped";
     try {
       const provider = getModelProvider();
       if (!provider.warmChatModel) return "skipped";
-      return await provider.warmChatModel(model);
+      const request = chatWarmRequest(agentic === true ? "agentic" : "classic");
+      return await provider.warmChatModel(model, request);
     } catch {
       return "failed";
     }

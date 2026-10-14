@@ -446,63 +446,147 @@ test("OllamaClient and embed delegate through the same provider seam", async () 
   assert.deepEqual(vectors, [[0.5, 0.5]]);
 });
 
-test("warmChatModel loads a chat model once and never the embedder", async () => {
-  const calls = [];
+function installOllama(state) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     const path = String(url);
-    calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : null });
-    if (path.endsWith("/api/ps")) {
-      return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    state.calls.push({ path, body });
+    if (state.fail) throw new Error("connect ECONNREFUSED");
+    if (path.endsWith("/api/version")) {
+      if (state.versionStatus && state.versionStatus !== 200) {
+        return new Response("nope", { status: state.versionStatus });
+      }
+      return new Response(JSON.stringify(state.version ?? {}), { status: 200 });
     }
-    return new Response(JSON.stringify({ done: true, done_reason: "load" }), { status: 200 });
+    if (path.endsWith("/api/tags")) {
+      const tags = state.tags ?? ["qwen3:4b", "qwen3:8b"];
+      return new Response(JSON.stringify({ models: tags.map((name) => ({ name })) }), { status: 200 });
+    }
+    if (path.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: state.ps ?? [] }), { status: 200 });
+    }
+    if (body && body.keep_alive === 0 && state.releaseStatus) {
+      return new Response("busy", { status: state.releaseStatus });
+    }
+    if (path.endsWith("/v1/chat/completions") && state.completionsStatus) {
+      return new Response("missing", { status: state.completionsStatus });
+    }
+    return new Response(JSON.stringify({ choices: [{ message: { content: "" } }] }), { status: 200 });
   };
+  return () => {
+    globalThis.fetch = originalFetch;
+  };
+}
+
+test("warm prompts are the real Ask prefixes", async () => {
+  const engine = await import("../dist/index.js");
+  const agentic = engine.chatWarmRequest("agentic");
+  assert.equal(agentic.kind, "agentic");
+  assert.equal(agentic.messages[0].content, engine.ASK_AGENT_SYSTEM);
+  assert.equal(agentic.messages[1].content, engine.AGENTIC_WARM_USER_PREFIX);
+  assert.equal(engine.AGENTIC_WARM_USER_PREFIX, "QUESTION: ");
+  const user = engine.agenticAskUserContent("tide pools", null);
+  assert.equal(user.startsWith(engine.AGENTIC_WARM_USER_PREFIX), true);
+  assert.match(user, /No retrieval seed was injected/);
+  assert.deepEqual(
+    agentic.tools.map((tool) => tool.name),
+    ["list", "find", "grep", "read", "open"],
+  );
+  assert.equal(agentic.tools[0].description, engine.ASK_SEARCH_TOOLS[0].description);
+  assert.deepEqual(agentic.tools[0].parameters, engine.ASK_SEARCH_TOOLS[0].parameters);
+
+  const classic = engine.chatWarmRequest("classic");
+  assert.equal(classic.kind, "classic");
+  assert.equal(classic.messages[0].content, engine.GROUNDING_SYSTEM);
+  assert.equal(classic.messages[1].content, "SOURCES:\n");
+  assert.equal(classic.tools, undefined);
+  assert.equal(engine.classicAskUserContent("notes", "q"), "SOURCES:\nnotes\n\nQUESTION: q");
+  assert.equal(engine.classicAskUserContent("notes", "q").startsWith(engine.CLASSIC_USER_PREFIX), true);
+});
+
+test("agentic warm posts the tool prompt and classic warm posts the grounding prefix", async () => {
+  const state = { calls: [], ps: [] };
+  const restore = installOllama(state);
   try {
     const engine = await import("../dist/index.js");
     engine.resetOllamaHttpClient();
     const client = new engine.OllamaClient("http://ollama.test");
-    assert.equal(await client.warmChatModel("qwen3-embedding:0.6b"), "skipped");
-    assert.equal(calls.length, 0);
-    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
-    assert.equal(await client.warmChatModel("qwen3:8b:latest"), "skipped");
-    const posts = calls.filter((call) => call.path.endsWith("/api/chat"));
-    assert.equal(posts.length, 1);
-    assert.deepEqual(posts[0].body, {
-      model: "qwen3:8b",
-      messages: [],
-      keep_alive: "30m",
-      think: false,
+    assert.equal(await client.warmChatModel("nomic-embed-text", engine.chatWarmRequest("agentic")), "skipped");
+    assert.equal(state.calls.length, 0);
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("agentic")), "warmed");
+    const agentic = state.calls.filter((call) => call.path.endsWith("/v1/chat/completions"));
+    assert.equal(agentic.length, 1);
+    assert.equal(state.calls.some((call) => call.path.endsWith("/api/chat")), false);
+    assert.equal(state.calls.some((call) => call.path.includes("/api/embed")), false);
+    const request = engine.chatWarmRequest("agentic");
+    assert.equal(agentic[0].body.model, "qwen3:8b");
+    assert.equal(agentic[0].body.stream, false);
+    assert.equal(agentic[0].body.temperature, 0);
+    assert.equal(agentic[0].body.reasoning_effort, "none");
+    assert.equal(agentic[0].body.think, false);
+    assert.equal(agentic[0].body.tool_choice, "required");
+    assert.equal(agentic[0].body.max_tokens, 1);
+    assert.equal(agentic[0].body.keep_alive, "30m");
+    assert.deepEqual(agentic[0].body.messages, request.messages);
+    assert.deepEqual(
+      agentic[0].body.tools.map((tool) => tool.function.name),
+      ["list", "find", "grep", "read", "open"],
+    );
+    assert.equal(agentic[0].body.tools[0].function.description, engine.ASK_SEARCH_TOOLS[0].description);
+    assert.deepEqual(agentic[0].body.tools[0].function.parameters, engine.ASK_SEARCH_TOOLS[0].parameters);
+
+    state.ps = [{ name: "qwen3:8b:latest", model: "qwen3:8b:latest" }];
+    assert.equal(await client.warmChatModel("qwen3:8b:latest", engine.chatWarmRequest("agentic")), "skipped");
+    assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, 1);
+
+    assert.equal(await client.warmChatModel("qwen3:4b", engine.chatWarmRequest("classic")), "warmed");
+    const release = state.calls.filter((call) => call.body?.keep_alive === 0);
+    assert.equal(release.length, 1);
+    assert.equal(release[0].path.endsWith("/api/chat"), true);
+    assert.equal(release[0].body.model, "qwen3:8b");
+    assert.deepEqual(release[0].body.messages, []);
+    assert.equal(release[0].body.stream, false);
+    const classic = state.calls.filter(
+      (call) => call.path.endsWith("/api/chat") && call.body?.model === "qwen3:4b",
+    );
+    assert.equal(classic.length, 1);
+    assert.ok(state.calls.indexOf(release[0]) < state.calls.indexOf(classic[0]));
+    assert.deepEqual(classic[0].body, {
+      model: "qwen3:4b",
+      messages: engine.chatWarmRequest("classic").messages,
       stream: false,
+      think: false,
+      keep_alive: "30m",
+      options: { num_predict: 1 },
     });
-    assert.equal(calls.some((call) => call.path.includes("/api/embed")), false);
   } finally {
-    globalThis.fetch = originalFetch;
+    restore();
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();
     engine.resetOllamaHttpClient();
   }
 });
 
-test("warmChatModel skips a model /api/ps already lists", async () => {
-  const calls = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    calls.push(String(url));
-    return new Response(
-      JSON.stringify({ models: [{ name: "qwen3:8b:latest", model: "qwen3:8b:latest" }] }),
-      { status: 200 },
-    );
-  };
+test("a resident model is still primed until this process has cached that prompt", async () => {
+  const state = { calls: [], ps: [{ name: "qwen3:8b", model: "qwen3:8b" }] };
+  const restore = installOllama(state);
   try {
     const engine = await import("../dist/index.js");
     engine.resetOllamaHttpClient();
     const client = new engine.OllamaClient("http://ollama.test");
-    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
-    assert.equal(calls.some((url) => url.endsWith("/api/chat")), false);
-    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
-    assert.equal(calls.length, 1);
+    const agentic = engine.chatWarmRequest("agentic");
+    assert.equal(await client.warmChatModel("qwen3:8b", agentic), "warmed");
+    assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, 1);
+    assert.equal(await client.warmChatModel("qwen3:8b", agentic), "skipped");
+    assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, 1);
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("classic")), "warmed");
+    assert.equal(state.calls.filter((call) => call.body?.keep_alive === 0).length, 0);
+    const classic = state.calls.filter((call) => call.path.endsWith("/api/chat") && call.body?.keep_alive === "30m");
+    assert.equal(classic.length, 1);
+    assert.equal(classic[0].body.messages[1].content, "SOURCES:\n");
   } finally {
-    globalThis.fetch = originalFetch;
+    restore();
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();
     engine.resetOllamaHttpClient();
@@ -510,22 +594,48 @@ test("warmChatModel skips a model /api/ps already lists", async () => {
 });
 
 test("warmChatModel failure stays silent and can be retried", async () => {
-  const originalFetch = globalThis.fetch;
-  let down = true;
-  globalThis.fetch = async (url) => {
-    if (down) throw new Error("connect ECONNREFUSED");
-    if (String(url).endsWith("/api/ps")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
-    return new Response(JSON.stringify({ done: true, done_reason: "load" }), { status: 200 });
-  };
+  const state = { calls: [], fail: true, ps: [] };
+  const restore = installOllama(state);
   try {
     const engine = await import("../dist/index.js");
     engine.resetOllamaHttpClient();
     const client = new engine.OllamaClient("http://ollama.test");
-    assert.equal(await client.warmChatModel("qwen3:8b"), "failed");
-    down = false;
-    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
+    const classic = engine.chatWarmRequest("classic");
+    assert.equal(await client.warmChatModel("qwen3:4b", classic), "failed");
+    state.fail = false;
+    assert.equal(await client.warmChatModel("qwen3:4b", classic), "warmed");
+    state.releaseStatus = 500;
+    state.ps = [{ name: "qwen3:4b" }];
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("agentic")), "warmed");
+    assert.equal(state.calls.some((call) => call.body?.keep_alive === 0), true);
+    assert.equal(state.calls.some((call) => call.path.endsWith("/v1/chat/completions")), true);
   } finally {
-    globalThis.fetch = originalFetch;
+    restore();
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("an older Ollama without /v1 still primes the agentic prompt natively", async () => {
+  const state = { calls: [], ps: [], completionsStatus: 404 };
+  const restore = installOllama(state);
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("agentic")), "warmed");
+    const native = state.calls.filter((call) => call.path.endsWith("/api/chat"));
+    assert.equal(native.length, 1);
+    assert.equal(native[0].body.think, false);
+    assert.equal(native[0].body.options.num_predict, 1);
+    assert.deepEqual(
+      native[0].body.tools.map((tool) => tool.function.name),
+      ["list", "find", "grep", "read", "open"],
+    );
+    assert.equal(native[0].body.messages[0].content, engine.ASK_AGENT_SYSTEM);
+  } finally {
+    restore();
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();
     engine.resetOllamaHttpClient();
@@ -561,36 +671,129 @@ test("nextOllamaWarmGate is only the down-to-up edge", async () => {
   assert.deepEqual(engine.nextOllamaWarmGate(true, false), { wasUp: false, recovered: false });
 });
 
-test("Ollama coming back rewarms unless /api/ps still lists the model", async () => {
-  const calls = [];
-  let resident = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    const path = String(url);
-    calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : null });
-    if (path.endsWith("/api/ps")) {
-      return new Response(JSON.stringify({ models: resident }), { status: 200 });
-    }
-    return new Response(JSON.stringify({ done: true, done_reason: "load" }), { status: 200 });
+test("ollama instance identity changes when the process start changes", async () => {
+  const engine = await import("../dist/index.js");
+  assert.equal(engine.ollamaInstanceToken({}), "");
+  assert.equal(engine.ollamaInstanceToken({ version: "0.6.0" }), "version:0.6.0");
+  assert.equal(
+    engine.ollamaInstanceToken({ version: "0.6.0", startedAt: "100" }),
+    "start:100",
+  );
+  const held = { token: "", held: "qwen3:8b", sawHeld: false };
+  assert.equal(engine.ollamaWarmInvalidated(held, { token: "start:1", running: [] }), false);
+  assert.equal(
+    engine.ollamaWarmInvalidated(
+      { token: "start:1", held: "qwen3:8b", sawHeld: true },
+      { token: "start:1", running: ["qwen3:8b:latest"] },
+    ),
+    false,
+  );
+  assert.equal(
+    engine.ollamaWarmInvalidated(
+      { token: "start:1", held: "qwen3:8b", sawHeld: true },
+      { token: "start:2", running: ["qwen3:8b"] },
+    ),
+    true,
+  );
+  assert.equal(
+    engine.ollamaWarmInvalidated(
+      { token: "version:0.6.0", held: "qwen3:8b", sawHeld: true },
+      { token: "version:0.6.0", running: [] },
+    ),
+    true,
+  );
+  assert.equal(
+    engine.ollamaWarmInvalidated(
+      { token: "version:0.6.0", held: "qwen3:8b", sawHeld: false },
+      { token: "version:0.6.0", running: [] },
+    ),
+    false,
+  );
+  assert.equal(
+    engine.ollamaWarmInvalidated(
+      { token: "version:0.6.0", held: "qwen3:8b", sawHeld: true },
+      { token: "", running: [] },
+    ),
+    true,
+  );
+  assert.equal(
+    engine.ollamaWarmInvalidated(
+      { token: "version:0.6.0", held: "qwen3:8b", sawHeld: true },
+      { token: "version:0.6.0", running: null },
+    ),
+    false,
+  );
+});
+
+test("a restart rewarms when /api/ps loses the model or the process start changes", async () => {
+  const state = {
+    calls: [],
+    ps: [],
+    tags: ["nomic-embed-text", "qwen3:4b", "qwen3:8b"],
+    version: { version: "0.6.0", started_at: "10" },
   };
+  const restore = installOllama(state);
   try {
     const engine = await import("../dist/index.js");
     engine.resetOllamaHttpClient();
     const client = new engine.OllamaClient("http://ollama.test");
-    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
-    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
-    client.forgetWarmedChatModels();
-    resident = [{ name: "qwen3:8b:latest", model: "qwen3:8b:latest" }];
-    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
-    client.forgetWarmedChatModels();
-    resident = [];
-    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
-    const posts = calls.filter((call) => call.path.endsWith("/api/chat"));
-    assert.equal(posts.length, 2);
-    assert.equal(posts.every((call) => call.body.model === "qwen3:8b"), true);
-    assert.equal(await client.warmChatModel("nomic-embed-text"), "skipped");
+    const agentic = engine.chatWarmRequest("agentic");
+    const boot = await client.probeForWarm();
+    assert.equal(boot.up, true);
+    assert.equal(boot.recovered, true);
+    assert.deepEqual(boot.models, state.tags);
+    assert.equal(await client.warmChatModel("qwen3:8b", agentic), "warmed");
+
+    state.ps = [{ name: "qwen3:8b:latest", model: "qwen3:8b:latest" }];
+    const steady = await client.probeForWarm();
+    assert.equal(steady.recovered, false);
+    assert.equal(steady.up, true);
+    const primed = state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length;
+    assert.equal(await client.warmChatModel("qwen3:8b", agentic), "skipped");
+    assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, primed);
+
+    state.versionStatus = 500;
+    assert.equal((await client.probeForWarm()).recovered, false);
+    state.versionStatus = undefined;
+    assert.equal((await client.probeForWarm()).recovered, false);
+
+    state.ps = [];
+    const lost = await client.probeForWarm();
+    assert.equal(lost.up, true);
+    assert.equal(lost.recovered, true);
+    assert.equal(await client.warmChatModel("qwen3:8b", agentic), "warmed");
+    assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, primed + 1);
+
+    state.ps = [{ name: "qwen3:8b" }];
+    const relatched = await client.probeForWarm();
+    assert.equal(relatched.recovered, false);
+    state.version = { version: "0.6.0", started_at: "11" };
+    const bounced = await client.probeForWarm();
+    assert.equal(bounced.recovered, true);
+    assert.equal(bounced.up, true);
+    assert.equal(await client.warmChatModel("qwen3:8b", agentic), "warmed");
+    assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, primed + 2);
+
+    state.version = { version: "0.6.0", uptime: 4 };
+    state.ps = [{ name: "qwen3:8b" }];
+    const uptimeBoot = await client.probeForWarm();
+    assert.equal(uptimeBoot.recovered, true);
+    assert.equal(await client.warmChatModel("qwen3:4b", engine.chatWarmRequest("classic")), "warmed");
+    state.ps = [{ name: "qwen3:4b" }];
+    assert.equal((await client.probeForWarm()).recovered, false);
+    state.version = { version: "0.6.0", uptime: 9 };
+    assert.equal((await client.probeForWarm()).recovered, true);
+
+    state.fail = true;
+    const down = await client.probeForWarm();
+    assert.deepEqual(down, { up: false, models: [], recovered: false });
+    state.fail = false;
+    state.version = { version: "0.6.0", uptime: 9 };
+    const back = await client.probeForWarm();
+    assert.equal(back.up, true);
+    assert.equal(back.recovered, true);
   } finally {
-    globalThis.fetch = originalFetch;
+    restore();
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();
     engine.resetOllamaHttpClient();

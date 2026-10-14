@@ -208,6 +208,8 @@ export function App() {
     () => isAgenticAskEnabled(window.localStorage, agenticAskEnvDefault),
     [agenticAskEnvDefault, agenticAskRev],
   );
+  const agenticRef = useRef(agenticAskEnabled);
+  agenticRef.current = agenticAskEnabled;
   // Armed escalation for the NEXT turn (null = stays local on Ollama).
   const [escalateTarget, setEscalateTarget] = useState<EscalateTarget | null>(null);
   // First-use confirm gate: once a provider is confirmed (or the session-wide skip is
@@ -285,12 +287,13 @@ export function App() {
   }, []);
 
   // Warm only after we know whether this profile's next Ask is agentic. A fresh
-  // profile has no pinned model, so the target is resolveChatModel — not tags[0].
-  // Ollama coming back (up false → true) warms again; a steady up does not.
+  // profile has no pinned model, so the target is resolveChatModel — classic
+  // qwen3:4b, agentic qwen3:8b — not tags[0]. `recovered` stays meaningful while
+  // `up` is already true: an Ollama restart, or `/api/ps` losing the model.
   useEffect(() => {
     if (!featuresReady || !ollama.up) return;
     warmChatForAsk(agenticAskEnabled);
-  }, [featuresReady, agenticAskEnabled, ollama.up]);
+  }, [featuresReady, agenticAskEnabled, ollama.up, ollama.recovered]);
 
   useEffect(() => {
     writeRightTab(window.localStorage, rightTab);
@@ -418,10 +421,10 @@ export function App() {
 
   const clearScope = useCallback(() => setExcludedSources(new Set()), []);
 
-  function requestChatWarm(model: string | null): void {
+  function requestChatWarm(model: string | null, agentic: boolean): void {
     if (!model) return;
     // Fire and forget. A failure must not toast, disable the composer, or block the shell.
-    void window.cairn.warmChatModel(model).catch(() => {});
+    void window.cairn.warmChatModel(model, agentic).catch(() => {});
   }
 
   function warmChatForAsk(agentic: boolean): void {
@@ -442,7 +445,7 @@ export function App() {
           setSelectedModel(target);
         }
       }
-      requestChatWarm(target);
+      requestChatWarm(target, agentic);
     })();
   }
 
@@ -471,7 +474,7 @@ export function App() {
     modelPinnedRef.current = true;
     selectedModelRef.current = model;
     setSelectedModel(model);
-    requestChatWarm(model);
+    requestChatWarm(model, agenticRef.current);
   }
 
   const refreshProviders = useCallback(async (): Promise<void> => {

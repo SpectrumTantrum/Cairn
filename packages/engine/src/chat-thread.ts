@@ -14,7 +14,7 @@ import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat, chatStream } from "./chat.js";
 import type { ChatMessage, ChatUsage, ModelProvider } from "./model-provider.js";
-import { GROUNDING_SYSTEM } from "./ask.js";
+import { classicAskUserContent, GROUNDING_SYSTEM } from "./ask.js";
 
 /** One recorded turn in a thread. Assistant turns carry the sources they were grounded in. */
 export interface ThreadTurn {
@@ -174,7 +174,7 @@ export class ChatThread {
     const messages: ChatMessage[] = [
       { role: "system", content: GROUNDING_SYSTEM },
       ...history,
-      { role: "user", content: `SOURCES:\n${sourcesBlock}\n\nQUESTION: ${userText}` },
+      { role: "user", content: classicAskUserContent(sourcesBlock, userText) },
     ];
 
     // Escalated turns always stream (cloud adapters report usage on the SSE tail).
