@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { ArrowUp, Check, ChevronDown, Cloud, Filter, HardDrive, Settings, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, Cloud, Filter, HardDrive, Settings, Square, X } from "lucide-react";
 import type { EscalateTarget, ProviderMeta } from "../../../shared/types.js";
 
 /** Top-level trust mode (ADR-0008). Ask is read-only; Agent runs the write tool loop. */
@@ -28,6 +28,9 @@ interface ComposerProps {
   onSelectEscalation(target: EscalateTarget | null): void;
   onOpenSettings(): void;
   onSubmit(): void;
+  onStop(): void;
+  /** True only while a classic or agentic Ask can be cancelled. Studio and Agent stay busy without Stop. */
+  canStop: boolean;
   onClearScope(): void;
 }
 
@@ -49,9 +52,18 @@ export function Composer({
   onSelectEscalation,
   onOpenSettings,
   onSubmit,
+  onStop,
+  canStop,
   onClearScope,
 }: ComposerProps) {
+  const showStop = busy && mode === "ask" && canStop;
+
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (e.key === "Escape" && showStop) {
+      e.preventDefault();
+      onStop();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (!disabled && !busy && value.trim()) onSubmit();
@@ -84,7 +96,7 @@ export function Composer({
           onKeyDown={onKeyDown}
         />
         <div className="composer-controls">
-          <ModeChip mode={mode} onSelectMode={onSelectMode} />
+          <ModeChip mode={mode} busy={busy} onSelectMode={onSelectMode} />
           <ModelChip
             models={models}
             selectedModel={selectedModel}
@@ -98,15 +110,21 @@ export function Composer({
             onOpenSettings={onOpenSettings}
           />
           <span className="spacer" />
-          <button
-            type="button"
-            className="send-btn"
-            title="Send (Enter)"
-            disabled={!canSend}
-            onClick={onSubmit}
-          >
-            <ArrowUp size={16} />
-          </button>
+          {showStop ? (
+            <button type="button" className="send-btn stop-btn" title="Stop (Esc)" aria-label="Stop" onClick={onStop}>
+              <Square size={12} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="send-btn"
+              title="Send (Enter)"
+              disabled={!canSend}
+              onClick={onSubmit}
+            >
+              <ArrowUp size={16} />
+            </button>
+          )}
         </div>
       </div>
       {disabledReason ? (
@@ -120,12 +138,31 @@ export function Composer({
  * Trust-mode picker (ADR-0008). Ask = read-only grounded Q&A; Agent = the write
  * tool-loop, where every proposed edit is a diff you approve before it touches disk.
  */
-function ModeChip({ mode, onSelectMode }: { mode: AgentMode; onSelectMode(mode: AgentMode): void }) {
+function ModeChip({
+  mode,
+  busy,
+  onSelectMode,
+}: {
+  mode: AgentMode;
+  busy: boolean;
+  onSelectMode(mode: AgentMode): void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useCloseOnOutside(() => setOpen(false));
+  useEffect(() => {
+    if (busy) setOpen(false);
+  }, [busy]);
   return (
     <span className="menu-wrap" ref={ref}>
-      <button type="button" className="chip accent" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="chip accent"
+        disabled={busy}
+        title={busy ? "Finish or stop the current run before switching mode" : undefined}
+        onClick={() => {
+          if (!busy) setOpen((v) => !v);
+        }}
+      >
         {mode === "agent" ? "Agent" : "Ask"} <ChevronDown size={13} />
       </button>
       {open ? (

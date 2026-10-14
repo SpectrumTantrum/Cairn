@@ -50,6 +50,8 @@ export interface ChatSendOptions {
    * grounding stays local. The turn is flagged `escalated` and reports `usage`/`sent`.
    */
   provider?: ModelProvider;
+  /** Cancels the model call. Retrieval may finish; the turn is not recorded. */
+  signal?: AbortSignal;
 }
 
 /** What an escalated turn actually transmitted — surfaced for the "what was sent" disclosure. */
@@ -99,7 +101,41 @@ export class ChatThread {
 
     // History as the model should see it — captured BEFORE we record this user turn.
     const history: ChatMessage[] = this.turns.map((t) => ({ role: t.role, content: t.content }));
-    this.turns.push({ role: "user", content: userText });
+    const turn: ThreadTurn = { role: "user", content: userText };
+    this.turns.push(turn);
+    // Drop this exact turn on abort, even if a newer send has already appended
+    // after it. The listener runs inside abort(), before that newer send reads history.
+    const dropAbortedTurn = () => {
+      const at = this.turns.indexOf(turn);
+      if (at < 0) return;
+      if (this.turns[at + 1]?.role === "assistant") return;
+      this.turns.splice(at, 1);
+    };
+    const onAbort = () => dropAbortedTurn();
+    send.signal?.addEventListener("abort", onAbort);
+
+    try {
+      return await this.completeSend(userText, history, send, k, mode, scope, coverageThreshold);
+    } catch (err) {
+      if (send.signal?.aborted) dropAbortedTurn();
+      throw err;
+    } finally {
+      send.signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  private async completeSend(
+    userText: string,
+    history: ChatMessage[],
+    send: ChatSendOptions,
+    k: number,
+    mode: Mode | undefined,
+    scope: string[] | undefined,
+    coverageThreshold: number | undefined,
+  ): Promise<ChatSendResult> {
+    if (send.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
 
     const { hits, mode: usedMode, coverage } = await search(this.index, userText, {
       k,
@@ -107,6 +143,10 @@ export class ChatThread {
       scope,
       coverageThreshold,
     });
+
+    if (send.signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
 
     if (!coverage.covered) {
       const answer = "Your notes don't cover this.";
@@ -137,11 +177,12 @@ export class ChatThread {
       { role: "user", content: `SOURCES:\n${sourcesBlock}\n\nQUESTION: ${userText}` },
     ];
 
-    // Escalated turns always stream (cloud adapters report usage on the SSE tail);
-    // local turns stream only when the caller wants token-by-token output.
+    // Escalated turns always stream (cloud adapters report usage on the SSE tail).
+    // A signal-bearing local turn also streams so the abort reaches the model call
+    // even when the caller did not ask for tokens.
     let usage: ChatUsage | undefined;
     const answer =
-      provider || send.onToken
+      provider || send.onToken || send.signal
         ? await chatStream(
             model,
             messages,
@@ -150,6 +191,7 @@ export class ChatThread {
               onUsage: (u) => {
                 usage = u;
               },
+              signal: send.signal,
             },
             false,
             provider,

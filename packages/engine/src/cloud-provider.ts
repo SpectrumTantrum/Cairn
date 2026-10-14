@@ -57,6 +57,10 @@ export interface CloudProviderConfig {
   fetchImpl?: typeof fetch;
 }
 
+function abortError(): Error {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
 function trimSlash(s: string): string {
   return s.replace(/\/+$/, "");
 }
@@ -224,6 +228,7 @@ export class CloudProvider implements ModelProvider {
       method: "POST",
       headers: this.oaiHeaders(),
       body: JSON.stringify(body),
+      signal: callbacks?.signal,
     });
     await ensureOk(r, "chat/completions");
     return this.consumeSse(r, callbacks, parseOpenAiEvent);
@@ -265,6 +270,7 @@ export class CloudProvider implements ModelProvider {
       method: "POST",
       headers: this.anthropicHeaders(),
       body: JSON.stringify(body),
+      signal: callbacks?.signal,
     }).then(async (r) => {
       await ensureOk(r, "messages");
       return this.consumeSse(r, callbacks, parseAnthropicEvent);
@@ -312,7 +318,8 @@ export class CloudProvider implements ModelProvider {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
-    const r = await this.fetchImpl(signed);
+    const r = await this.fetchImpl(signed, callbacks?.signal ? { signal: callbacks.signal } : undefined);
+    if (callbacks?.signal?.aborted) throw abortError();
     await ensureOk(r, "converse");
     const j = (await r.json()) as {
       output?: { message?: { content?: Array<{ text?: string }> } };
@@ -323,6 +330,7 @@ export class CloudProvider implements ModelProvider {
         ?.map((c) => c.text)
         .filter((t): t is string => typeof t === "string")
         .join("") ?? "";
+    if (callbacks?.signal?.aborted) throw abortError();
     if (text) callbacks?.onToken?.(text);
     if (j.usage) {
       callbacks?.onUsage?.({
@@ -355,6 +363,7 @@ export class CloudProvider implements ModelProvider {
     const decoder = new TextDecoder();
     let buf = "";
     for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
+      if (callbacks?.signal?.aborted) throw abortError();
       buf += decoder.decode(chunk, { stream: true });
       let nl: number;
       while ((nl = buf.indexOf("\n")) !== -1) {

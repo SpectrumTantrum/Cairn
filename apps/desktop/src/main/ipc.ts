@@ -256,6 +256,12 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle("chat:stop", async () => {
+    return handleUserErrors(() => {
+      session.stopGenerating();
+    });
+  });
+
   ipcMain.handle("pdf:open", async (event, payload: unknown) => {
     return handleUserErrors(() => {
       const p = asRecord(payload);
