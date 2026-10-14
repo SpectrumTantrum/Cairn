@@ -43,8 +43,14 @@ test("Stop aborts the in-flight Ask and removes only the streaming draft", () =>
   const agent = slice(app, "async function submitAgent", "async function submitStudio");
   assert.match(classic, /setCanStop\(true\)/);
   assert.match(agentic, /setCanStop\(true\)/);
+  assert.match(studio, /setCanStop\(false\)/);
   assert.equal(studio.includes("setCanStop(true)"), false);
+  assert.match(agent, /setCanStop\(false\)/);
   assert.equal(agent.includes("setCanStop(true)"), false);
+  const load = slice(app, "const loadThread", "const deleteThread");
+  const choose = slice(app, "async function chooseVault", "const toggleFolder");
+  assert.match(load, /setCanStop\(false\)/);
+  assert.match(choose, /setCanStop\(false\)/);
   assert.match(stop, /last\?\.role === "assistant" && last\.streaming/);
   assert.match(stop, /prev\.slice\(0, -1\)/);
   assert.equal(stop.includes("resetChat"), false);

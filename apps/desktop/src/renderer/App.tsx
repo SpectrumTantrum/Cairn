@@ -339,6 +339,7 @@ export function App() {
       activeRequestId.current = -1;
       void window.cairn.resetChat();
       setAsking(false);
+      setCanStop(false);
       suppressPersistRef.current = true;
       setThread(record.turns as ChatTurn[]);
       activeThreadIdRef.current = record.id;
@@ -358,6 +359,8 @@ export function App() {
         if (activeThreadIdRef.current === id) {
           activeRequestId.current = -1;
           void window.cairn.resetChat();
+          setAsking(false);
+          setCanStop(false);
           suppressPersistRef.current = true;
           setThread([]);
           activeThreadIdRef.current = null;
@@ -432,6 +435,7 @@ export function App() {
       // Invalidate any in-flight chat and drop the server-side thread for the old vault.
       activeRequestId.current = -1;
       setAsking(false);
+      setCanStop(false);
       setThread([]);
       // Detach from any persisted thread; the new vault starts a fresh conversation.
       activeThreadIdRef.current = null;
@@ -1113,6 +1117,7 @@ export function App() {
     setThread((prev) => [...prev, { role: "user", text: goal }]);
     setChatInput("");
     setAsking(true);
+    setCanStop(false);
     setError(null);
     try {
       const res = await window.cairn.agentStart({
@@ -1153,6 +1158,7 @@ export function App() {
     setRightTab("chat"); // reveal the approval UI where the diff card renders
     setThread((prev) => [...prev, { role: "user", text: label }]);
     setAsking(true);
+    setCanStop(false);
     setError(null);
     try {
       const res = await window.cairn.studioGenerate({
