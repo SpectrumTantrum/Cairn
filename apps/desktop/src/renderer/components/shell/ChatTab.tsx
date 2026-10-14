@@ -8,6 +8,7 @@ import type {
 } from "../../../shared/types.js";
 import { classicChipBadge } from "../../agent-citations";
 import { buildProgressView, type AgenticProgressState } from "../../agentic-progress";
+import { chatFollowScrollTop } from "../../chat-scroll";
 import { Composer } from "./Composer";
 import type { AgentMode } from "./Composer";
 import { AgentTurn } from "./AgentTurn";
@@ -61,9 +62,33 @@ export function ChatTab(props: ChatTabProps) {
   // For the agent (non-streaming) path there is no streaming placeholder — show a
   // working pulse while a run is in flight (the last turn is still the user's goal).
   const showWorking = busy && lastRole === "user";
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const turnCountRef = useRef(thread.length);
+  // Follow a newly appended turn. Stop drops the streaming draft and leaves the
+  // view on the previous question, so the next Ask would otherwise sit below the fold.
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    const previousCount = turnCountRef.current;
+    if (!scroller) {
+      turnCountRef.current = thread.length;
+      return;
+    }
+    const turns = scroller.querySelectorAll<HTMLElement>("[data-chat-turn='user']");
+    const turn = turns[turns.length - 1];
+    const turnTop = turn
+      ? turn.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
+      : scroller.scrollHeight - scroller.clientHeight;
+    scroller.scrollTop = chatFollowScrollTop({
+      previousCount,
+      nextCount: thread.length,
+      scrollTop: scroller.scrollTop,
+      turnTop,
+    });
+    turnCountRef.current = thread.length;
+  }, [thread.length]);
   return (
     <>
-      <div className="chat-thread">
+      <div className="chat-thread" ref={scrollerRef}>
         {thread.length === 0 && !busy ? (
           <p className="chat-empty">
             {mode === "agent"
@@ -74,7 +99,7 @@ export function ChatTab(props: ChatTabProps) {
         {thread.map((turn, i) => {
           if (turn.role === "user") {
             return (
-              <div className="chat-user" key={i}>
+              <div className="chat-user" data-chat-turn="user" key={i}>
                 {turn.text}
               </div>
             );
