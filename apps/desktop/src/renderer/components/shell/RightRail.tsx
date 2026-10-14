@@ -48,6 +48,7 @@ interface RightRailProps {
   onAgentReject(runId: string, proposalId: string): void;
   onAgentRevert(runId: string): void;
   agenticAskEnabled: boolean;
+  composerWarning: string | null;
   // sources
   sources: SearchHit[];
   excludedSources: Set<string>;
@@ -157,6 +158,7 @@ export function RightRail(props: RightRailProps) {
             onAgentReject={props.onAgentReject}
             onAgentRevert={props.onAgentRevert}
             agenticAskEnabled={props.agenticAskEnabled}
+            composerWarning={props.composerWarning}
           />
         ) : activeTab === "sources" ? (
           <SourcesTab

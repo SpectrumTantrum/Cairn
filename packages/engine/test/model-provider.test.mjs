@@ -433,6 +433,194 @@ test("classic chatStream forwards a user abort as AbortError", async () => {
   }
 });
 
+function showResponse(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+test("OllamaClient.modelInfo reads tools from POST /api/show and never throws", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), method: init?.method, body: JSON.parse(init.body) });
+    const model = JSON.parse(init.body).model;
+    if (model === "qwen3:8b") return showResponse({ capabilities: ["completion", "tools", "thinking"] });
+    if (model === "llama3.2") return showResponse({ capabilities: ["completion"] });
+    if (model === "missing-field") return showResponse({ details: {} });
+    if (model === "http-error") return new Response("nope", { status: 500 });
+    if (model === "refused") throw new TypeError("fetch failed");
+    if (model === "timed-out") {
+      const err = new Error("The operation was aborted due to timeout");
+      err.name = "TimeoutError";
+      throw err;
+    }
+    return showResponse({});
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(calls[0].url, "http://ollama.test/api/show");
+    assert.equal(calls[0].method, "POST");
+    assert.deepEqual(calls[0].body, { model: "qwen3:8b" });
+    assert.equal(await client.modelInfo("llama3.2"), "incapable");
+    assert.equal(await client.modelInfo("missing-field"), "unknown");
+    assert.equal(await client.modelInfo("http-error"), "unknown");
+    assert.equal(await client.modelInfo("refused"), "unknown");
+    assert.equal(await client.modelInfo("timed-out"), "unknown");
+    assert.equal(await client.modelInfo(""), "unknown");
+    assert.equal(await client.modelInfo("qwen3-embedding:0.6b"), "unknown");
+    assert.equal(calls.some((call) => call.body.model === "qwen3-embedding:0.6b"), false);
+    assert.equal(calls.some((call) => call.body.model === ""), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("OllamaClient.modelInfo caches per exact model name and clears on up-after-down", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const model = JSON.parse(init.body).model;
+    calls.push(model);
+    if (model === "qwen3:8b") return showResponse({ capabilities: ["tools"] });
+    if (model === "qwen3:4b") return showResponse({ capabilities: ["completion", "tools"] });
+    throw new TypeError("fetch failed");
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    client.noteOllamaReachability(true);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(await client.modelInfo("qwen3:4b"), "capable");
+    assert.deepEqual(calls, ["qwen3:8b", "qwen3:4b"]);
+    client.noteOllamaReachability(true);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.deepEqual(calls, ["qwen3:8b", "qwen3:4b"]);
+    assert.equal(await client.modelInfo("gone"), "unknown");
+    assert.equal(await client.modelInfo("gone"), "unknown");
+    assert.deepEqual(calls, ["qwen3:8b", "qwen3:4b", "gone"]);
+    client.noteOllamaReachability(false);
+    client.noteOllamaReachability(false);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.deepEqual(calls, ["qwen3:8b", "qwen3:4b", "gone"]);
+    client.noteOllamaReachability(true);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(await client.modelInfo("gone"), "unknown");
+    assert.deepEqual(calls, ["qwen3:8b", "qwen3:4b", "gone", "qwen3:8b", "gone"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("an in-flight /api/show does not refill the cache cleared by up-after-down", async () => {
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let calls = 0;
+  let started = () => {};
+  const startedGate = new Promise((resolve) => {
+    started = resolve;
+  });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) {
+      started();
+      await gate;
+    }
+    return showResponse({ capabilities: ["tools"] });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    client.noteOllamaReachability(true);
+    const pending = client.modelInfo("qwen3:8b");
+    await startedGate;
+    client.noteOllamaReachability(false);
+    client.noteOllamaReachability(true);
+    release();
+    assert.equal(await pending, "capable");
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(calls, 2);
+  } finally {
+    release();
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("probeForWarm clears modelInfo when the instance changes without going down", async () => {
+  const calls = [];
+  let startedAt = "10";
+  let fail = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const path = String(url);
+    calls.push(path);
+    if (fail) throw new Error("connect ECONNREFUSED");
+    if (path.endsWith("/api/version")) {
+      return showResponse({ version: "0.6.0", started_at: startedAt });
+    }
+    if (path.endsWith("/api/tags")) return showResponse({ models: [{ name: "qwen3:8b" }] });
+    if (path.endsWith("/api/ps")) return showResponse({ models: [{ name: "qwen3:8b" }] });
+    if (path.endsWith("/api/show")) return showResponse({ capabilities: ["tools"] });
+    return new Response("nope", { status: 500 });
+  };
+  const shows = () => calls.filter((path) => path.endsWith("/api/show")).length;
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const boot = await client.probeForWarm();
+    assert.equal(boot.up, true);
+    assert.equal(boot.recovered, true);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(shows(), 1);
+    const steady = await client.probeForWarm();
+    assert.equal(steady.up, true);
+    assert.equal(steady.recovered, false);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(shows(), 1);
+    startedAt = "11";
+    const bounced = await client.probeForWarm();
+    assert.equal(bounced.up, true);
+    assert.equal(bounced.recovered, true);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(shows(), 2);
+    fail = true;
+    assert.deepEqual(await client.probeForWarm(), { up: false, models: [], recovered: false });
+    fail = false;
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(shows(), 2);
+    const back = await client.probeForWarm();
+    assert.equal(back.up, true);
+    assert.equal(back.recovered, true);
+    assert.equal(await client.modelInfo("qwen3:8b"), "capable");
+    assert.equal(shows(), 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
 test("OllamaClient and embed delegate through the same provider seam", async () => {
   setModelProvider(
     new FakeModelProvider({

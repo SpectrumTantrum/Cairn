@@ -6,6 +6,7 @@ import type {
   ChatSendPayload,
   AskAgentProgressEvent,
   ChatTokenEvent,
+  ModelToolCapability,
   OllamaStatus,
   ProviderInput,
   ProviderMeta,
@@ -28,6 +29,7 @@ export type {
   AskAgentProgressEvent,
   ChatTokenEvent,
   IndexStats,
+  ModelToolCapability,
   OllamaStatus,
   ProviderInput,
   ProviderMeta,
@@ -107,6 +109,8 @@ export interface CairnApi {
    * real prompt prefix. Embedders are ignored. Never rejects.
    */
   warmChatModel(model: string, agentic: boolean): Promise<"warmed" | "skipped" | "failed">;
+  /** Tool capability for the chat model Ask will use. Never rejects. */
+  modelInfo(model: string): Promise<ModelToolCapability>;
   /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
   agentStart(payload: { goal: string; model?: string; scope?: string[] }): Promise<AgentStartResult>;
   /** Approve one proposed edit — the per-hunk gate; the only path to disk. */
@@ -189,6 +193,7 @@ const api: CairnApi = {
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
   resolveChatModel: (agentic) => ipcRenderer.invoke("ollama:resolveChatModel", agentic),
   warmChatModel: (model, agentic) => ipcRenderer.invoke("ollama:warm", model, agentic),
+  modelInfo: (model) => ipcRenderer.invoke("ollama:modelInfo", model),
   agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
   agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),

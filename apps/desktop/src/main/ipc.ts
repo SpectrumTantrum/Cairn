@@ -5,6 +5,7 @@ import {
   chatWarmRequest,
   CloudProvider,
   getModelProvider,
+  OllamaClient,
   PROVIDER_PRESETS,
   resolveChatModel,
   studioTemplateMetas,
@@ -585,6 +586,17 @@ export function registerIpcHandlers(): void {
       return await provider.warmChatModel(model, request);
     } catch {
       return "failed";
+    }
+  });
+
+  ipcMain.handle("ollama:modelInfo", async (_event, model: unknown) => {
+    try {
+      if (typeof model !== "string" || model.length === 0) return "unknown";
+      const provider = getModelProvider();
+      if (!(provider instanceof OllamaClient)) return "unknown";
+      return await provider.modelInfo(model);
+    } catch {
+      return "unknown";
     }
   });
 }

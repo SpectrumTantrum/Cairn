@@ -38,10 +38,13 @@ import { useResizable } from "./components/shell/useResizable";
 import {
   RIGHT_WIDTH,
   VAULT_WIDTH,
+  agenticGuidanceText,
   isAgenticAskEnabled,
   readRightTab,
+  resolveAskChatModel,
   writeAgenticAskPref,
   writeRightTab,
+  type ModelToolCapability,
 } from "./settings";
 
 /** ⌘K on macOS, Ctrl+K elsewhere — used for the palette hint + open chord (issue #13). */
@@ -244,6 +247,10 @@ export function App() {
   const selectedModelRef = useRef<string | null>(null);
   const ollamaUpRef = useRef(false);
   const ollamaCheckRef = useRef(false);
+  /** Last `/api/show` result for the chat model Ask will use. Cleared while Ollama is down. */
+  const [shownModelInfo, setShownModelInfo] = useState<{ model: string; capability: ModelToolCapability } | null>(
+    null,
+  );
   const [lastSources, setLastSources] = useState<SearchHit[]>([]);
   // Vault-relative file paths unchecked in the Sources tab — excluded from the NEXT
   // question's retrieval. Empty = whole index (no scope). Reset on each new answer / thread.
@@ -477,6 +484,44 @@ export function App() {
     setSelectedModel(model);
     requestChatWarm(model, agenticRef.current);
   }
+
+  const guidanceModel = resolveAskChatModel(selectedModel, ollama.models);
+  const guidanceCapability: ModelToolCapability =
+    ollama.up && shownModelInfo && shownModelInfo.model === guidanceModel ? shownModelInfo.capability : "unknown";
+  const guidance = agenticGuidanceText({
+    agentic: agenticAskEnabled,
+    ollamaUp: ollama.up,
+    model: guidanceModel,
+    capability: guidanceCapability,
+  });
+
+  // Chip, toggle, and the existing Ollama poll refresh the line without sending an Ask.
+  // That poll is also the offline signal (`ollama.up`) and the restart signal
+  // (`ollama.recovered`): the main process drops the show cache on both, and this
+  // refetches. There is no second status loop.
+  useEffect(() => {
+    if (!ollama.up) {
+      setShownModelInfo(null);
+      return;
+    }
+    const model = resolveAskChatModel(selectedModel, ollama.models);
+    if (!model) {
+      setShownModelInfo(null);
+      return;
+    }
+    let cancelled = false;
+    void window.cairn
+      .modelInfo(model)
+      .then((capability) => {
+        if (!cancelled) setShownModelInfo({ model, capability });
+      })
+      .catch(() => {
+        if (!cancelled) setShownModelInfo({ model, capability: "unknown" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ollama.up, ollama.models, ollama.recovered, selectedModel, agenticAskEnabled]);
 
   const refreshProviders = useCallback(async (): Promise<void> => {
     try {
@@ -1631,6 +1676,7 @@ export function App() {
               onAgentReject={onAgentReject}
               onAgentRevert={onAgentRevert}
               agenticAskEnabled={agenticAskEnabled}
+              composerWarning={guidance.composerWarning}
               sources={lastSources}
               excludedSources={excludedSources}
               onToggleSource={toggleSource}
@@ -1660,6 +1706,8 @@ export function App() {
           onRightTabChange={setRightTab}
           agenticAsk={agenticAskEnabled}
           agenticAskEnvDefault={agenticAskEnvDefault}
+          guidanceLine={guidance.settingsLine}
+          guidanceWarning={guidance.settingsWarning}
           onAgenticAskChange={(enabled) => {
             writeAgenticAskPref(window.localStorage, enabled);
             setAgenticAskRev((v) => v + 1);
