@@ -19,6 +19,7 @@ import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progres
 import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
+import { inlineErrorText } from "./inline-error";
 import { VaultRail } from "./components/shell/VaultRail";
 import { EditorPane } from "./components/shell/EditorPane";
 import type { IndexState } from "./components/shell/EditorPane";
@@ -48,7 +49,7 @@ const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCas
 const PALETTE_HINT = IS_MAC ? "⌘K" : "Ctrl+K";
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return inlineErrorText(error);
 }
 
 function basename(p: string): string {
