@@ -27,8 +27,11 @@ export const OLLAMA_CHAT_STREAM_TIMEOUT_MS = 600_000;
 export const OLLAMA_CHAT_TOOLS_TIMEOUT_MS = 600_000;
 /** Background chat-model preload. Long enough for a cold 8B load, short of the ask budget. */
 export const OLLAMA_WARM_TIMEOUT_MS = 180_000;
-/** How long a warmed chat model stays resident. Ollama's default idle unload is 5m. */
-export const CHAT_MODEL_KEEP_ALIVE = "30m";
+/**
+ * Same default as `resolveEmbedder` (`embed.ts`). A warm embed must name the
+ * model a search will actually call.
+ */
+const SEARCH_EMBED_MODEL = "qwen3-embedding:0.6b";
 
 export type ChatWarmResult = "warmed" | "skipped" | "failed";
 
@@ -300,10 +303,14 @@ export interface ModelProvider {
     options?: ChatWithToolsOptions,
   ): Promise<ToolTurn>;
   /**
-   * Prime one chat model's prompt cache and hold it. Embedders are refused.
-   * A model this process already primed, that `/api/ps` still lists, is skipped.
-   * A different chat model is unloaded (`keep_alive: 0`) first. Failures resolve
-   * as `"failed"` and are not remembered, so a later call can retry.
+   * Prime one chat model's prompt cache and hold it. Embedders are refused as
+   * the chat model. The prime body matches the real Ask (no extra keep_alive,
+   * num_ctx, or num_predict). A fresh process, and a warm after the primed
+   * model was forgotten, also embeds a tiny string with the same body as
+   * `embed()` so the first search does not load the embedder. A model this
+   * process already primed, that `/api/ps` still lists, is skipped. A different
+   * chat model is unloaded (`keep_alive: 0`) first. Failures resolve as
+   * `"failed"` and are not remembered, so a later call can retry.
    */
   warmChatModel?(model: string, request: ChatWarmRequest): Promise<ChatWarmResult>;
   /** Drop the primed prompt so the next warm sends it again. */
@@ -453,6 +460,90 @@ function chatModelKey(model: string): string {
   return model.trim().replace(/:latest$/, "");
 }
 
+/**
+ * The embedder `resolveEmbedder()` would pick. Family match returns the
+ * canonical tag, which is what an index stores and what search then sends.
+ */
+function pickedEmbedder(models: readonly string[]): string | null {
+  const has = (want: string) =>
+    models.some((name) => name === want || name.split(":")[0] === want.split(":")[0]);
+  if (has(SEARCH_EMBED_MODEL)) return SEARCH_EMBED_MODEL;
+  return models.find((name) => /embed/i.test(name)) ?? null;
+}
+
+/** OpenAI-compat tool turn. Prime and Ask must send this same shape. */
+function openAiAskBody(
+  model: string,
+  messages: unknown[],
+  tools: Record<string, unknown>[],
+  stream: boolean,
+  requireToolCall: boolean,
+): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    stream,
+    temperature: 0,
+    messages,
+    tools,
+    reasoning_effort: "none",
+    think: false,
+  };
+  if (requireToolCall) body.tool_choice = "required";
+  return body;
+}
+
+/** Native `/api/chat` body. Prime and classic Ask must send this same shape. */
+function nativeAskBody(
+  model: string,
+  messages: unknown[],
+  stream: boolean,
+  tools?: Record<string, unknown>[],
+): Record<string, unknown> {
+  const body: Record<string, unknown> = { model, messages, stream, think: false };
+  if (tools) body.tools = tools;
+  return body;
+}
+
+/**
+ * Older Ollama builds 400 when they do not know `think`. Any other failure
+ * must keep `think: false`: omitting it turns thinking on for Qwen3.
+ */
+function rejectsThinkField(status: number, body: string): boolean {
+  return status === 400 && /think/i.test(body);
+}
+
+async function postHonoringThink(
+  url: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+  label: string,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const send = () =>
+    ollamaFetch(
+      url,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      timeoutMs,
+      label,
+      signal,
+    );
+  let r = await send();
+  if (!r.ok && body.think !== undefined) {
+    const text = await r.text().catch(() => "");
+    if (rejectsThinkField(r.status, text)) {
+      delete body.think;
+      r = await send();
+    } else {
+      return new Response(text, { status: r.status });
+    }
+  }
+  return r;
+}
+
 function ollamaToolDefs(tools: ToolSchema[]): Record<string, unknown>[] {
   return tools.map((t) => ({
     type: "function",
@@ -509,6 +600,8 @@ export class OllamaClient implements ModelProvider {
   /** Chat model whose prompt this process has primed. One model at a time. */
   private heldKey: string | null = null;
   private primedKind: ChatWarmKind | null = null;
+  /** Embedder this process has already warmed. Cleared when the prime is forgotten. */
+  private embedKey: string | null = null;
   /** True after a prime, so a later `/api/ps` miss is a restart rather than a race. */
   private lastProbeSawHeld = false;
   private wasUp = false;
@@ -521,7 +614,7 @@ export class OllamaClient implements ModelProvider {
   async warmChatModel(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
     const name = model.trim();
     if (!name || isEmbedModelName(name)) return "skipped";
-    const run = this.warmChain.then(() => this.primeChatModel(name, request));
+    const run = this.warmChain.then(() => this.primeAndEmbed(name, request));
     this.warmChain = run.then(
       () => undefined,
       () => undefined,
@@ -534,6 +627,7 @@ export class OllamaClient implements ModelProvider {
     this.heldKey = null;
     this.primedKind = null;
     this.lastProbeSawHeld = false;
+    this.embedKey = null;
   }
 
   async probeForWarm(): Promise<OllamaWarmProbe> {
@@ -576,6 +670,42 @@ export class OllamaClient implements ModelProvider {
       this.lastProbeSawHeld = running.some((name) => chatModelKey(name) === this.heldKey);
     }
     return { up: true, models, recovered };
+  }
+
+  private async primeAndEmbed(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
+    const chat = await this.primeChatModel(model, request);
+    await this.warmSearchEmbedder();
+    return chat;
+  }
+
+  /**
+   * Load the search embedder with the same JSON `embed()` sends (`model` +
+   * `input`, no keep_alive). Once per process while `/api/ps` still lists it,
+   * and again after a restart forgets that prime.
+   */
+  private async warmSearchEmbedder(): Promise<void> {
+    let model: string | null = null;
+    try {
+      model = pickedEmbedder(await this.listModels());
+    } catch {
+      return;
+    }
+    if (!model) return;
+    const key = chatModelKey(model);
+    let running: string[] | null = null;
+    try {
+      running = await this.runningModelNames();
+    } catch {
+      running = null;
+    }
+    const resident = running?.some((name) => chatModelKey(name) === key) ?? false;
+    if (this.embedKey === key && resident) return;
+    try {
+      await this.embed(model, ["."]);
+      this.embedKey = key;
+    } catch {
+      // A failed embed warm must not surface, and must not block the chat prime.
+    }
   }
 
   private async primeChatModel(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
@@ -640,20 +770,10 @@ export class OllamaClient implements ModelProvider {
 
   private async primeAgentic(model: string, request: ChatWarmRequest): Promise<boolean> {
     const tools = ollamaToolDefs(request.tools ?? []);
-    // Same body as the first agentic turn (`tool_choice: required`, thinking off)
-    // plus a one-token cap so the prefill lands in the cache and stops.
-    const openAiBody: Record<string, unknown> = {
-      model,
-      stream: false,
-      temperature: 0,
-      messages: request.messages,
-      tools,
-      reasoning_effort: "none",
-      think: false,
-      tool_choice: "required",
-      max_tokens: 1,
-      keep_alive: CHAT_MODEL_KEEP_ALIVE,
-    };
+    // Identical to the first agentic turn. Extra keep_alive / max_tokens become
+    // a different Ollama request (max_tokens → options.num_predict) and the
+    // follow-up Ask misses this prefill.
+    const openAiBody = openAiAskBody(model, request.messages, tools, false, true);
     const openAi = await ollamaFetch(
       `${this.baseUrl}/v1/chat/completions`,
       {
@@ -673,42 +793,90 @@ export class OllamaClient implements ModelProvider {
       return false;
     }
     await openAi.text().catch(() => "");
-    return this.postNativePrime(model, request.messages, tools);
+    return this.postNativePrime(model, request.messages, tools, false);
   }
 
   private async primeClassic(model: string, request: ChatWarmRequest): Promise<boolean> {
-    return this.postNativePrime(model, request.messages);
+    // Desktop classic Ask streams. Same fields: model, messages, stream, think.
+    return this.postNativePrime(model, request.messages, undefined, true);
   }
 
   private async postNativePrime(
     model: string,
     messages: ChatMessage[],
-    tools?: Record<string, unknown>[],
+    tools: Record<string, unknown>[] | undefined,
+    stream: boolean,
   ): Promise<boolean> {
-    const body: Record<string, unknown> = {
-      model,
-      messages,
-      stream: false,
-      think: false,
-      keep_alive: CHAT_MODEL_KEEP_ALIVE,
-      options: { num_predict: 1 },
-    };
-    if (tools) body.tools = tools;
-    const r = await ollamaFetch(
-      `${this.baseUrl}/api/chat`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      },
-      OLLAMA_WARM_TIMEOUT_MS,
-      "warm-chat",
-    );
+    const body = nativeAskBody(model, messages, stream, tools);
+    let r: Response;
+    try {
+      r = await ollamaFetch(
+        `${this.baseUrl}/api/chat`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        OLLAMA_WARM_TIMEOUT_MS,
+        "warm-chat",
+      );
+    } catch {
+      return false;
+    }
     if (!r.ok) {
       await r.text().catch(() => "");
       return false;
     }
-    await r.text().catch(() => "");
+    if (!stream) {
+      await r.text().catch(() => "");
+      return true;
+    }
+    // Stop after the first generated token. The prompt is in the KV cache by
+    // then, and the body stayed identical to a real classic Ask (no num_predict).
+    return this.finishStreamingPrime(r);
+  }
+
+  private async finishStreamingPrime(r: Response): Promise<boolean> {
+    if (!r.body) {
+      await r.text().catch(() => "");
+      return true;
+    }
+    const decoder = new TextDecoder();
+    let buf = "";
+    let saw = false;
+    const take = (line: string): boolean => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      let obj: { message?: { content?: string; thinking?: string }; done?: boolean };
+      try {
+        obj = JSON.parse(trimmed);
+      } catch {
+        return false;
+      }
+      const message = obj.message;
+      return Boolean(message && (message.content || message.thinking)) || obj.done === true;
+    };
+    try {
+      for await (const chunk of r.body as unknown as AsyncIterable<Uint8Array>) {
+        buf += decoder.decode(chunk, { stream: true });
+        let nl: number;
+        let stop = false;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          if (take(buf.slice(0, nl))) {
+            stop = true;
+            break;
+          }
+          buf = buf.slice(nl + 1);
+        }
+        if (stop || take(buf)) {
+          saw = true;
+          break;
+        }
+      }
+    } catch {
+      return saw;
+    }
+    if (saw) await r.body.cancel().catch(() => undefined);
     return true;
   }
 
@@ -779,26 +947,10 @@ export class OllamaClient implements ModelProvider {
   }
 
   async chat(model: string, messages: ChatMessage[], think = false): Promise<string> {
-    const body: Record<string, unknown> = { model, messages, stream: false };
-    if (think === false) body.think = false;
+    const body = nativeAskBody(model, messages, false);
+    if (think !== false) delete body.think;
 
-    const post = () =>
-      ollamaFetch(
-        `${this.baseUrl}/api/chat`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        OLLAMA_CHAT_TIMEOUT_MS,
-        "chat",
-      );
-
-    let r = await post();
-    if (!r.ok && body.think !== undefined) {
-      delete body.think;
-      r = await post();
-    }
+    const r = await postHonoringThink(`${this.baseUrl}/api/chat`, body, OLLAMA_CHAT_TIMEOUT_MS, "chat");
     if (!r.ok) {
       const t = await r.text().catch(() => "");
       throw new Error(`HTTP ${r.status} from /api/chat: ${t.slice(0, 200)}`);
@@ -813,28 +965,17 @@ export class OllamaClient implements ModelProvider {
     callbacks?: ChatStreamCallbacks,
     think = false,
   ): Promise<string> {
-    const body: Record<string, unknown> = { model, messages, stream: true };
-    if (think === false) body.think = false;
+    const body = nativeAskBody(model, messages, true);
+    if (think !== false) delete body.think;
     const signal = callbacks?.signal;
 
-    const post = () =>
-      ollamaFetch(
-        `${this.baseUrl}/api/chat`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        OLLAMA_CHAT_STREAM_TIMEOUT_MS,
-        "chat-stream",
-        signal,
-      );
-
-    let r = await post();
-    if (!r.ok && body.think !== undefined) {
-      delete body.think;
-      r = await post();
-    }
+    const r = await postHonoringThink(
+      `${this.baseUrl}/api/chat`,
+      body,
+      OLLAMA_CHAT_STREAM_TIMEOUT_MS,
+      "chat-stream",
+      signal,
+    );
     if (!r.ok) {
       const t = await r.text().catch(() => "");
       throw new Error(`HTTP ${r.status} from /api/chat (stream): ${t.slice(0, 200)}`);
@@ -843,12 +984,13 @@ export class OllamaClient implements ModelProvider {
     const emit = (line: string, acc: { full: string }) => {
       const trimmed = line.trim();
       if (!trimmed) return;
-      let obj: { message?: { content?: string }; done?: boolean };
+      let obj: { message?: { content?: string; thinking?: string }; done?: boolean };
       try {
         obj = JSON.parse(trimmed);
       } catch {
         return;
       }
+      // `message.thinking` is reasoning. Only `content` can reach the answer.
       const tok = obj.message?.content;
       if (tok) {
         acc.full += tok;
@@ -902,19 +1044,13 @@ export class OllamaClient implements ModelProvider {
     const timeoutMs = options?.timeoutMs ?? OLLAMA_CHAT_TOOLS_TIMEOUT_MS;
     const ollamaTools = ollamaToolDefs(tools);
 
-    const openAiBody: Record<string, unknown> = {
+    const openAiBody = openAiAskBody(
       model,
-      stream: false,
-      temperature: 0,
-      messages: agentMessagesToOpenAI(messages),
-      tools: ollamaTools,
-      // Qwen3 + tools + thinking ON can burn max tokens with empty tool_calls (ollama #10976).
-      reasoning_effort: "none",
-      think: false,
-    };
-    if (options?.requireToolCall) {
-      openAiBody.tool_choice = "required";
-    }
+      agentMessagesToOpenAI(messages),
+      ollamaTools,
+      false,
+      options?.requireToolCall === true,
+    );
 
     const openAi = await ollamaFetch(
       `${this.baseUrl}/v1/chat/completions`,
@@ -947,32 +1083,15 @@ export class OllamaClient implements ModelProvider {
       throw new Error(`HTTP ${openAi.status} from /v1/chat/completions (tools): ${t.slice(0, 200)}`);
     }
 
-    const nativeBody: Record<string, unknown> = {
-      model,
-      stream: false,
-      think: false,
-      tools: ollamaTools,
-      messages: nativeAgentMessages(messages),
-    };
+    const nativeBody = nativeAskBody(model, nativeAgentMessages(messages), false, ollamaTools);
 
-    const postNative = async (body: Record<string, unknown>) =>
-      ollamaFetch(
-        `${this.baseUrl}/api/chat`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(body),
-        },
-        timeoutMs,
-        "chat-with-tools",
-        options?.signal,
-      );
-
-    let r = await postNative(nativeBody);
-    if (!r.ok && nativeBody.think !== undefined) {
-      delete nativeBody.think;
-      r = await postNative(nativeBody);
-    }
+    const r = await postHonoringThink(
+      `${this.baseUrl}/api/chat`,
+      nativeBody,
+      timeoutMs,
+      "chat-with-tools",
+      options?.signal,
+    );
     if (!r.ok) {
       const t = await r.text().catch(() => "");
       throw new Error(`HTTP ${r.status} from /api/chat (tools): ${t.slice(0, 200)}`);
@@ -1016,15 +1135,7 @@ export class OllamaClient implements ModelProvider {
       });
     };
     const ollamaTools = ollamaToolDefs(tools);
-    const body: Record<string, unknown> = {
-      model,
-      stream: true,
-      temperature: 0,
-      messages: agentMessagesToOpenAI(messages),
-      tools: ollamaTools,
-      reasoning_effort: "none",
-      think: false,
-    };
+    const body = openAiAskBody(model, agentMessagesToOpenAI(messages), ollamaTools, true, false);
     const r = await ollamaFetch(
       `${this.baseUrl}/v1/chat/completions`,
       {

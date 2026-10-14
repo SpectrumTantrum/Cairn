@@ -78,7 +78,6 @@ export {
   OLLAMA_CHAT_STREAM_TIMEOUT_MS,
   OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
   OLLAMA_WARM_TIMEOUT_MS,
-  CHAT_MODEL_KEEP_ALIVE,
   agentMessagesToOpenAI,
   nextOllamaWarmGate,
   ollamaInstanceToken,

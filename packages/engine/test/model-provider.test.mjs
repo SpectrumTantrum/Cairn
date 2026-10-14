@@ -466,6 +466,9 @@ function installOllama(state) {
     if (path.endsWith("/api/ps")) {
       return new Response(JSON.stringify({ models: state.ps ?? [] }), { status: 200 });
     }
+    if (path.endsWith("/api/embed")) {
+      return new Response(JSON.stringify({ embeddings: [[0.01]] }), { status: 200 });
+    }
     if (body && body.keep_alive === 0 && state.releaseStatus) {
       return new Response("busy", { status: state.releaseStatus });
     }
@@ -526,8 +529,10 @@ test("agentic warm posts the tool prompt and classic warm posts the grounding pr
     assert.equal(agentic[0].body.reasoning_effort, "none");
     assert.equal(agentic[0].body.think, false);
     assert.equal(agentic[0].body.tool_choice, "required");
-    assert.equal(agentic[0].body.max_tokens, 1);
-    assert.equal(agentic[0].body.keep_alive, "30m");
+    assert.equal(agentic[0].body.max_tokens, undefined);
+    assert.equal(agentic[0].body.keep_alive, undefined);
+    assert.equal(agentic[0].body.options, undefined);
+    assert.equal(agentic[0].body.num_ctx, undefined);
     assert.deepEqual(agentic[0].body.messages, request.messages);
     assert.deepEqual(
       agentic[0].body.tools.map((tool) => tool.function.name),
@@ -555,10 +560,8 @@ test("agentic warm posts the tool prompt and classic warm posts the grounding pr
     assert.deepEqual(classic[0].body, {
       model: "qwen3:4b",
       messages: engine.chatWarmRequest("classic").messages,
-      stream: false,
+      stream: true,
       think: false,
-      keep_alive: "30m",
-      options: { num_predict: 1 },
     });
   } finally {
     restore();
@@ -582,7 +585,9 @@ test("a resident model is still primed until this process has cached that prompt
     assert.equal(state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).length, 1);
     assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("classic")), "warmed");
     assert.equal(state.calls.filter((call) => call.body?.keep_alive === 0).length, 0);
-    const classic = state.calls.filter((call) => call.path.endsWith("/api/chat") && call.body?.keep_alive === "30m");
+    const classic = state.calls.filter(
+      (call) => call.path.endsWith("/api/chat") && call.body?.model === "qwen3:8b" && call.body?.think === false,
+    );
     assert.equal(classic.length, 1);
     assert.equal(classic[0].body.messages[1].content, "SOURCES:\n");
   } finally {
@@ -628,7 +633,10 @@ test("an older Ollama without /v1 still primes the agentic prompt natively", asy
     const native = state.calls.filter((call) => call.path.endsWith("/api/chat"));
     assert.equal(native.length, 1);
     assert.equal(native[0].body.think, false);
-    assert.equal(native[0].body.options.num_predict, 1);
+    assert.equal(native[0].body.stream, false);
+    assert.equal(native[0].body.keep_alive, undefined);
+    assert.equal(native[0].body.options, undefined);
+    assert.equal(native[0].body.num_ctx, undefined);
     assert.deepEqual(
       native[0].body.tools.map((tool) => tool.function.name),
       ["list", "find", "grep", "read", "open"],
@@ -636,6 +644,186 @@ test("an older Ollama without /v1 still primes the agentic prompt natively", asy
     assert.equal(native[0].body.messages[0].content, engine.ASK_AGENT_SYSTEM);
   } finally {
     restore();
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("prime options match the real Ask, and a steady poll does not unload or re-embed", async () => {
+  const state = {
+    calls: [],
+    ps: [],
+    tags: ["qwen3-embedding:latest", "nomic-embed-text", "qwen3:4b", "qwen3:8b"],
+  };
+  const restore = installOllama(state);
+  try {
+    const engine = await import("../dist/index.js");
+    const { DEFAULT_EMBED } = await import("../dist/embed.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const tools = [{ name: "find", description: "search", parameters: { type: "object", properties: {} } }];
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("agentic")), "warmed");
+    const agenticPrime = state.calls.find((call) => call.path.endsWith("/v1/chat/completions"));
+    await client.chatWithTools("qwen3:8b", [{ role: "user", content: "QUESTION: tide" }], tools, {
+      requireToolCall: true,
+    });
+    const agenticAsk = state.calls.filter((call) => call.path.endsWith("/v1/chat/completions")).at(-1);
+    assert.deepEqual(Object.keys(agenticPrime.body).sort(), Object.keys(agenticAsk.body).sort());
+    for (const key of ["stream", "temperature", "reasoning_effort", "think", "tool_choice"]) {
+      assert.equal(agenticPrime.body[key], agenticAsk.body[key], key);
+    }
+    assert.equal(agenticPrime.body.keep_alive, undefined);
+    assert.equal(agenticAsk.body.keep_alive, undefined);
+    assert.equal(agenticPrime.body.max_tokens, undefined);
+    assert.equal(agenticAsk.body.max_tokens, undefined);
+
+    const embeds = state.calls.filter((call) => call.path.endsWith("/api/embed"));
+    assert.equal(embeds.length, 1);
+    assert.equal(embeds[0].body.model, DEFAULT_EMBED);
+    assert.deepEqual(embeds[0].body.input, ["."]);
+    assert.equal(embeds[0].body.keep_alive, undefined);
+    assert.equal(Object.keys(embeds[0].body).sort().join(), "input,model");
+
+    state.ps = [
+      { name: "qwen3:8b" },
+      { name: "qwen3-embedding:0.6b" },
+    ];
+    const before = state.calls.length;
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("agentic")), "skipped");
+    const added = state.calls.slice(before);
+    assert.equal(added.some((call) => call.path.endsWith("/v1/chat/completions")), false);
+    assert.equal(added.some((call) => call.path.endsWith("/api/embed")), false);
+    assert.equal(added.some((call) => call.body?.keep_alive === 0), false);
+
+    state.ps = [{ name: "qwen3:8b" }];
+    assert.equal(await client.warmChatModel("qwen3:8b", engine.chatWarmRequest("agentic")), "skipped");
+    const reembed = state.calls.filter((call) => call.path.endsWith("/api/embed"));
+    assert.equal(reembed.length, 2);
+    assert.deepEqual(reembed[1].body, embeds[0].body);
+
+    state.ps = [{ name: "qwen3:8b" }, { name: DEFAULT_EMBED }];
+    assert.equal(await client.warmChatModel("qwen3:4b", engine.chatWarmRequest("classic")), "warmed");
+    const classicPrime = state.calls.filter(
+      (call) => call.path.endsWith("/api/chat") && call.body?.model === "qwen3:4b" && call.body?.think === false,
+    ).at(-1);
+    engine.setModelProvider(client);
+    await engine.chatStream("qwen3:4b", [{ role: "user", content: "SOURCES:\nnotes\n\nQUESTION: q" }], {
+      onToken() {},
+    });
+    const classicAsk = state.calls.filter((call) => call.path.endsWith("/api/chat") && call.body?.stream === true).at(-1);
+    assert.deepEqual(Object.keys(classicPrime.body).sort(), Object.keys(classicAsk.body).sort());
+    assert.equal(classicPrime.body.stream, true);
+    assert.equal(classicPrime.body.think, false);
+    assert.equal(classicAsk.body.think, false);
+    assert.equal(classicPrime.body.keep_alive, undefined);
+    assert.equal(classicPrime.body.options, undefined);
+    assert.equal(classicAsk.body.options, undefined);
+    assert.equal(classicPrime.body.num_ctx, undefined);
+    const releases = state.calls.filter((call) => call.body?.keep_alive === 0);
+    assert.equal(releases.length, 1);
+    assert.equal(releases[0].body.model, "qwen3:8b");
+    assert.equal(releases.some((call) => /embed/i.test(String(call.body?.model ?? ""))), false);
+
+    const embedsBeforeRestart = state.calls.filter((call) => call.path.endsWith("/api/embed")).length;
+    state.ps = [];
+    assert.equal((await client.probeForWarm()).recovered, true);
+    state.ps = [{ name: "qwen3:4b" }];
+    assert.equal(await client.warmChatModel("qwen3:4b", engine.chatWarmRequest("classic")), "warmed");
+    assert.ok(state.calls.filter((call) => call.path.endsWith("/api/embed")).length > embedsBeforeRestart);
+  } finally {
+    restore();
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("classic streaming keeps think:false and never emits reasoning", async () => {
+  const calls = [];
+  let attempt = 0;
+  const originalFetch = globalThis.fetch;
+  const hello = [
+    JSON.stringify({ message: { content: "<thi", thinking: "hidden reasoning" }, done: false }),
+    JSON.stringify({ message: { content: "nk>plan the answer</think>Hel" }, done: false }),
+    JSON.stringify({ message: { thinking: "still hidden", content: "" }, done: false }),
+    JSON.stringify({ message: { content: "lo" }, done: true }),
+  ].join("\n");
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init.body));
+    calls.push(body);
+    attempt += 1;
+    if (attempt === 1) return new Response("overloaded", { status: 500 });
+    if (attempt === 3) {
+      return new Response(JSON.stringify({ message: { content: "<think>secret" }, done: true }), { status: 200 });
+    }
+    return new Response(hello, { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    await assert.rejects(client.chatStream("qwen3:4b", [{ role: "user", content: "q" }]), /HTTP 500/);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].think, false);
+    assert.equal(calls[0].stream, true);
+    assert.equal(calls[0].keep_alive, undefined);
+    assert.equal(calls[0].options, undefined);
+
+    engine.setModelProvider(client);
+    const tokens = [];
+    const answer = await engine.chatStream("qwen3:4b", [{ role: "user", content: "q" }], {
+      onToken: (token) => tokens.push(token),
+    });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].think, false);
+    assert.equal(tokens.join(""), "Hello");
+    assert.equal(answer, "Hello");
+    assert.equal(tokens.some((token) => /plan the answer|hidden|think/i.test(token)), false);
+
+    const hidden = [];
+    const unclosed = await engine.chatStream("qwen3:4b", [{ role: "user", content: "q" }], {
+      onToken: (token) => hidden.push(token),
+    });
+    assert.deepEqual(hidden, []);
+    assert.equal(unclosed, "");
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("an old server that rejects think is retried once, and the answer stays visible text", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(String(init.body));
+    calls.push(body);
+    if (body.think !== undefined) {
+      return new Response('{"error":"unknown field \\"think\\""}', { status: 400 });
+    }
+    const lines = [
+      JSON.stringify({ message: { content: "<think>secret</think>Noted" }, done: true }),
+    ].join("\n");
+    return new Response(lines, { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    engine.setModelProvider(new engine.OllamaClient("http://ollama.test"));
+    const tokens = [];
+    const answer = await engine.chatStream("qwen3:4b", [{ role: "user", content: "q" }], {
+      onToken: (token) => tokens.push(token),
+    });
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].think, false);
+    assert.equal(calls[1].think, undefined);
+    assert.equal(tokens.join(""), "Noted");
+    assert.equal(answer, "Noted");
+  } finally {
+    globalThis.fetch = originalFetch;
     const engine = await import("../dist/index.js");
     engine.resetModelProvider();
     engine.resetOllamaHttpClient();

@@ -89,7 +89,23 @@ export async function chatStream(
 ): Promise<string> {
   const active = provider ?? getModelProvider();
   if (active.chatStream) {
-    const raw = await active.chatStream(model, messages, callbacks, think);
+    // Qwen3 can stream a `<think>` block inside `message.content` before the
+    // answer. Strip it before `onToken` so the answer area never shows it.
+    const filter = new ThinkingTokenFilter();
+    const raw = await active.chatStream(
+      model,
+      messages,
+      {
+        ...callbacks,
+        onToken: (token) => {
+          const visible = filter.push(token);
+          if (visible) callbacks?.onToken?.(visible);
+        },
+      },
+      think,
+    );
+    const tail = filter.finish();
+    if (tail) callbacks?.onToken?.(tail);
     return stripThinking(raw);
   }
   const answer = await chat(model, messages, think, provider);
@@ -97,9 +113,80 @@ export async function chatStream(
   return answer;
 }
 
+const THINK_OPEN = "<think>";
+const THINK_CLOSE = "</think>";
+
+/**
+ * Drops a Qwen thinking block as tokens arrive, including when the tags are
+ * split across chunks. An unclosed block is discarded: it is reasoning, not
+ * the answer.
+ */
+class ThinkingTokenFilter {
+  private buf = "";
+  private inside = false;
+
+  push(chunk: string): string {
+    this.buf += chunk;
+    let out = "";
+    while (this.buf.length > 0) {
+      if (this.inside) {
+        const at = indexOfIgnoreCase(this.buf, THINK_CLOSE);
+        if (at === -1) {
+          this.buf = this.buf.slice(this.buf.length - partialTagLength(this.buf, THINK_CLOSE));
+          break;
+        }
+        this.buf = this.buf.slice(at + THINK_CLOSE.length);
+        this.inside = false;
+        continue;
+      }
+      const at = indexOfIgnoreCase(this.buf, THINK_OPEN);
+      if (at === -1) {
+        const keep = partialTagLength(this.buf, THINK_OPEN);
+        out += this.buf.slice(0, this.buf.length - keep);
+        this.buf = this.buf.slice(this.buf.length - keep);
+        break;
+      }
+      out += this.buf.slice(0, at);
+      this.buf = this.buf.slice(at + THINK_OPEN.length);
+      this.inside = true;
+    }
+    return out;
+  }
+
+  finish(): string {
+    if (this.inside) {
+      this.buf = "";
+      this.inside = false;
+      return "";
+    }
+    const rest = this.buf;
+    this.buf = "";
+    return rest;
+  }
+}
+
+function indexOfIgnoreCase(hay: string, needle: string): number {
+  return hay.toLowerCase().indexOf(needle.toLowerCase());
+}
+
+function partialTagLength(buf: string, tag: string): number {
+  const max = Math.min(buf.length, tag.length - 1);
+  const lower = buf.toLowerCase();
+  const want = tag.toLowerCase();
+  for (let n = max; n > 0; n--) {
+    if (want.startsWith(lower.slice(lower.length - n))) return n;
+  }
+  return 0;
+}
+
 function stripThinking(s: string): string {
   let out = s;
-  const lastClose = out.lastIndexOf("</think>");
-  if (lastClose !== -1) out = out.slice(lastClose + "</think>".length);
+  const lower = out.toLowerCase();
+  const lastClose = lower.lastIndexOf(THINK_CLOSE);
+  if (lastClose !== -1) out = out.slice(lastClose + THINK_CLOSE.length);
+  else {
+    const open = lower.lastIndexOf(THINK_OPEN);
+    if (open !== -1) out = out.slice(0, open);
+  }
   return out.replace(/<\/?think>/gi, "").trim();
 }
