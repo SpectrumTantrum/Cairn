@@ -228,6 +228,8 @@ export function App() {
   // one render (a freshly-loaded thread must not be re-saved and bumped to the top).
   const suppressPersistRef = useRef(false);
   const [asking, setAsking] = useState(false);
+  /** Stop is only for classic and agentic Ask. Studio and the write agent share `asking` but are not cancellable here. */
+  const [canStop, setCanStop] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [mode, setMode] = useState<AgentMode>("ask");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
@@ -987,6 +989,7 @@ export function App() {
     ]);
     setChatInput("");
     setAsking(true);
+    setCanStop(true);
     setError(null);
 
     try {
@@ -1042,7 +1045,10 @@ export function App() {
       const message = errorMessage(err);
       setThread((prev) => settleStreaming(prev, { role: "error", text: message }));
     } finally {
-      if (activeRequestId.current === requestId) setAsking(false);
+      if (activeRequestId.current === requestId) {
+        setAsking(false);
+        setCanStop(false);
+      }
     }
   }
 
@@ -1060,6 +1066,7 @@ export function App() {
     ]);
     setChatInput("");
     setAsking(true);
+    setCanStop(true);
     setError(null);
 
     try {
@@ -1086,7 +1093,10 @@ export function App() {
       const message = errorMessage(err);
       setThread((prev) => settleStreaming(prev, { role: "error", text: message }));
     } finally {
-      if (activeRequestId.current === requestId) setAsking(false);
+      if (activeRequestId.current === requestId) {
+        setAsking(false);
+        setCanStop(false);
+      }
     }
   }
 
@@ -1239,12 +1249,13 @@ export function App() {
   );
 
   function stopAsk(): void {
-    if (!asking) return;
-    // Same cancel as New chat: invalidate the in-flight result and abort Ollama.
+    if (!canStop) return;
+    // Same cancel as New chat: invalidate the in-flight result and abort the model call.
     // Keep the question and every earlier turn; drop only the streaming draft.
     activeRequestId.current = -1;
     void window.cairn.stopAsk();
     setAsking(false);
+    setCanStop(false);
     setThread((prev) => {
       const last = prev[prev.length - 1];
       if (last?.role === "assistant" && last.streaming) return prev.slice(0, -1);
@@ -1257,6 +1268,7 @@ export function App() {
     activeRequestId.current = -1;
     void window.cairn.resetChat();
     setAsking(false);
+    setCanStop(false);
     setThread([]);
     setLastSources([]);
     setExcludedSources(new Set());
@@ -1532,6 +1544,7 @@ export function App() {
               onOpenSettings={() => setSettingsOpen(true)}
               onSubmit={onSubmit}
               onStop={stopAsk}
+              canStop={canStop}
               onClearScope={clearScope}
               onCite={openCitation}
               onAgentApply={onAgentApply}

@@ -18,19 +18,33 @@ function slice(source, start, end) {
 
 test("the Ask box shows Stop while a turn is in flight and Esc triggers it", () => {
   const fn = slice(composer, "export function Composer", "function ModeChip");
-  assert.match(fn, /const showStop = busy && mode === "ask"/);
+  assert.match(fn, /const showStop = busy && mode === "ask" && canStop/);
   assert.match(fn, /e\.key === "Escape" && showStop/);
   assert.match(fn, /onStop\(\)/);
   assert.match(fn, /aria-label="Stop"/);
   assert.match(fn, /title="Stop \(Esc\)"/);
   assert.match(fn, /className="send-btn stop-btn"/);
+  assert.match(fn, /<ModeChip mode=\{mode\} busy=\{busy\}/);
+  const modeChip = slice(composer, "function ModeChip", "function EscalateChip");
+  assert.match(modeChip, /disabled=\{busy\}/);
+  assert.match(modeChip, /if \(busy\) setOpen\(false\)/);
 });
 
 test("Stop aborts the in-flight Ask and removes only the streaming draft", () => {
   const stop = slice(app, "function stopAsk()", "function newThread()");
+  assert.match(stop, /if \(!canStop\) return/);
   assert.match(stop, /activeRequestId\.current = -1/);
   assert.match(stop, /window\.cairn\.stopAsk\(\)/);
   assert.match(stop, /setAsking\(false\)/);
+  assert.match(stop, /setCanStop\(false\)/);
+  const classic = slice(app, "async function runChat", "function onSubmit()");
+  const agentic = slice(app, "async function runAgenticAskChat", "async function runChat");
+  const studio = slice(app, "async function submitStudio", "const patchProposal");
+  const agent = slice(app, "async function submitAgent", "async function submitStudio");
+  assert.match(classic, /setCanStop\(true\)/);
+  assert.match(agentic, /setCanStop\(true\)/);
+  assert.equal(studio.includes("setCanStop(true)"), false);
+  assert.equal(agent.includes("setCanStop(true)"), false);
   assert.match(stop, /last\?\.role === "assistant" && last\.streaming/);
   assert.match(stop, /prev\.slice\(0, -1\)/);
   assert.equal(stop.includes("resetChat"), false);

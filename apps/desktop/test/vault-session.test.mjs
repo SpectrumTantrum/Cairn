@@ -953,6 +953,58 @@ test("stopGenerating cancels a classic stream without keeping it in history, and
   }
 });
 
+test("a new ask started while stop is settling does not keep the cancelled question", async () => {
+  const vault = makeIndexedVaultDir();
+  let release = () => {};
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  let entered = () => {};
+  const enteredGate = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const seen = [];
+  let n = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatStream: async (_model, messages, callbacks) => {
+        n += 1;
+        seen.push(messages.map((m) => m.content).join("\n"));
+        if (n === 1) {
+          entered();
+          await gate;
+          if (callbacks?.signal?.aborted) {
+            throw new DOMException("The operation was aborted.", "AbortError");
+          }
+          return "should not finish";
+        }
+        return "Grounded answer [1].";
+      },
+    }),
+  );
+  try {
+    const session = createVaultSession({
+      openIndex: (v) => buildLexicalIndex(v, [{ file: "a.md", text: "markdown vault notes" }]),
+    });
+    session.setVault(vault);
+    const pending = session.chatSend("markdown vault CANCEL", { onToken() {} });
+    await enteredGate;
+    session.stopGenerating();
+    const next = session.chatSend("markdown vault NEXT", { onToken() {} });
+    release();
+    await assert.rejects(pending, (err) => err instanceof DOMException && err.name === "AbortError");
+    const result = await next;
+    assert.equal(result.answer, "Grounded answer [1].");
+    assert.equal(seen.at(-1).includes("markdown vault CANCEL"), false);
+    assert.match(seen.at(-1), /markdown vault NEXT/);
+  } finally {
+    release();
+    resetModelProvider();
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("resetChat cancels an in-flight classic stream", async () => {
   const vault = makeIndexedVaultDir();
   let release = () => {};

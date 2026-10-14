@@ -41,6 +41,7 @@ interface RightRailProps {
   onOpenSettings(): void;
   onSubmit(): void;
   onStop(): void;
+  canStop: boolean;
   onClearScope(): void;
   onCite(source: SearchHit): void;
   onAgentApply(runId: string, proposalId: string): void;
@@ -149,6 +150,7 @@ export function RightRail(props: RightRailProps) {
             onOpenSettings={props.onOpenSettings}
             onSubmit={props.onSubmit}
             onStop={props.onStop}
+            canStop={props.canStop}
             onClearScope={props.onClearScope}
             onCite={props.onCite}
             onAgentApply={props.onAgentApply}

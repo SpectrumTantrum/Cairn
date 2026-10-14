@@ -29,6 +29,8 @@ interface ComposerProps {
   onOpenSettings(): void;
   onSubmit(): void;
   onStop(): void;
+  /** True only while a classic or agentic Ask can be cancelled. Studio and Agent stay busy without Stop. */
+  canStop: boolean;
   onClearScope(): void;
 }
 
@@ -51,9 +53,10 @@ export function Composer({
   onOpenSettings,
   onSubmit,
   onStop,
+  canStop,
   onClearScope,
 }: ComposerProps) {
-  const showStop = busy && mode === "ask";
+  const showStop = busy && mode === "ask" && canStop;
 
   function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>): void {
     if (e.key === "Escape" && showStop) {
@@ -93,7 +96,7 @@ export function Composer({
           onKeyDown={onKeyDown}
         />
         <div className="composer-controls">
-          <ModeChip mode={mode} onSelectMode={onSelectMode} />
+          <ModeChip mode={mode} busy={busy} onSelectMode={onSelectMode} />
           <ModelChip
             models={models}
             selectedModel={selectedModel}
@@ -135,12 +138,31 @@ export function Composer({
  * Trust-mode picker (ADR-0008). Ask = read-only grounded Q&A; Agent = the write
  * tool-loop, where every proposed edit is a diff you approve before it touches disk.
  */
-function ModeChip({ mode, onSelectMode }: { mode: AgentMode; onSelectMode(mode: AgentMode): void }) {
+function ModeChip({
+  mode,
+  busy,
+  onSelectMode,
+}: {
+  mode: AgentMode;
+  busy: boolean;
+  onSelectMode(mode: AgentMode): void;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useCloseOnOutside(() => setOpen(false));
+  useEffect(() => {
+    if (busy) setOpen(false);
+  }, [busy]);
   return (
     <span className="menu-wrap" ref={ref}>
-      <button type="button" className="chip accent" onClick={() => setOpen((v) => !v)}>
+      <button
+        type="button"
+        className="chip accent"
+        disabled={busy}
+        title={busy ? "Finish or stop the current run before switching mode" : undefined}
+        onClick={() => {
+          if (!busy) setOpen((v) => !v);
+        }}
+      >
         {mode === "agent" ? "Agent" : "Ask"} <ChevronDown size={13} />
       </button>
       {open ? (

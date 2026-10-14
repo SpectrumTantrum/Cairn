@@ -227,6 +227,87 @@ test("HTTP error maps to a Cloud-prefixed message (not mistaken for local Ollama
   );
 });
 
+test("openai stream forwards the stop signal and rejects when it aborts", async () => {
+  const ac = new AbortController();
+  let seen;
+  const impl = async (_url, init) => {
+    seen = init?.signal;
+    return {
+      ok: true,
+      status: 200,
+      body: (async function* () {
+        yield enc.encode('data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n');
+        await new Promise((_resolve, reject) => {
+          const fail = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+          if (init?.signal?.aborted) fail();
+          else init?.signal?.addEventListener("abort", fail, { once: true });
+        });
+      })(),
+      async text() {
+        return "";
+      },
+    };
+  };
+  const p = new CloudProvider({
+    kind: "openai-compat",
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4o-mini",
+    credentials: { apiKey: "sk-test" },
+    fetchImpl: impl,
+  });
+  const pending = p.chatStream("gpt-4o-mini", MESSAGES, { signal: ac.signal, onToken() {} });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  ac.abort();
+  await assert.rejects(pending, (err) => err instanceof DOMException && err.name === "AbortError");
+  assert.equal(seen, ac.signal);
+});
+
+test("anthropic and bedrock forward the stop signal on the request", async () => {
+  const ac = new AbortController();
+  const done = {
+    ok: true,
+    status: 200,
+    body: null,
+    async json() {
+      return { output: { message: { content: [{ text: "ok" }] } } };
+    },
+    async text() {
+      return "";
+    },
+  };
+  let anthropicSignal;
+  const anthropic = new CloudProvider({
+    kind: "anthropic",
+    baseUrl: "https://api.anthropic.com/v1",
+    model: "claude-3-5-sonnet",
+    credentials: { apiKey: "sk-ant" },
+    fetchImpl: async (_url, init) => {
+      anthropicSignal = init?.signal;
+      return done;
+    },
+  });
+  await anthropic.chatStream("claude-3-5-sonnet", MESSAGES, { signal: ac.signal });
+  assert.equal(anthropicSignal, ac.signal);
+
+  let bedrockSignal;
+  const bedrock = new CloudProvider({
+    kind: "bedrock",
+    baseUrl: "",
+    model: "anthropic.claude-3-sonnet-20240229-v1:0",
+    region: "us-east-1",
+    credentials: { accessKeyId: "AKIA_TEST", secretAccessKey: "secret_test" },
+    fetchImpl: async (_input, init) => {
+      bedrockSignal = init?.signal;
+      return done;
+    },
+  });
+  const text = await bedrock.chatStream("anthropic.claude-3-sonnet-20240229-v1:0", MESSAGES, {
+    signal: ac.signal,
+  });
+  assert.equal(text, "ok");
+  assert.equal(bedrockSignal, ac.signal);
+});
+
 test("preset registry ships every provider with a verified/editable base URL", () => {
   const ids = PROVIDER_PRESETS.map((p) => p.id);
   for (const required of [
