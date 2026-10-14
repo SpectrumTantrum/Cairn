@@ -552,4 +552,16 @@ export function registerIpcHandlers(): void {
       return { up: false, models: [] };
     }
   });
+
+  // Background chat-model preload. Never rejects: a down Ollama stays silent.
+  ipcMain.handle("ollama:warm", async (_event, model: unknown) => {
+    if (typeof model !== "string" || !model.trim()) return "skipped";
+    try {
+      const provider = getModelProvider();
+      if (!provider.warmChatModel) return "skipped";
+      return await provider.warmChatModel(model);
+    } catch {
+      return "failed";
+    }
+  });
 }

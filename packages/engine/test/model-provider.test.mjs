@@ -383,3 +383,89 @@ test("OllamaClient and embed delegate through the same provider seam", async () 
   const vectors = await embed("test-embedder", ["probe"]);
   assert.deepEqual(vectors, [[0.5, 0.5]]);
 });
+
+test("warmChatModel loads a chat model once and never the embedder", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const path = String(url);
+    calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (path.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ done: true, done_reason: "load" }), { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    assert.equal(await client.warmChatModel("qwen3-embedding:0.6b"), "skipped");
+    assert.equal(calls.length, 0);
+    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
+    assert.equal(await client.warmChatModel("qwen3:8b:latest"), "skipped");
+    const posts = calls.filter((call) => call.path.endsWith("/api/chat"));
+    assert.equal(posts.length, 1);
+    assert.deepEqual(posts[0].body, {
+      model: "qwen3:8b",
+      messages: [],
+      keep_alive: "30m",
+      think: false,
+      stream: false,
+    });
+    assert.equal(calls.some((call) => call.path.includes("/api/embed")), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("warmChatModel skips a model /api/ps already lists", async () => {
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    calls.push(String(url));
+    return new Response(
+      JSON.stringify({ models: [{ name: "qwen3:8b:latest", model: "qwen3:8b:latest" }] }),
+      { status: 200 },
+    );
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
+    assert.equal(calls.some((url) => url.endsWith("/api/chat")), false);
+    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
+    assert.equal(calls.length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
+test("warmChatModel failure stays silent and can be retried", async () => {
+  const originalFetch = globalThis.fetch;
+  let down = true;
+  globalThis.fetch = async (url) => {
+    if (down) throw new Error("connect ECONNREFUSED");
+    if (String(url).endsWith("/api/ps")) return new Response(JSON.stringify({ models: [] }), { status: 200 });
+    return new Response(JSON.stringify({ done: true, done_reason: "load" }), { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    assert.equal(await client.warmChatModel("qwen3:8b"), "failed");
+    down = false;
+    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
