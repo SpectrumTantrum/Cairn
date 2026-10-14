@@ -25,6 +25,12 @@ export const OLLAMA_CHAT_STREAM_TIMEOUT_MS = 600_000;
  * Must exceed undici's 300s default — agentic Ask and Agent mode use this path.
  */
 export const OLLAMA_CHAT_TOOLS_TIMEOUT_MS = 600_000;
+/** Background chat-model preload. Long enough for a cold 8B load, short of the ask budget. */
+export const OLLAMA_WARM_TIMEOUT_MS = 180_000;
+/** How long a warmed chat model stays resident. Ollama's default idle unload is 5m. */
+export const CHAT_MODEL_KEEP_ALIVE = "30m";
+
+export type ChatWarmResult = "warmed" | "skipped" | "failed";
 
 const ollamaAgentByTimeout = new Map<number, object>();
 let undiciFetch: typeof fetch | null = null;
@@ -267,6 +273,12 @@ export interface ModelProvider {
     tools: ToolSchema[],
     options?: ChatWithToolsOptions,
   ): Promise<ToolTurn>;
+  /**
+   * Load one chat model and hold it. Embedders are refused. A model already
+   * listed by `/api/ps`, or already warmed this process, is skipped. Failures
+   * resolve as `"failed"` and are not remembered, so a later call can retry.
+   */
+  warmChatModel?(model: string): Promise<ChatWarmResult>;
 }
 
 function parseToolCallArguments(raw: unknown): Record<string, unknown> {
@@ -379,8 +391,74 @@ export function agentMessagesToOpenAI(messages: AgentMessage[]): Record<string, 
   return out;
 }
 
+function isEmbedModelName(model: string): boolean {
+  return /embed/i.test(model);
+}
+
+/** `qwen3:8b` and `qwen3:8b:latest` are the same resident model. */
+function chatModelKey(model: string): string {
+  return model.trim().replace(/:latest$/, "");
+}
+
 export class OllamaClient implements ModelProvider {
+  /** Chat models this process has already loaded or found resident. */
+  private readonly warmedChatModels = new Set<string>();
+
   constructor(private readonly baseUrl = process.env.OLLAMA_HOST || "http://localhost:11434") {}
+
+  async warmChatModel(model: string): Promise<ChatWarmResult> {
+    const name = model.trim();
+    if (!name || isEmbedModelName(name)) return "skipped";
+    const key = chatModelKey(name);
+    if (this.warmedChatModels.has(key)) return "skipped";
+    try {
+      let running: string[] = [];
+      try {
+        running = await this.runningModelNames();
+      } catch {
+        running = [];
+      }
+      if (running.some((listed) => chatModelKey(listed) === key)) {
+        this.warmedChatModels.add(key);
+        return "skipped";
+      }
+      const r = await ollamaFetch(
+        `${this.baseUrl}/api/chat`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            model: name,
+            messages: [],
+            keep_alive: CHAT_MODEL_KEEP_ALIVE,
+            think: false,
+            // Load-only returns one object. The default stream would keep the body open.
+            stream: false,
+          }),
+        },
+        OLLAMA_WARM_TIMEOUT_MS,
+        "warm-chat",
+      );
+      if (!r.ok) return "failed";
+      await r.text().catch(() => "");
+      this.warmedChatModels.add(key);
+      return "warmed";
+    } catch {
+      return "failed";
+    }
+  }
+
+  private async runningModelNames(): Promise<string[]> {
+    const r = await ollamaFetch(`${this.baseUrl}/api/ps`, undefined, OLLAMA_TAGS_TIMEOUT_MS, "ps");
+    if (!r.ok) throw new Error(`HTTP ${r.status} from /api/ps`);
+    const j = (await r.json()) as { models?: { name?: string; model?: string }[] };
+    const names: string[] = [];
+    for (const entry of j.models ?? []) {
+      if (typeof entry.name === "string" && entry.name) names.push(entry.name);
+      if (typeof entry.model === "string" && entry.model) names.push(entry.model);
+    }
+    return names;
+  }
 
   async listModels(): Promise<string[]> {
     const r = await ollamaFetch(`${this.baseUrl}/api/tags`, undefined, OLLAMA_TAGS_TIMEOUT_MS, "tags");

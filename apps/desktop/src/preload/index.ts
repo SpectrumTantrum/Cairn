@@ -94,6 +94,8 @@ export interface CairnApi {
   /** Delete a file or folder (folders recursively). Confirmation is a renderer concern. */
   deletePath(path: string): Promise<void>;
   checkOllama(): Promise<OllamaStatus>;
+  /** Load the chat model in the background. Embedders are ignored. Never rejects. */
+  warmChatModel(model: string): Promise<"warmed" | "skipped" | "failed">;
   /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
   agentStart(payload: { goal: string; model?: string; scope?: string[] }): Promise<AgentStartResult>;
   /** Approve one proposed edit — the per-hunk gate; the only path to disk. */
@@ -173,6 +175,7 @@ const api: CairnApi = {
   movePath: (from, to) => ipcRenderer.invoke("vault:move", { from, to }),
   deletePath: (path) => ipcRenderer.invoke("vault:delete", { path }),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
+  warmChatModel: (model) => ipcRenderer.invoke("ollama:warm", model),
   agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
   agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),

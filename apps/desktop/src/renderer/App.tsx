@@ -393,10 +393,23 @@ export function App() {
 
   const clearScope = useCallback(() => setExcludedSources(new Set()), []);
 
+  function requestChatWarm(model: string | null): void {
+    if (!model) return;
+    // Fire and forget. A failure must not toast, disable the composer, or block the shell.
+    void window.cairn.warmChatModel(model).catch(() => {});
+  }
+
   async function refreshOllama(): Promise<void> {
     const status = await window.cairn.checkOllama();
     setOllama(status);
-    setSelectedModel((current) => current ?? status.models[0] ?? null);
+    const model = selectedModel ?? status.models[0] ?? null;
+    setSelectedModel((current) => current ?? model);
+    if (status.up) requestChatWarm(model);
+  }
+
+  function selectChatModel(model: string): void {
+    setSelectedModel(model);
+    requestChatWarm(model);
   }
 
   const refreshProviders = useCallback(async (): Promise<void> => {
@@ -1513,7 +1526,7 @@ export function App() {
               escalateTarget={escalateTarget}
               onInputChange={setChatInput}
               onSelectMode={setMode}
-              onSelectModel={setSelectedModel}
+              onSelectModel={selectChatModel}
               onSelectEscalation={setEscalateTarget}
               onOpenSettings={() => setSettingsOpen(true)}
               onSubmit={onSubmit}
@@ -1555,6 +1568,7 @@ export function App() {
           onAgenticAskChange={(enabled) => {
             writeAgenticAskPref(window.localStorage, enabled);
             setAgenticAskRev((v) => v + 1);
+            if (enabled) requestChatWarm(selectedModel);
           }}
           onResetLayout={() => {
             vaultRail.reset();
