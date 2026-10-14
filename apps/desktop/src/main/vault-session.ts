@@ -207,6 +207,9 @@ export class VaultSession {
   // The single in-flight Agent run (ADR-0008). Reset on vault switch / reindex.
   private activeRun: ActiveRun | null = null;
 
+  /** Aborts the in-flight agentic Ask HTTP call. Cleared when that call finishes. */
+  private askAbort: AbortController | null = null;
+
   constructor(deps: VaultSessionDeps) {
     this.openIndexFn = deps.openIndex;
   }
@@ -233,6 +236,8 @@ export class VaultSession {
 
   /** Drop the active thread and close its Index. Called on new-thread / vault switch / reindex. */
   resetChat(): void {
+    this.askAbort?.abort();
+    this.askAbort = null;
     if (this.chatIndex) {
       try {
         this.chatIndex.close();
@@ -362,6 +367,9 @@ export class VaultSession {
       return rel.filter((p) => p === norm || p.startsWith(`${norm}/`));
     };
 
+    this.askAbort?.abort();
+    const abort = new AbortController();
+    this.askAbort = abort;
     return this.withIndex(vaultPath, (index) =>
       runAskAgent({
         index,
@@ -373,8 +381,11 @@ export class VaultSession {
         readPdf: async (rel) => extractPdfPages(this.resolveSourcePath(rel)),
         listNotes,
         onProgress: opts.onProgress,
+        signal: abort.signal,
       }),
-    );
+    ).finally(() => {
+      if (this.askAbort === abort) this.askAbort = null;
+    });
   }
 
   resolveSourcePath(file: string): string {

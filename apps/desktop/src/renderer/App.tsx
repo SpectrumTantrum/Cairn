@@ -97,8 +97,20 @@ function appendToken(thread: ChatTurn[], token: string): ChatTurn[] {
 function applyAgenticProgress(thread: ChatTurn[], progress: AskAgentProgress): ChatTurn[] {
   const last = thread[thread.length - 1];
   if (!last || last.role !== "assistant" || !last.streaming) return thread;
-  const agentic = last.agentic ?? initialAgenticProgress(Date.now());
   const next = thread.slice(0, -1);
+  if (progress.kind === "token") {
+    next.push({
+      ...last,
+      text: last.text + progress.token,
+      agentic: last.agentic ?? initialAgenticProgress(Date.now()),
+    });
+    return next;
+  }
+  if (progress.kind === "clear-answer") {
+    next.push({ ...last, text: "", agentic: last.agentic ?? initialAgenticProgress(Date.now()) });
+    return next;
+  }
+  const agentic = last.agentic ?? initialAgenticProgress(Date.now());
   next.push({ ...last, agentic: reduceAgenticProgress(agentic, progress) });
   return next;
 }
@@ -984,6 +996,14 @@ export function App() {
         scope: scopeActive ? includedFiles : undefined,
       });
       if (activeRequestId.current !== requestId) return;
+      if (raw.stopReason === "cancelled") {
+        setThread((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.role === "assistant" && last.streaming) return prev.slice(0, -1);
+          return prev;
+        });
+        return;
+      }
       const sources = citationsFromAskAgent(Object.assign(raw, { question }));
       const uncovered = raw.answer.includes("don't cover");
       const result: DesktopChatSendResult = {

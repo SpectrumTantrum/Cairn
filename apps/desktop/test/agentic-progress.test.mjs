@@ -180,6 +180,21 @@ test("elapsed clock only: no estimate, countdown, ETA, percent, or progress bar"
   assertNoEstimate(progressCss);
 });
 
+test("agentic draft text is muted and is not a cited answer", () => {
+  const chat = readFileSync(new URL("../src/renderer/components/shell/ChatTab.tsx", import.meta.url), "utf8");
+  const start = chat.indexOf("function StreamingTurn");
+  const end = chat.indexOf("function AgenticProgressPanel");
+  assert.ok(start !== -1 && end > start);
+  const fn = chat.slice(start, end);
+  assert.match(fn, /assistant-text drafting/);
+  assert.equal(fn.includes("CitationCard"), false);
+  assert.equal(fn.includes("AnswerText"), false);
+  assert.match(fn, /assistant-text streaming/);
+
+  const css = readFileSync(new URL("../src/renderer/styles.css", import.meta.url), "utf8");
+  assert.match(css, /\.assistant-text\.drafting\s*\{[^}]*color:\s*var\(--text-muted\)/);
+});
+
 test("the latest step is current only while the status equals its label", () => {
   const running = reduceAgenticProgress(initialAgenticProgress(0), {
     kind: "tool",

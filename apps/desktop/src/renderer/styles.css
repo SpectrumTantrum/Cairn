@@ -1118,6 +1118,17 @@ button {
   color: var(--accent);
   animation: caret-blink 1s steps(1) infinite;
 }
+/* Agentic answer draft. Muted until the turn settles and chips arrive. */
+.assistant-text.drafting {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.assistant-text.drafting::after {
+  content: "▍";
+  margin-left: 1px;
+  color: var(--text-faint);
+  animation: caret-blink 1s steps(1) infinite;
+}
 @keyframes caret-blink {
   50% {
     opacity: 0;
