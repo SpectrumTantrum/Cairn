@@ -287,9 +287,10 @@ export function App() {
   }, []);
 
   // Warm only after we know whether this profile's next Ask is agentic. A fresh
-  // profile has no pinned model, so the target is resolveChatModel — classic
-  // qwen3:4b, agentic qwen3:8b — not tags[0]. `recovered` stays meaningful while
-  // `up` is already true: an Ollama restart, or `/api/ps` losing the model.
+  // profile has no pinned model, so the target is resolveChatModel — qwen3:8b
+  // in both modes when it is installed, never tags[0]. Toggling agentic does
+  // not change that model. `recovered` stays meaningful while `up` is already
+  // true: an Ollama restart, or `/api/ps` losing the model.
   useEffect(() => {
     if (!featuresReady || !ollama.up) return;
     warmChatForAsk(agenticAskEnabled);

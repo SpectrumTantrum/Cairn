@@ -7,12 +7,19 @@ import { listModels } from "./embed.js";
 
 export type { ChatMessage, ChatStreamCallbacks };
 
-/** Classic Ask prefers the smaller Qwen. Agentic Ask prefers qwen3:8b, the model it is tested on. */
-const CLASSIC_CHAT_PREFER = ["qwen3:4b", "qwen3:8b", "qwen3", "llama3.2:3b", "llama3.2"] as const;
-const AGENTIC_CHAT_PREFER = ["qwen3:8b", "qwen3:4b", "qwen3", "llama3.2:3b", "llama3.2"] as const;
+/**
+ * Fresh-profile default for both Ask modes. `qwen3:8b` wins whenever it is
+ * installed. The rest is the previous classic order, so a machine without 8b
+ * still resolves the way classic Ask did. The list does not depend on mode:
+ * toggling Agentic Ask must not swap models.
+ */
+const CHAT_MODEL_PREFER = ["qwen3:8b", "qwen3:4b", "qwen3", "llama3.2:3b", "llama3.2"] as const;
 
 export interface ResolveChatModelOptions {
-  /** When set, an omitted request prefers the agentic model over the classic default. */
+  /**
+   * Accepted so callers can keep passing the Ask mode. It does not change the
+   * model: both modes share `CHAT_MODEL_PREFER`.
+   */
   agentic?: boolean;
 }
 
@@ -35,11 +42,10 @@ export function pickChatModel(
     const fromEnv = resolve(opts.envModel);
     if (fromEnv) return fromEnv;
   }
-  const prefer = opts?.agentic ? AGENTIC_CHAT_PREFER : CLASSIC_CHAT_PREFER;
-  for (const name of prefer) {
+  for (const name of CHAT_MODEL_PREFER) {
     if (exact(name)) return name;
   }
-  for (const name of prefer) {
+  for (const name of CHAT_MODEL_PREFER) {
     const match = family(name);
     if (match) return match;
   }

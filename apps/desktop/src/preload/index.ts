@@ -97,8 +97,9 @@ export interface CairnApi {
   deletePath(path: string): Promise<void>;
   checkOllama(): Promise<OllamaStatus>;
   /**
-   * Chat model a fresh profile will send. `agentic` prefers qwen3:8b over the
-   * first Ollama tag. Null when Ollama is down or no chat model is pulled.
+   * Chat model a fresh profile will send. Both modes prefer qwen3:8b over the
+   * first Ollama tag. `agentic` does not change the model. Null when Ollama is
+   * down or no chat model is pulled.
    */
   resolveChatModel(agentic: boolean): Promise<string | null>;
   /**

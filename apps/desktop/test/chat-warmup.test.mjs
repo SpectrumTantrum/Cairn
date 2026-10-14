@@ -17,7 +17,7 @@ function slice(source, start, end) {
   return source.slice(from, to);
 }
 
-test("a fresh profile warms resolveChatModel for agentic, not the first tag", () => {
+test("a fresh profile warms resolveChatModel for both modes, not the first tag", () => {
   assert.equal(app.includes("models[0]"), false);
   const warm = slice(app, "function warmChatForAsk", "async function refreshOllama");
   assert.match(warm, /window\.cairn\.resolveChatModel\(agentic\)/);

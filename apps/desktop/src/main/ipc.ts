@@ -564,8 +564,8 @@ export function registerIpcHandlers(): void {
     }
   });
 
-  // The model the next Ask will send when the user has not picked one. Agentic
-  // prefers qwen3:8b; classic prefers qwen3:4b. Never the first tag. Never throws.
+  // The model the next Ask will send when the user has not picked one. Both
+  // modes prefer qwen3:8b when it is installed. Never the first tag. Never throws.
   ipcMain.handle("ollama:resolveChatModel", async (_event, agentic: unknown) => {
     try {
       return await resolveChatModel(undefined, { agentic: agentic === true });

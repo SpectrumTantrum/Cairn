@@ -830,20 +830,32 @@ test("an old server that rejects think is retried once, and the answer stays vis
   }
 });
 
-test("a fresh profile's agentic model is qwen3:8b, not the first tag", async () => {
+test("a fresh profile defaults to qwen3:8b in both modes, not the first tag", async () => {
   const engine = await import("../dist/index.js");
-  const tags = ["nomic-embed-text", "llama3.2:3b", "qwen3:4b", "qwen3:8b"];
-  assert.equal(engine.pickChatModel(tags, undefined, { agentic: true, envModel: undefined }), "qwen3:8b");
-  assert.equal(engine.pickChatModel(tags, undefined, { envModel: undefined }), "qwen3:4b");
-  assert.equal(engine.pickChatModel(tags, "llama3.2:3b", { agentic: true, envModel: undefined }), "llama3.2:3b");
-  assert.equal(engine.pickChatModel(["nomic-embed-text"], undefined, { agentic: true, envModel: undefined }), null);
+  const tags = ["gemma4:e4b", "nomic-embed-text", "llama3.2:3b", "qwen3:4b", "qwen3:8b"];
+  const classic = { agentic: false, envModel: undefined };
+  const agentic = { agentic: true, envModel: undefined };
+  assert.equal(engine.pickChatModel(tags, undefined, classic), "qwen3:8b");
+  assert.equal(engine.pickChatModel(tags, undefined, agentic), "qwen3:8b");
+  assert.equal(engine.pickChatModel(tags, undefined, agentic), engine.pickChatModel(tags, undefined, classic));
+  assert.equal(engine.pickChatModel(tags, "llama3.2:3b", agentic), "llama3.2:3b");
+  assert.equal(engine.pickChatModel(tags, "qwen3:4b", classic), "qwen3:4b");
+  assert.equal(engine.pickChatModel(["nomic-embed-text"], undefined, agentic), null);
+
+  const without8b = ["gemma4:e4b", "qwen3:4b", "llama3.2:3b"];
+  assert.equal(engine.pickChatModel(without8b, undefined, classic), "qwen3:4b");
+  assert.equal(engine.pickChatModel(without8b, undefined, agentic), "qwen3:4b");
+  const legacyOnly = ["gemma4:e4b", "llama3.2:3b"];
+  assert.equal(engine.pickChatModel(legacyOnly, undefined, classic), "llama3.2:3b");
+  assert.equal(engine.pickChatModel(legacyOnly, undefined, agentic), "llama3.2:3b");
 
   const previous = process.env.CHAT_MODEL;
   delete process.env.CHAT_MODEL;
   setModelProvider(new FakeModelProvider({ models: tags }));
   try {
     assert.equal(await engine.resolveChatModel(undefined, { agentic: true }), "qwen3:8b");
-    assert.equal(await engine.resolveChatModel(), "qwen3:4b");
+    assert.equal(await engine.resolveChatModel(), "qwen3:8b");
+    assert.equal(await engine.resolveChatModel("gemma4:e4b"), "gemma4:e4b");
   } finally {
     if (previous === undefined) delete process.env.CHAT_MODEL;
     else process.env.CHAT_MODEL = previous;
