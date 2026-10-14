@@ -13,6 +13,8 @@ export type { ThreadMeta, ThreadRecord, ThreadSaveInput } from "../main/thread-s
 export interface OllamaStatus {
   up: boolean;
   models: string[];
+  /** True on the check that sees Ollama up after it was down, including the first success. */
+  recovered?: boolean;
 }
 
 /** An explicit, confirmed BYOK escalation for one chat turn (ADR-0002). */

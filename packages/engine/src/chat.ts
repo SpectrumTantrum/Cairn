@@ -7,29 +7,55 @@ import { listModels } from "./embed.js";
 
 export type { ChatMessage, ChatStreamCallbacks };
 
-export async function resolveChatModel(requested?: string): Promise<string> {
-  const models = await listModels();
+/** Classic Ask prefers the smaller Qwen. Agentic Ask prefers qwen3:8b, the model it is tested on. */
+const CLASSIC_CHAT_PREFER = ["qwen3:4b", "qwen3:8b", "qwen3", "llama3.2:3b", "llama3.2"] as const;
+const AGENTIC_CHAT_PREFER = ["qwen3:8b", "qwen3:4b", "qwen3", "llama3.2:3b", "llama3.2"] as const;
+
+export interface ResolveChatModelOptions {
+  /** When set, an omitted request prefers the agentic model over the classic default. */
+  agentic?: boolean;
+}
+
+/**
+ * The chat model a fresh profile will actually send. Tag order from Ollama is ignored.
+ * An explicit request wins. Otherwise `envModel` (CHAT_MODEL), then the preference list,
+ * then any non-embedder. Returns null when nothing qualifies.
+ */
+export function pickChatModel(
+  models: readonly string[],
+  requested?: string,
+  opts?: ResolveChatModelOptions & { envModel?: string },
+): string | null {
   const exact = (want: string) => models.includes(want);
-  const family = (want: string) =>
-    models.find((m) => m.split(":")[0] === want.split(":")[0]);
+  const family = (want: string) => models.find((m) => m.split(":")[0] === want.split(":")[0]);
+  const resolve = (want: string): string | null => (exact(want) ? want : (family(want) ?? null));
 
+  if (requested) return resolve(requested);
+  if (opts?.envModel) {
+    const fromEnv = resolve(opts.envModel);
+    if (fromEnv) return fromEnv;
+  }
+  const prefer = opts?.agentic ? AGENTIC_CHAT_PREFER : CLASSIC_CHAT_PREFER;
+  for (const name of prefer) {
+    if (exact(name)) return name;
+  }
+  for (const name of prefer) {
+    const match = family(name);
+    if (match) return match;
+  }
+  return models.find((m) => !/embed/i.test(m)) ?? null;
+}
+
+export async function resolveChatModel(requested?: string, opts?: ResolveChatModelOptions): Promise<string> {
+  const models = await listModels();
+  const picked = pickChatModel(models, requested, {
+    agentic: opts?.agentic,
+    envModel: requested ? undefined : process.env.CHAT_MODEL,
+  });
+  if (picked) return picked;
   if (requested) {
-    if (!exact(requested) && !family(requested)) {
-      throw new Error(`chat model "${requested}" not pulled (have: ${models.join(", ") || "none"})`);
-    }
-    return exact(requested) ? requested : (family(requested) as string);
+    throw new Error(`chat model "${requested}" not pulled (have: ${models.join(", ") || "none"})`);
   }
-  const env = process.env.CHAT_MODEL;
-  if (env && (exact(env) || family(env))) return exact(env) ? env : (family(env) as string);
-
-  const prefer = ["qwen3:4b", "qwen3:8b", "qwen3", "llama3.2:3b", "llama3.2"];
-  for (const p of prefer) if (exact(p)) return p;
-  for (const p of prefer) {
-    const m = family(p);
-    if (m) return m;
-  }
-  const any = models.find((m) => !/embed/i.test(m));
-  if (any) return any;
   throw new Error("no local chat model — `ollama pull qwen3:4b`");
 }
 

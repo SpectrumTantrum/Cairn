@@ -1,7 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { CloudProvider, getModelProvider, PROVIDER_PRESETS, studioTemplateMetas } from "@cairn/engine";
+import {
+  CloudProvider,
+  getModelProvider,
+  nextOllamaWarmGate,
+  PROVIDER_PRESETS,
+  resolveChatModel,
+  studioTemplateMetas,
+} from "@cairn/engine";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
 import {
   ProviderStore,
@@ -542,14 +549,32 @@ export function registerIpcHandlers(): void {
     agenticAskEnvDefault: process.env.CAIRN_AGENTIC_ASK === "1",
   }));
 
+  // Remembered across checks in this process. A down→up edge forgets the warm-set
+  // so the next warm loads again after Ollama restarts while Cairn stays open.
+  let ollamaWasUp = false;
+
   ipcMain.handle("ollama:check", async () => {
     try {
       const provider = getModelProvider();
       const up = await provider.isReachable();
-      if (!up) return { up: false, models: [] };
-      return { up: true, models: await provider.listModels() };
+      const gate = nextOllamaWarmGate(ollamaWasUp, up);
+      ollamaWasUp = gate.wasUp;
+      if (!up) return { up: false, models: [], recovered: false };
+      if (gate.recovered) provider.forgetWarmedChatModels?.();
+      return { up: true, models: await provider.listModels(), recovered: gate.recovered };
     } catch {
-      return { up: false, models: [] };
+      ollamaWasUp = false;
+      return { up: false, models: [], recovered: false };
+    }
+  });
+
+  // The model the next Ask will send when the user has not picked one. Agentic
+  // prefers qwen3:8b; classic prefers qwen3:4b. Never the first tag. Never throws.
+  ipcMain.handle("ollama:resolveChatModel", async (_event, agentic: unknown) => {
+    try {
+      return await resolveChatModel(undefined, { agentic: agentic === true });
+    } catch {
+      return null;
     }
   });
 

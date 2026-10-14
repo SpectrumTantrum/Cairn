@@ -284,6 +284,17 @@ export interface ModelProvider {
    * resolve as `"failed"` and are not remembered, so a later call can retry.
    */
   warmChatModel?(model: string): Promise<ChatWarmResult>;
+  /** Drop the process warm-set so the next warm consults `/api/ps` again. */
+  forgetWarmedChatModels?(): void;
+}
+
+/**
+ * Down→up edge for a background warm. A check that stays up is not a recovery.
+ * A down check clears the remembered up state so the next up check warms again.
+ */
+export function nextOllamaWarmGate(wasUp: boolean, up: boolean): { wasUp: boolean; recovered: boolean } {
+  if (!up) return { wasUp: false, recovered: false };
+  return { wasUp: true, recovered: !wasUp };
 }
 
 function parseToolCallArguments(raw: unknown): Record<string, unknown> {
@@ -460,6 +471,11 @@ export class OllamaClient implements ModelProvider {
     } catch {
       return "failed";
     }
+  }
+
+  /** Ollama restarted: the resident set is gone even if this process already warmed. */
+  forgetWarmedChatModels(): void {
+    this.warmedChatModels.clear();
   }
 
   private async runningModelNames(): Promise<string[]> {

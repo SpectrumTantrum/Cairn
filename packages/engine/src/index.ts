@@ -29,7 +29,8 @@ export type {
   CloudProviderConfig,
   CloudCredentials,
 } from "./cloud-provider.js";
-export { chat, chatStream, resolveChatModel } from "./chat.js";
+export { chat, chatStream, pickChatModel, resolveChatModel } from "./chat.js";
+export type { ResolveChatModelOptions } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
 export {
@@ -76,6 +77,7 @@ export {
   OLLAMA_WARM_TIMEOUT_MS,
   CHAT_MODEL_KEEP_ALIVE,
   agentMessagesToOpenAI,
+  nextOllamaWarmGate,
 } from "./model-provider.js";
 export type { ChatWarmResult } from "./model-provider.js";
 export type {

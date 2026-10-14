@@ -96,6 +96,11 @@ export interface CairnApi {
   /** Delete a file or folder (folders recursively). Confirmation is a renderer concern. */
   deletePath(path: string): Promise<void>;
   checkOllama(): Promise<OllamaStatus>;
+  /**
+   * Chat model a fresh profile will send. `agentic` prefers qwen3:8b over the
+   * first Ollama tag. Null when Ollama is down or no chat model is pulled.
+   */
+  resolveChatModel(agentic: boolean): Promise<string | null>;
   /** Load the chat model in the background. Embedders are ignored. Never rejects. */
   warmChatModel(model: string): Promise<"warmed" | "skipped" | "failed">;
   /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
@@ -178,6 +183,7 @@ const api: CairnApi = {
   movePath: (from, to) => ipcRenderer.invoke("vault:move", { from, to }),
   deletePath: (path) => ipcRenderer.invoke("vault:delete", { path }),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
+  resolveChatModel: (agentic) => ipcRenderer.invoke("ollama:resolveChatModel", agentic),
   warmChatModel: (model) => ipcRenderer.invoke("ollama:warm", model),
   agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),

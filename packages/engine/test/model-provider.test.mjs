@@ -531,3 +531,68 @@ test("warmChatModel failure stays silent and can be retried", async () => {
     engine.resetOllamaHttpClient();
   }
 });
+
+test("a fresh profile's agentic model is qwen3:8b, not the first tag", async () => {
+  const engine = await import("../dist/index.js");
+  const tags = ["nomic-embed-text", "llama3.2:3b", "qwen3:4b", "qwen3:8b"];
+  assert.equal(engine.pickChatModel(tags, undefined, { agentic: true, envModel: undefined }), "qwen3:8b");
+  assert.equal(engine.pickChatModel(tags, undefined, { envModel: undefined }), "qwen3:4b");
+  assert.equal(engine.pickChatModel(tags, "llama3.2:3b", { agentic: true, envModel: undefined }), "llama3.2:3b");
+  assert.equal(engine.pickChatModel(["nomic-embed-text"], undefined, { agentic: true, envModel: undefined }), null);
+
+  const previous = process.env.CHAT_MODEL;
+  delete process.env.CHAT_MODEL;
+  setModelProvider(new FakeModelProvider({ models: tags }));
+  try {
+    assert.equal(await engine.resolveChatModel(undefined, { agentic: true }), "qwen3:8b");
+    assert.equal(await engine.resolveChatModel(), "qwen3:4b");
+  } finally {
+    if (previous === undefined) delete process.env.CHAT_MODEL;
+    else process.env.CHAT_MODEL = previous;
+    resetModelProvider();
+  }
+});
+
+test("nextOllamaWarmGate is only the down-to-up edge", async () => {
+  const engine = await import("../dist/index.js");
+  assert.deepEqual(engine.nextOllamaWarmGate(false, false), { wasUp: false, recovered: false });
+  assert.deepEqual(engine.nextOllamaWarmGate(false, true), { wasUp: true, recovered: true });
+  assert.deepEqual(engine.nextOllamaWarmGate(true, true), { wasUp: true, recovered: false });
+  assert.deepEqual(engine.nextOllamaWarmGate(true, false), { wasUp: false, recovered: false });
+});
+
+test("Ollama coming back rewarms unless /api/ps still lists the model", async () => {
+  const calls = [];
+  let resident = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const path = String(url);
+    calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : null });
+    if (path.endsWith("/api/ps")) {
+      return new Response(JSON.stringify({ models: resident }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ done: true, done_reason: "load" }), { status: 200 });
+  };
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
+    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
+    client.forgetWarmedChatModels();
+    resident = [{ name: "qwen3:8b:latest", model: "qwen3:8b:latest" }];
+    assert.equal(await client.warmChatModel("qwen3:8b"), "skipped");
+    client.forgetWarmedChatModels();
+    resident = [];
+    assert.equal(await client.warmChatModel("qwen3:8b"), "warmed");
+    const posts = calls.filter((call) => call.path.endsWith("/api/chat"));
+    assert.equal(posts.length, 2);
+    assert.equal(posts.every((call) => call.body.model === "qwen3:8b"), true);
+    assert.equal(await client.warmChatModel("nomic-embed-text"), "skipped");
+  } finally {
+    globalThis.fetch = originalFetch;
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});

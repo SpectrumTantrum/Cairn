@@ -392,7 +392,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     };
   }
 
-  const model = await resolveChatModel(opts.model);
+  const model = await resolveChatModel(opts.model, { agentic: true });
   const toolState: AskSearchToolState = { sources: [], opened: [] };
   const toolCtx: AskSearchToolContext = {
     index: opts.index,
