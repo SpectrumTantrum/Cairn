@@ -5,6 +5,8 @@ const {
   citationLandingLine,
   citationOpenTarget,
   citationsFromAskAgent,
+  classicAskTurn,
+  classicChipBadge,
   clampCitationLine,
   lineForMarkdownHeading,
   resolveCitationLine,
@@ -2046,4 +2048,170 @@ test("media and PDF chips do not open as an editor line", () => {
     line: 5,
     highlight: true,
   });
+});
+
+function classicFtsHit(file, line, text, heading = "") {
+  return {
+    file,
+    line,
+    heading,
+    score: 1,
+    cosine: NaN,
+    snippet: text,
+    text,
+    arms: "fts",
+  };
+}
+
+const CLASSIC_QUESTION = "What is the COPPER FINCH number?";
+const FINCH_ROSTER = classicFtsHit(
+  "finch-roster.md",
+  2,
+  "COPPER FINCH is listed on the field roster beside other codenames.",
+  "Roster",
+);
+const ALPHA_312 = classicFtsHit(
+  "alpha-notes.md",
+  5,
+  "The unique cairn-alpha phrase is COPPER FINCH, 312.",
+  "Field notes",
+);
+
+test("the 312 question shows only the alpha-notes chip", () => {
+  const { chips, lastSources } = classicAskTurn("312.", [FINCH_ROSTER, ALPHA_312], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 5);
+  assert.equal(lastSources.length, 2);
+  assert.equal(lastSources[0].file, "finch-roster.md");
+  assert.equal(lastSources[1].file, "alpha-notes.md");
+});
+
+test("the line-1 answer still chips alpha-notes.md:1", () => {
+  const fact = "The badge code is stored at the top of the note.";
+  const { chips } = classicAskTurn(fact, [classicFtsHit("alpha-notes.md", 1, fact)], "What is the badge code?");
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 1);
+  assert.equal(chips[0].heading, "");
+});
+
+test("an honest miss shows zero chips", () => {
+  const { chips, lastSources } = classicAskTurn("Your notes don't cover this.", [], CLASSIC_QUESTION);
+  assert.deepEqual(chips, []);
+  assert.deepEqual(lastSources, []);
+});
+
+test("a four-word overlap with an unused neighbor does not chip that note", () => {
+  const answer = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  const neighbor = classicFtsHit(
+    "finch-roster.md",
+    2,
+    "The unique cairn-alpha phrase is listed beside other codenames.",
+    "Roster",
+  );
+  const { chips, lastSources } = classicAskTurn(answer, [neighbor, ALPHA_312], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 5);
+  assert.equal(chips[0].citeIndex, 2);
+  assert.equal(classicChipBadge(chips[0], 1), 2);
+  assert.equal(lastSources.length, 2);
+  assert.equal(lastSources[0].file, "finch-roster.md");
+  assert.equal(lastSources[0].citeIndex, undefined);
+});
+
+test("classic chips keep both notes when each holds a fact the answer uses", () => {
+  const answer = "The badge code is stored at the top. The field number is 312.";
+  const badge = classicFtsHit("alpha-notes.md", 1, "The badge code is stored at the top of the note.");
+  const field = classicFtsHit("field-notes.md", 4, "The field number is 312.");
+  const { chips } = classicAskTurn(answer, [badge, field], "What do the notes say?");
+  assert.deepEqual(
+    chips.map((chip) => chip.file),
+    ["alpha-notes.md", "field-notes.md"],
+  );
+  assert.equal(chips[0].citeIndex, 1);
+  assert.equal(chips[1].citeIndex, 2);
+  assert.equal(classicChipBadge(chips[0], 9), 1);
+  assert.equal(classicChipBadge(chips[1], 9), 2);
+});
+
+const QA_CODENAME_QUESTION = "COPPER FINCH codename: what number goes with it?";
+
+test("QA: COPPER FINCH codename question chips only the cited [2]", () => {
+  assert.equal(QA_CODENAME_QUESTION, "COPPER FINCH codename: what number goes with it?");
+  const roster = classicFtsHit("finch-roster.md", 1, "The roster lists COPPER FINCH beside the northern unit.");
+  const alpha = classicFtsHit("alpha-notes.md", 1, "COPPER FINCH is 312 in the field log.");
+  const answer =
+    "The roster lists COPPER FINCH beside the northern unit. COPPER FINCH is 312 in the field log [2].";
+  const { chips, lastSources } = classicAskTurn(answer, [roster, alpha], QA_CODENAME_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 1);
+  assert.equal(chips[0].citeIndex, 2);
+  assert.equal(classicChipBadge(chips[0], 1), 2);
+  assert.equal(
+    lastSources.map((source) => source.file).join(","),
+    "finch-roster.md,alpha-notes.md",
+  );
+});
+
+test("markers path keeps only the cited numbers", () => {
+  const hit1 = classicFtsHit("a.md", 4, "alpha fact one");
+  const hit2 = classicFtsHit("b.md", 8, "beta fact two stays in the notes");
+  const hit3 = classicFtsHit("c.md", 9, "gamma fact three");
+  const answer = "See [1][3]. beta fact two stays in the notes";
+  const { chips, lastSources } = classicAskTurn(answer, [hit1, hit2, hit3], "Which facts?");
+  assert.deepEqual(
+    chips.map((chip) => chip.file),
+    ["a.md", "c.md"],
+  );
+  assert.equal(chips[0].citeIndex, 1);
+  assert.equal(chips[1].citeIndex, 3);
+  assert.equal(classicChipBadge(chips[0], 1), 1);
+  assert.equal(classicChipBadge(chips[1], 2), 3);
+  assert.equal(lastSources.length, 3);
+});
+
+test("no markers fall back to the note that holds the fact", () => {
+  const roster = classicFtsHit("finch-roster.md", 1, "The roster lists COPPER FINCH beside the northern unit.");
+  const alpha = classicFtsHit("alpha-notes.md", 1, "COPPER FINCH is 312 in the field log.");
+  const { chips } = classicAskTurn(
+    "COPPER FINCH is 312 in the field log.",
+    [roster, alpha],
+    QA_CODENAME_QUESTION,
+  );
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 1);
+  assert.equal(chips[0].citeIndex, 2);
+  assert.equal(classicChipBadge(chips[0], 1), 2);
+});
+
+test("question words echoed in the answer do not chip a note", () => {
+  const roster = classicFtsHit(
+    "finch-roster.md",
+    1,
+    "COPPER FINCH codename what number goes with it on the roster.",
+  );
+  const alpha = classicFtsHit("alpha-notes.md", 1, "COPPER FINCH is 312 in the field log.");
+  const { chips, lastSources } = classicAskTurn(
+    "COPPER FINCH codename what number goes with it.",
+    [roster, alpha],
+    QA_CODENAME_QUESTION,
+  );
+  assert.deepEqual(chips, []);
+  assert.equal(lastSources.length, 2);
+});
+
+test("when hit 1 is dropped, the remaining chip badge is 2 and matches [2] in the prose", () => {
+  const answer = "The number is 312 [2].";
+  const { chips } = classicAskTurn(answer, [FINCH_ROSTER, ALPHA_312], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].citeIndex, 2);
+  const badge = classicChipBadge(chips[0], 1);
+  assert.equal(badge, 2);
+  const marker = Number(answer.match(/\[(\d+)\]/)?.[1]);
+  assert.equal(badge, marker);
 });

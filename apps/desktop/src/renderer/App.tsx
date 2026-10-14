@@ -13,7 +13,7 @@ import type {
   TreeNode,
   TreeSortMode,
 } from "../shared/types.js";
-import { citationOpenTarget, citationsFromAskAgent } from "./agent-citations";
+import { citationOpenTarget, citationsFromAskAgent, classicAskTurn } from "./agent-citations";
 import { nextEditorFlash } from "./citation-editor-focus";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
 import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
@@ -1071,9 +1071,12 @@ export function App() {
         escalate,
       });
       if (activeRequestId.current !== requestId) return; // superseded (reset / new send)
-      setThread((prev) => settleStreaming(prev, { role: "assistant", streaming: false, result }));
-      if (result.sources.length > 0) {
-        setLastSources(result.sources);
+      const { chips, lastSources: fullSources } = classicAskTurn(result.answer, result.sources, question);
+      setThread((prev) =>
+        settleStreaming(prev, { role: "assistant", streaming: false, result: { ...result, sources: chips } }),
+      );
+      if (fullSources.length > 0) {
+        setLastSources(fullSources);
       }
       // Checkboxes control the NEXT question's scope, so every settled answer (even an
       // uncovered/refused one with no sources) clears stale exclusions from the prior turn.
