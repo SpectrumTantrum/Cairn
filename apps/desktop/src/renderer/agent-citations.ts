@@ -763,6 +763,86 @@ export function citationsFromAskAgent(result: AskAgentResult): SearchHit[] {
   return collapsePdfPages(citeAnsweredReads(located, result));
 }
 
+/**
+ * Classic hits are `fts` / `dense`, not reads, so the agentic neighbor veto
+ * never sees them. Drop a chip when another retrieved hit holds the answer's
+ * fact and this one only shares the passage.
+ */
+function classicSharedNeighbor(answer: string, chip: SearchHit, sources: readonly SearchHit[]): boolean {
+  return sharedTokenNeighbor(answer, corpusForFile(chip.file, sources), otherCorpora(chip, sources));
+}
+
+/** 1-based `[n]` markers in classic prose. `[path:line]` is not a marker. */
+function citedMarkerIndexes(answer: string): number[] {
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const match of answer.matchAll(/\[(\d+)\]/g)) {
+    const n = Number(match[1]);
+    if (!Number.isInteger(n) || n < 1 || seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+/** Question tokens are removed from the fallback match. The prompt is unchanged. */
+function answerWithoutQuestionTokens(answer: string, question: string): string {
+  const asked = new Set(wordSpans(question).map((span) => span.word));
+  if (asked.size === 0) return answer;
+  return answer.replace(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu, (word) =>
+    asked.has(word.toLowerCase()) ? " " : word,
+  );
+}
+
+/**
+ * Classic Ask chips for one turn.
+ * When the answer cites `[n]`, those numbers are the chips — the retrieval
+ * index the model was shown — and the token filter does not add the others.
+ * With no markers, the agentic filter runs (no opened anchors, question
+ * attached). Question tokens are removed first, so an echoed codename is not
+ * a match. A neighbor that only shares a passage is dropped there too.
+ * Each chip keeps the 1-based index it had in `sources`.
+ * `lastSources` is that full list, for the Sources tab.
+ */
+export function classicAskTurn(
+  answer: string,
+  sources: SearchHit[],
+  question: string,
+): { chips: SearchHit[]; lastSources: SearchHit[] } {
+  const indexed = sources.map((hit, i) => ({ ...hit, citeIndex: i + 1 }));
+  const markers = citedMarkerIndexes(answer);
+  if (markers.length > 0) {
+    const wanted = new Set(markers);
+    return {
+      chips: indexed.filter((hit) => hit.citeIndex !== undefined && wanted.has(hit.citeIndex)),
+      lastSources: sources,
+    };
+  }
+  const judged = answerWithoutQuestionTokens(answer, question);
+  const chips = citationsFromAskAgent(
+    Object.assign(
+      {
+        answer: judged,
+        sources: indexed,
+        opened: [] as AskAgentResult["opened"],
+        seedHits: [] as SearchHit[],
+        steps: 0,
+        stopReason: "done" as const,
+        grounded: true,
+      },
+      { question },
+    ),
+  ).filter((chip) => !classicSharedNeighbor(judged, chip, indexed));
+  return { chips, lastSources: sources };
+}
+
+/** Classic chip badge: the retrieval number, so it matches prose `[n]`. */
+export function classicChipBadge(hit: Pick<SearchHit, "citeIndex">, position: number): number {
+  const n = hit.citeIndex;
+  if (typeof n === "number" && Number.isFinite(n) && n >= 1) return Math.floor(n);
+  return position;
+}
+
 const INLINE_PATH_CITE = /\[([^\[\]\n]+?):(\d+)\]/g;
 
 /** `[path:line]` — a path has a slash or extension. Bracket numbers like `[1]` are prose. */
