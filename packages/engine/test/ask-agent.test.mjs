@@ -486,11 +486,80 @@ test("list prefix with trailing slash matches folder notes", async () => {
   }
 });
 
-test("runAskAgent fails fast when the first turn returns no tool calls", async () => {
+test("a first reply with no tool call searches the question before answering or missing", async () => {
+  const question = "What is the COPPER FINCH number?";
+  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  const seen = [];
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async () => ({ content: "I know the answer.", toolCalls: [] }),
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        seen.push({
+          turn,
+          tools: messages.filter((message) => message.role === "tool").map((message) => message.toolName),
+          find: messages.find((message) => message.role === "assistant" && message.toolCalls?.length)?.toolCalls?.[0],
+        });
+        if (turn === 1) return { content: "Your notes don't cover this.", toolCalls: [] };
+        return { content: fact, toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 1,
+      chunks: [
+        {
+          id: 1,
+          file: "alpha-notes.md",
+          ordinal: 0,
+          line: 4,
+          heading: "Field",
+          text: fact,
+          hash: "alpha",
+        },
+      ],
+    });
+    const result = await runAskAgent({
+      index,
+      question,
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(seen.length, 2);
+    assert.deepEqual(seen[0].tools, []);
+    assert.equal(seen[1].find?.name, "find");
+    assert.equal(seen[1].find?.id, "cairn_forced_find");
+    assert.equal(seen[1].find?.arguments.query, question);
+    assert.deepEqual(seen[1].tools, ["find"]);
+    assert.equal(result.stopReason, "done");
+    assert.equal(result.answer, fact);
+    assert.equal(result.answer.includes("Your notes don't cover this."), false);
+    assert.equal(result.sources.some((source) => source.file === "alpha-notes.md"), true);
+  } finally {
+    index.close();
+  }
+});
+
+test("a turn that already searched does not add another search", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "find", arguments: { query: "spaced repetition" } }] };
+        }
+        const finds = messages.filter((message) => message.role === "assistant" && message.toolCalls?.some((call) => call.name === "find"));
+        assert.equal(finds.length, 1);
+        assert.equal(finds[0].toolCalls[0].id, undefined);
+        assert.equal(finds[0].toolCalls[0].arguments.query, "spaced repetition");
+        assert.equal(messages.filter((message) => message.role === "tool" && message.toolName === "find").length, 1);
+        return { content: "Reviews use intervals.", toolCalls: [] };
+      },
     }),
   );
   const index = new InMemoryIndex();
@@ -498,16 +567,51 @@ test("runAskAgent fails fast when the first turn returns no tool calls", async (
     seed(index);
     const result = await runAskAgent({
       index,
-      question: "anything",
+      question: "How does spaced repetition work?",
       mode: "lexical",
       readNote: makeReader({}),
       retrievalSeed: false,
     });
-    assert.equal(result.stopReason, "no-tool-use");
-    assert.equal(result.steps, 1);
-    assert.equal(result.answer, "I know the answer.");
-    assert.equal(result.sources.length, 0);
-    assert.equal(result.opened.length, 0);
+    assert.equal(calls, 2);
+    assert.equal(result.answer, "Reviews use intervals.");
+    assert.equal(result.sources.some((source) => source.file === "notes/topic.md"), true);
+  } finally {
+    index.close();
+  }
+});
+
+test("a miss after a search with no results shows no chips", async () => {
+  const question = "zzzzqqq";
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) return { content: "Your notes don't cover this.", toolCalls: [] };
+        const find = messages.find((message) => message.role === "tool" && message.toolName === "find");
+        assert.ok(find);
+        assert.match(find.content, /"results":\[\]/);
+        return { content: "Your notes don't cover this.", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question,
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.stopReason, "done");
+    assert.equal(result.answer, "Your notes don't cover this.");
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(result.opened, []);
+    assert.equal(result.grounded, false);
   } finally {
     index.close();
   }
@@ -518,8 +622,8 @@ test("runAskAgent passes a bounded timeoutMs on the first tool turn", async () =
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async (_m, _msg, _t, _turn, options) => {
-        sawTimeout = options?.timeoutMs;
+      chatWithTools: async (_m, _msg, _t, turn, options) => {
+        if (turn === 1) sawTimeout = options?.timeoutMs;
         return { content: "ok", toolCalls: [] };
       },
     }),
@@ -581,8 +685,8 @@ test("runAskAgent caps the first tool-call timeout at 90s", async () => {
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async (_m, _msg, _t, _turn, options) => {
-        sawTimeout = options?.timeoutMs;
+      chatWithTools: async (_m, _msg, _t, turn, options) => {
+        if (turn === 1) sawTimeout = options?.timeoutMs;
         return { content: "ok", toolCalls: [] };
       },
     }),

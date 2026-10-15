@@ -482,17 +482,32 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     if (turn.toolCalls.length > 0 && streamed) progress({ kind: "clear-answer" });
 
     if (turn.toolCalls.length === 0) {
-      progress({ kind: "status", message: "Composing answer…" });
-      const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
-      if (firstTurn && noGroundingYet) {
-        stopReason = "no-tool-use";
-        answer =
-          turn.content.trim() ||
-          "Agentic Ask needs at least one search tool call before answering. This model replied without using tools — try qwen3:8b (not 4b), use classic Ask, or upgrade Ollama if Qwen3 thinking blocked tools.";
-      } else {
-        answer = turn.content;
-        stopReason = "done";
+      // A tool-less first reply is not an answer and not the miss. Search once
+      // with the question, then let the model answer from those results.
+      if (steps === 1) {
+        const query = opts.question.trim();
+        const args = { query };
+        const call = { id: "cairn_forced_find", name: "find", arguments: args };
+        messages.push({ role: "assistant", content: "", toolCalls: [call] });
+        progress({
+          kind: "tool",
+          step: steps,
+          name: "find",
+          label: labelAskSearchToolCall("find", args),
+        });
+        const content = await runAskSearchTool("find", args, toolCtx, toolState);
+        if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
+        messages.push({
+          role: "tool",
+          toolName: "find",
+          toolCallId: call.id,
+          content,
+        });
+        continue;
       }
+      progress({ kind: "status", message: "Composing answer…" });
+      answer = turn.content;
+      stopReason = "done";
       break;
     }
 
