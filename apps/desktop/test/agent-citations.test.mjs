@@ -12,7 +12,7 @@ const {
   resolveCitationLine,
   splitInlineCites,
 } = await import("../out-test/agent-citations.js");
-const { FILE_CITE_LINE, citationLineLabel, citationTitle, pdfChipLabel, pdfOpenTitle, PDF_OPEN_LANDS_ON_PAGE } =
+const { FILE_CITE_LINE, citationLineLabel, citationTitle, docxChipLabel, pdfChipLabel, pdfOpenTitle, PDF_OPEN_LANDS_ON_PAGE } =
   await import("../out-test/cite-format.js");
 
 test("citationsFromAskAgent prefers opened anchors with source snippets", () => {
@@ -2037,6 +2037,7 @@ test("media and PDF chips do not open as an editor line", () => {
   }
   assert.deepEqual(citationOpenTarget(openHit("report.pdf", 4, { page: 3 })), { kind: "pdf", page: 3 });
   assert.deepEqual(citationOpenTarget(openHit("report.pdf", 4)), { kind: "pdf", page: 1 });
+  assert.deepEqual(citationOpenTarget(openHit("field.docx", 4, { heading: "第二節" })), { kind: "docx" });
   const fact = "The orphan fact lives on this exact line.";
   assert.deepEqual(citationOpenTarget(openHit("notes/a.md", 5, { text: fact })), {
     kind: "editor",
@@ -2085,6 +2086,37 @@ test("the 312 question shows only the alpha-notes chip", () => {
   assert.equal(lastSources.length, 2);
   assert.equal(lastSources[0].file, "finch-roster.md");
   assert.equal(lastSources[1].file, "alpha-notes.md");
+});
+
+test("the 312 question still chips only alpha-notes when a docx neighbor is retrieved", () => {
+  const docx = classicFtsHit(
+    "field.docx",
+    2,
+    "這份筆記記載欄位代碼銅雀。 The roster lists other codes.",
+    "第二節",
+  );
+  const { chips, lastSources } = classicAskTurn("312.", [FINCH_ROSTER, ALPHA_312, docx], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 5);
+  assert.equal(lastSources.some((source) => source.file === "field.docx"), true);
+});
+
+test("a Traditional Chinese docx heading is the chip label", () => {
+  const heading = "第二節";
+  const body = "這份 筆記 記載 欄位 代碼 銅雀 與 編號";
+  const text = `# ${heading}\n${body}\n`;
+  const hit = { ...readHit("field.docx", text), heading };
+  const cites = citationsFromAskAgent({
+    answer: body,
+    sources: [hit],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].heading, heading);
+  assert.equal(docxChipLabel(cites[0].file, cites[0].heading), "field.docx · 第二節");
+  assert.equal(citationOpenTarget(cites[0]).kind, "docx");
 });
 
 test("the line-1 answer still chips alpha-notes.md:1", () => {
