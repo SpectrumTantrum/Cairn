@@ -43,6 +43,43 @@ function makeReader(files) {
   };
 }
 
+const COPPER_QUESTION = "What is the COPPER FINCH number?";
+const COPPER_ROSTER = "COPPER FINCH is listed on the field roster beside other codenames.";
+const COPPER_FACT = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+const COPPER_CITED = "The number is 312. [alpha-notes.md:1]";
+
+function indexCopper(index) {
+  index.rebuildIndex({
+    mode: "lexical",
+    files: 2,
+    chunks: [
+      { id: 1, file: "finch-roster.md", ordinal: 0, line: 2, heading: "Roster", text: COPPER_ROSTER, hash: "roster" },
+      { id: 2, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field notes", text: COPPER_FACT, hash: "alpha" },
+    ],
+  });
+}
+
+function forcedFind(messages) {
+  return messages.find((message) => message.role === "tool" && message.toolCallId === "cairn_forced_find");
+}
+
+/** Held draft tokens never reach the renderer, and nothing streams before the forced find. */
+function assertDraftHeld(events, held) {
+  const findAt = events.findIndex((event) => event.kind === "tool" && event.name === "find");
+  assert.ok(findAt >= 0);
+  assert.equal(
+    events.slice(0, findAt).some((event) => event.kind === "token" || event.kind === "clear-answer"),
+    false,
+  );
+  const shown = events
+    .filter((event) => event.kind === "token")
+    .map((event) => event.token)
+    .join("");
+  assert.equal(shown.includes(held), false);
+  assert.match(shown, /312/);
+  assert.match(shown, /alpha-notes\.md:1/);
+}
+
 before(async () => {
   const engine = await import("../dist/index.js");
   const testing = await import("../dist/testing.js");
@@ -487,57 +524,53 @@ test("list prefix with trailing slash matches folder notes", async () => {
 });
 
 test("a first reply with no tool call searches the question before answering or missing", async () => {
-  const question = "What is the COPPER FINCH number?";
-  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
   const seen = [];
+  const events = [];
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async (_model, messages, _tools, turn) => {
+      chatWithTools: async (_model, messages, _tools, turn, options) => {
         seen.push({
           turn,
           tools: messages.filter((message) => message.role === "tool").map((message) => message.toolName),
           find: messages.find((message) => message.role === "assistant" && message.toolCalls?.length)?.toolCalls?.[0],
         });
-        if (turn === 1) return { content: "Your notes don't cover this.", toolCalls: [] };
-        return { content: fact, toolCalls: [] };
+        if (turn === 1) {
+          options?.onToken?.("Your notes don't cover this.");
+          return { content: "Your notes don't cover this.", toolCalls: [] };
+        }
+        const found = forcedFind(messages);
+        assert.ok(found);
+        assert.match(found.content, /alpha-notes\.md/);
+        assert.match(found.content, /312/);
+        options?.onToken?.(COPPER_CITED);
+        return { content: COPPER_CITED, toolCalls: [] };
       },
     }),
   );
   const index = new InMemoryIndex();
   try {
-    index.rebuildIndex({
-      mode: "lexical",
-      files: 1,
-      chunks: [
-        {
-          id: 1,
-          file: "alpha-notes.md",
-          ordinal: 0,
-          line: 4,
-          heading: "Field",
-          text: fact,
-          hash: "alpha",
-        },
-      ],
-    });
+    indexCopper(index);
     const result = await runAskAgent({
       index,
-      question,
+      question: COPPER_QUESTION,
       mode: "lexical",
-      readNote: makeReader({}),
+      readNote: makeReader({ "finch-roster.md": COPPER_ROSTER, "alpha-notes.md": COPPER_FACT }),
       retrievalSeed: false,
+      onProgress: (event) => events.push(event),
     });
     assert.equal(seen.length, 2);
     assert.deepEqual(seen[0].tools, []);
     assert.equal(seen[1].find?.name, "find");
     assert.equal(seen[1].find?.id, "cairn_forced_find");
-    assert.equal(seen[1].find?.arguments.query, question);
+    assert.equal(seen[1].find?.arguments.query, COPPER_QUESTION);
     assert.deepEqual(seen[1].tools, ["find"]);
     assert.equal(result.stopReason, "done");
-    assert.equal(result.answer, fact);
-    assert.equal(result.answer.includes("Your notes don't cover this."), false);
+    assert.equal(result.answer, COPPER_CITED);
+    assert.match(result.answer, /312/);
+    assert.match(result.answer, /alpha-notes\.md:1/);
     assert.equal(result.sources.some((source) => source.file === "alpha-notes.md"), true);
+    assertDraftHeld(events, "Your notes don't cover this.");
   } finally {
     index.close();
   }
@@ -545,10 +578,13 @@ test("a first reply with no tool call searches the question before answering or 
 
 test("a turn that already searched does not add another search", async () => {
   let calls = 0;
+  let answerCallOpen = false;
+  let tokenDuringAnswerCall = false;
+  const events = [];
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async (_model, messages, _tools, turn) => {
+      chatWithTools: async (_model, messages, _tools, turn, options) => {
         calls += 1;
         if (turn === 1) {
           return { content: "", toolCalls: [{ name: "find", arguments: { query: "spaced repetition" } }] };
@@ -558,6 +594,10 @@ test("a turn that already searched does not add another search", async () => {
         assert.equal(finds[0].toolCalls[0].id, undefined);
         assert.equal(finds[0].toolCalls[0].arguments.query, "spaced repetition");
         assert.equal(messages.filter((message) => message.role === "tool" && message.toolName === "find").length, 1);
+        assert.equal(messages.some((message) => message.toolCallId === "cairn_forced_find"), false);
+        answerCallOpen = true;
+        options?.onToken?.("Reviews use intervals.");
+        answerCallOpen = false;
         return { content: "Reviews use intervals.", toolCalls: [] };
       },
     }),
@@ -571,9 +611,15 @@ test("a turn that already searched does not add another search", async () => {
       mode: "lexical",
       readNote: makeReader({}),
       retrievalSeed: false,
+      onProgress: (event) => {
+        events.push(event);
+        if (event.kind === "token" && answerCallOpen) tokenDuringAnswerCall = true;
+      },
     });
     assert.equal(calls, 2);
     assert.equal(result.steps, 2);
+    assert.equal(tokenDuringAnswerCall, true);
+    assert.equal(events.filter((event) => event.kind === "tool" && event.name === "find").length, 1);
     assert.equal(result.answer, "Reviews use intervals.");
     assert.equal(result.sources.some((source) => source.file === "notes/topic.md"), true);
   } finally {
@@ -581,9 +627,7 @@ test("a turn that already searched does not add another search", async () => {
   }
 });
 
-test("list then a text answer still searches once", async () => {
-  const question = "What is the COPPER FINCH number?";
-  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+test("list then the exact miss still searches once and cites alpha-notes", async () => {
   let calls = 0;
   setModelProvider(
     new FakeModelProvider({
@@ -592,124 +636,122 @@ test("list then a text answer still searches once", async () => {
         calls += 1;
         if (turn === 1) return { content: "", toolCalls: [{ name: "list", arguments: { prefix: "notes" } }] };
         if (turn === 2) return { content: "Your notes don't cover this.", toolCalls: [] };
-        const forced = messages.filter(
-          (message) => message.role === "assistant" && message.toolCalls?.some((call) => call.id === "cairn_forced_find"),
-        );
-        assert.equal(forced.length, 1);
-        assert.equal(forced[0].toolCalls[0].arguments.query, question);
-        return { content: fact, toolCalls: [] };
+        const found = forcedFind(messages);
+        assert.ok(found);
+        assert.match(found.content, /alpha-notes\.md/);
+        assert.match(found.content, /312/);
+        return { content: COPPER_CITED, toolCalls: [] };
       },
     }),
   );
   const index = new InMemoryIndex();
   try {
-    index.rebuildIndex({
-      mode: "lexical",
-      files: 1,
-      chunks: [{ id: 1, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field", text: fact, hash: "alpha" }],
-    });
+    indexCopper(index);
     const result = await runAskAgent({
       index,
-      question,
+      question: COPPER_QUESTION,
       mode: "lexical",
-      readNote: makeReader({}),
+      readNote: makeReader({ "finch-roster.md": COPPER_ROSTER, "alpha-notes.md": COPPER_FACT }),
       retrievalSeed: false,
     });
     assert.equal(calls, 3);
-    assert.equal(result.answer, fact);
+    assert.equal(result.answer, COPPER_CITED);
+    assert.match(result.answer, /312/);
+    assert.match(result.answer, /alpha-notes\.md:1/);
     assert.equal(result.sources.some((source) => source.file === "alpha-notes.md"), true);
   } finally {
     index.close();
   }
 });
 
-test("read then a miss still searches once", async () => {
-  const question = "What is the COPPER FINCH number?";
-  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+test("a reworded miss after reading the finch-roster decoy still searches and cites alpha-notes", async () => {
+  const reworded = "There is no specific number provided for the COPPER FINCH codename";
+  const events = [];
   let calls = 0;
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async (_model, messages, _tools, turn) => {
+      chatWithTools: async (_model, messages, _tools, turn, options) => {
         calls += 1;
-        if (turn === 1) return { content: "", toolCalls: [{ name: "read", arguments: { path: "alpha-notes.md" } }] };
-        if (turn === 2) return { content: "Your notes don't cover this.", toolCalls: [] };
-        const forced = messages.filter(
-          (message) => message.role === "assistant" && message.toolCalls?.some((call) => call.id === "cairn_forced_find"),
-        );
-        assert.equal(forced.length, 1);
-        return { content: fact, toolCalls: [] };
+        if (turn === 1) return { content: "", toolCalls: [{ name: "read", arguments: { path: "finch-roster.md" } }] };
+        if (turn === 2) {
+          options?.onToken?.(reworded);
+          return { content: reworded, toolCalls: [] };
+        }
+        const found = forcedFind(messages);
+        assert.ok(found);
+        assert.match(found.content, /alpha-notes\.md/);
+        assert.match(found.content, /312/);
+        options?.onToken?.(COPPER_CITED);
+        return { content: COPPER_CITED, toolCalls: [] };
       },
     }),
   );
   const index = new InMemoryIndex();
   try {
-    index.rebuildIndex({
-      mode: "lexical",
-      files: 1,
-      chunks: [{ id: 1, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field", text: fact, hash: "alpha" }],
-    });
+    indexCopper(index);
     const result = await runAskAgent({
       index,
-      question,
+      question: COPPER_QUESTION,
       mode: "lexical",
-      readNote: makeReader({ "alpha-notes.md": fact }),
+      readNote: makeReader({ "finch-roster.md": COPPER_ROSTER, "alpha-notes.md": COPPER_FACT }),
       retrievalSeed: false,
+      onProgress: (event) => events.push(event),
     });
     assert.equal(calls, 3);
-    assert.equal(result.answer, fact);
+    assert.equal(result.answer, COPPER_CITED);
+    assert.match(result.answer, /312/);
+    assert.match(result.answer, /alpha-notes\.md:1/);
+    assert.equal(result.answer.includes(reworded), false);
+    assert.equal(result.sources.some((source) => source.file === "alpha-notes.md"), true);
+    assertDraftHeld(events, reworded);
   } finally {
     index.close();
   }
 });
 
-test("a miss after reading the finch-roster decoy searches and cites alpha-notes", async () => {
-  const question = "What is the COPPER FINCH number?";
-  const roster = "COPPER FINCH is listed on the field roster beside other codenames.";
-  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
-  const cited = "The number is 312. [alpha-notes.md:1]";
+test("a confident decoy answer after list and read still searches and cites alpha-notes", async () => {
+  const decoy = "alpha track";
+  const events = [];
   let calls = 0;
   setModelProvider(
     new FakeModelProvider({
       models: ["qwen3:4b"],
-      chatWithTools: async (_model, messages, _tools, turn) => {
+      chatWithTools: async (_model, messages, _tools, turn, options) => {
         calls += 1;
         if (turn === 1) return { content: "", toolCalls: [{ name: "list", arguments: {} }] };
         if (turn === 2) return { content: "", toolCalls: [{ name: "read", arguments: { path: "finch-roster.md" } }] };
-        if (turn === 3) return { content: "Your notes don't cover this.", toolCalls: [] };
-        const forced = messages.filter(
-          (message) => message.role === "tool" && message.toolCallId === "cairn_forced_find",
-        );
-        assert.equal(forced.length, 1);
-        assert.match(forced[0].content, /alpha-notes\.md/);
-        assert.match(forced[0].content, /312/);
-        return { content: cited, toolCalls: [] };
+        if (turn === 3) {
+          options?.onToken?.(decoy);
+          return { content: decoy, toolCalls: [] };
+        }
+        const found = forcedFind(messages);
+        assert.ok(found);
+        assert.match(found.content, /alpha-notes\.md/);
+        assert.match(found.content, /312/);
+        options?.onToken?.(COPPER_CITED);
+        return { content: COPPER_CITED, toolCalls: [] };
       },
     }),
   );
   const index = new InMemoryIndex();
   try {
-    index.rebuildIndex({
-      mode: "lexical",
-      files: 2,
-      chunks: [
-        { id: 1, file: "finch-roster.md", ordinal: 0, line: 2, heading: "Roster", text: roster, hash: "roster" },
-        { id: 2, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field notes", text: fact, hash: "alpha" },
-      ],
-    });
+    indexCopper(index);
     const result = await runAskAgent({
       index,
-      question,
+      question: COPPER_QUESTION,
       mode: "lexical",
-      readNote: makeReader({ "finch-roster.md": roster, "alpha-notes.md": fact }),
+      readNote: makeReader({ "finch-roster.md": COPPER_ROSTER, "alpha-notes.md": COPPER_FACT }),
       retrievalSeed: false,
+      onProgress: (event) => events.push(event),
     });
     assert.equal(calls, 4);
-    assert.equal(result.answer, cited);
+    assert.equal(result.answer, COPPER_CITED);
     assert.match(result.answer, /312/);
     assert.match(result.answer, /alpha-notes\.md:1/);
-    assert.equal(result.answer.includes("Your notes don't cover this."), false);
+    assert.equal(result.answer.includes(decoy), false);
     assert.equal(result.sources.some((source) => source.file === "alpha-notes.md"), true);
+    assertDraftHeld(events, decoy);
   } finally {
     index.close();
   }

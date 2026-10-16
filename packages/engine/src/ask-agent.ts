@@ -111,7 +111,7 @@ export const ASK_AGENT_SYSTEM = [
   "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, or the text of each PDF page.",
   "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text, CSV, TSV, or HTML file opens at a line, like a note.",
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
-  "Before you reply that the notes don't cover the question, you MUST call find or grep. list and read do not count as that search.",
+  "Before you give a final answer, you MUST call find or grep. list and read do not count as that search.",
   "Cite Markdown, plain text, CSV, TSV, and HTML as [path:line]. Cite a PDF by its page.",
   "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows. An audio file (.mp3, .wav, .m4a) has no transcript. Do not invent what it says. A video file (.mp4, .webm, .mov) has no transcript. Do not invent what it says or shows.",
   "If the question names a file that cannot be read, do not answer from any other file.",
@@ -451,20 +451,24 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     );
     let turn;
     let streamed = false;
+    // Draft text before any find/grep. Kept here so it is not forwarded.
+    let heldAnswer = "";
     try {
       turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS, {
         timeoutMs: turnBudget,
         requireToolCall: firstTurn,
         signal: opts.signal,
-        onToken: firstTurn
-          ? undefined
-          : (token) => {
-              if (!streamed) {
-                streamed = true;
-                progress({ kind: "status", message: "Composing answer…" });
-              }
-              progress({ kind: "token", token });
-            },
+        onToken: (token) => {
+          if (!sawSearch) {
+            heldAnswer += token;
+            return;
+          }
+          if (!streamed) {
+            streamed = true;
+            progress({ kind: "status", message: "Composing answer…" });
+          }
+          progress({ kind: "token", token });
+        },
       });
     } catch (err) {
       if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
@@ -483,12 +487,12 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     if (turn.toolCalls.length > 0 && streamed) progress({ kind: "clear-answer" });
 
     if (turn.toolCalls.length === 0) {
-      // A miss before any find/grep has not searched the vault. Search once
-      // with the question, then let the model answer. One shot per Ask.
-      // list and read do not count. A search that already ran is left alone.
-      if (!sawSearch && turn.content.trim() === UNCOVERED) {
-        if (streamed) progress({ kind: "clear-answer" });
+      // Every Ask runs one find or grep before a final answer, whatever the
+      // wording. list and read do not count. The draft stays off the renderer.
+      // One shot per Ask. A search that already ran is left alone.
+      if (!sawSearch) {
         sawSearch = true;
+        heldAnswer = "";
         const query = opts.question.trim();
         const args = { query };
         const call = { id: "cairn_forced_find", name: "find", arguments: args };
