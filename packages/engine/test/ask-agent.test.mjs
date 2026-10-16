@@ -623,8 +623,7 @@ test("list then a text answer still searches once", async () => {
   }
 });
 
-test("read then a text answer still searches once", async () => {
-  const question = "What is the COPPER FINCH number?";
+test("read then a text answer does not add a search", async () => {
   const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
   let calls = 0;
   setModelProvider(
@@ -633,9 +632,7 @@ test("read then a text answer still searches once", async () => {
       chatWithTools: async (_model, messages, _tools, turn) => {
         calls += 1;
         if (turn === 1) return { content: "", toolCalls: [{ name: "read", arguments: { path: "alpha-notes.md" } }] };
-        if (turn === 2) return { content: "Your notes don't cover this.", toolCalls: [] };
-        const forced = messages.filter((message) => message.role === "tool" && message.toolName === "find");
-        assert.equal(forced.length, 1);
+        assert.equal(messages.some((message) => message.toolName === "find"), false);
         return { content: fact, toolCalls: [] };
       },
     }),
@@ -649,12 +646,13 @@ test("read then a text answer still searches once", async () => {
     });
     const result = await runAskAgent({
       index,
-      question,
+      question: "What is the COPPER FINCH number?",
       mode: "lexical",
       readNote: makeReader({ "alpha-notes.md": fact }),
       retrievalSeed: false,
     });
-    assert.equal(calls, 3);
+    assert.equal(calls, 2);
+    assert.equal(result.steps, 2);
     assert.equal(result.answer, fact);
   } finally {
     index.close();
@@ -978,11 +976,8 @@ test("a streamed answer that ends as a miss leaves only the miss text and 0 chip
         if (turn === 1) {
           return { content: "", toolCalls: [{ name: "read", arguments: { path: "clip.mp4" } }] };
         }
-        if (turn === 2) {
-          options?.onToken?.("The clip says hello.");
-          return { content: "The clip says hello.", toolCalls: [] };
-        }
-        return { content: "Your notes don't cover this.", toolCalls: [] };
+        options?.onToken?.("The clip says hello.");
+        return { content: "The clip says hello.", toolCalls: [] };
       },
     }),
   );
