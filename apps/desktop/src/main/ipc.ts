@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { CloudProvider, getModelProvider, PROVIDER_PRESETS, studioTemplateMetas } from "@cairn/engine";
@@ -292,6 +292,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("pdf:hide", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) hidePdfView(win);
+  });
+
+  ipcMain.handle("docx:open", async (_event, file: unknown) => {
+    return handleUserErrors(() => {
+      if (typeof file !== "string") throw new Error("No source file was provided.");
+      return session.openDocx(file, (abs) => shell.openPath(abs));
+    });
   });
 
   ipcMain.handle("source:read", async (_event, file: unknown) => {

@@ -21,6 +21,10 @@ const {
   isImagePath,
   isAudioPath,
   isVideoPath,
+  isDocxPath,
+  DOCX_NO_APP,
+  docxChipLabel,
+  docxChipText,
   isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
@@ -158,6 +162,27 @@ test("audio opens in the player and not in the editor", () => {
   assert.equal(opensInEditor("notes/section-b.mp3"), false);
   assert.equal(opensInEditor("notes/tone.wav"), false);
   assert.equal(isReadOnlyEditorPath("notes/clip.m4a"), false);
+});
+
+test("a Word file chips as file.docx · heading and does not open in the editor", () => {
+  assert.equal(isDocxPath("notes/field.docx"), true);
+  assert.equal(isDocxPath("notes/field.DOCX"), true);
+  assert.equal(isDocxPath("notes/old.doc"), false);
+  assert.equal(isDocxPath("notes/macro.docm"), false);
+  assert.equal(opensInEditor("notes/field.docx"), false);
+  assert.equal(docxChipLabel("notes/field.docx", "第二節"), "field.docx · 第二節");
+  assert.equal(docxChipLabel("notes/field.docx", "  "), "field.docx");
+  assert.equal(docxChipText("notes/field.docx", "第二節", null), "field.docx · 第二節");
+  assert.equal(
+    docxChipText("notes/field.docx", "第二節", { file: "notes/field.docx", message: DOCX_NO_APP }),
+    "No app on this computer opens .docx files.",
+  );
+  assert.equal(
+    docxChipText("notes/other.docx", "第二節", { file: "notes/field.docx", message: DOCX_NO_APP }),
+    "other.docx · 第二節",
+  );
+  assert.equal(citationTitle("notes/field.docx", 4, "第二節"), "Open notes/field.docx");
+  assert.equal(citationTitle("notes/field.docx", 4, "第二節").includes("line"), false);
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

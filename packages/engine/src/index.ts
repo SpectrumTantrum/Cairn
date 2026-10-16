@@ -13,6 +13,22 @@ export { IMAGE_NO_TEXT, imageMimeType, isImagePath } from "./image-files.js";
 export { AUDIO_NO_TEXT, audioMimeType, isAudioPath } from "./audio-files.js";
 export { VIDEO_NO_TEXT, videoMimeType, isVideoPath } from "./video-files.js";
 export { extractHtmlText, HTML_NO_TEXT } from "./html-text.js";
+export {
+  DOCX_NO_TEXT,
+  DOCX_TEXT_CAP,
+  DOCX_UNREADABLE,
+  extractDocxText,
+  isDocxPath,
+  limitDocxText,
+  renderDocxXml,
+} from "./docx-text.js";
+export {
+  readZipEntry,
+  ZIP_RATIO_CAP,
+  ZIP_RATIO_MIN_UNCOMPRESSED,
+  ZIP_UNCOMPRESSED_CAP,
+  ZipError,
+} from "./zip-read.js";
 export { extractPdfPages, pdfPageHeading, textFromItems, PdfTextError } from "./pdf-text.js";
 export type { PdfPageText } from "./pdf-text.js";
 export type { IndexStats, PendingChunk, EmbedChunksResult } from "./indexer.js";
