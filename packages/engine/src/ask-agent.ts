@@ -111,7 +111,7 @@ export const ASK_AGENT_SYSTEM = [
   "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, or the text of each PDF page.",
   "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text, CSV, TSV, or HTML file opens at a line, like a note.",
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
-  "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
+  "You MUST call find or grep before the final answer. list and read do not count as a search. Never answer with text only before a search has run.",
   "Cite Markdown, plain text, CSV, TSV, and HTML as [path:line]. Cite a PDF by its page.",
   "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows. An audio file (.mp3, .wav, .m4a) has no transcript. Do not invent what it says. A video file (.mp4, .webm, .mov) has no transcript. Do not invent what it says or shows.",
   "If the question names a file that cannot be read, do not answer from any other file.",
@@ -413,6 +413,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   ];
 
   let steps = 0;
+  let searched = false;
   let answer = "";
   let stopReason: AskAgentResult["stopReason"] = "done";
   const progress = (event: AskAgentProgress): void => {
@@ -482,9 +483,12 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     if (turn.toolCalls.length > 0 && streamed) progress({ kind: "clear-answer" });
 
     if (turn.toolCalls.length === 0) {
-      // A tool-less first reply is not an answer and not the miss. Search once
-      // with the question, then let the model answer from those results.
-      if (steps === 1) {
+      // A final answer before any find/grep is not grounded. Search once with
+      // the question, then let the model answer from those results. One shot
+      // per Ask, and never after a search has already run.
+      if (!searched) {
+        if (streamed) progress({ kind: "clear-answer" });
+        searched = true;
         const query = opts.question.trim();
         const args = { query };
         const call = { id: "cairn_forced_find", name: "find", arguments: args };
@@ -511,6 +515,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       break;
     }
 
+    if (turn.toolCalls.some((call) => call.name === "find" || call.name === "grep")) searched = true;
     messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
 
     for (const call of turn.toolCalls) {

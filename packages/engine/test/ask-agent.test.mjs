@@ -573,8 +573,153 @@ test("a turn that already searched does not add another search", async () => {
       retrievalSeed: false,
     });
     assert.equal(calls, 2);
+    assert.equal(result.steps, 2);
     assert.equal(result.answer, "Reviews use intervals.");
     assert.equal(result.sources.some((source) => source.file === "notes/topic.md"), true);
+  } finally {
+    index.close();
+  }
+});
+
+test("list then a text answer still searches once", async () => {
+  const question = "What is the COPPER FINCH number?";
+  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) return { content: "", toolCalls: [{ name: "list", arguments: { prefix: "notes" } }] };
+        if (turn === 2) return { content: "Your notes don't cover this.", toolCalls: [] };
+        const forced = messages.filter(
+          (message) => message.role === "assistant" && message.toolCalls?.some((call) => call.id === "cairn_forced_find"),
+        );
+        assert.equal(forced.length, 1);
+        assert.equal(forced[0].toolCalls[0].arguments.query, question);
+        return { content: fact, toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 1,
+      chunks: [{ id: 1, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field", text: fact, hash: "alpha" }],
+    });
+    const result = await runAskAgent({
+      index,
+      question,
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(calls, 3);
+    assert.equal(result.answer, fact);
+    assert.equal(result.sources.some((source) => source.file === "alpha-notes.md"), true);
+  } finally {
+    index.close();
+  }
+});
+
+test("read then a text answer still searches once", async () => {
+  const question = "What is the COPPER FINCH number?";
+  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) return { content: "", toolCalls: [{ name: "read", arguments: { path: "alpha-notes.md" } }] };
+        if (turn === 2) return { content: "Your notes don't cover this.", toolCalls: [] };
+        const forced = messages.filter((message) => message.role === "tool" && message.toolName === "find");
+        assert.equal(forced.length, 1);
+        return { content: fact, toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 1,
+      chunks: [{ id: 1, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field", text: fact, hash: "alpha" }],
+    });
+    const result = await runAskAgent({
+      index,
+      question,
+      mode: "lexical",
+      readNote: makeReader({ "alpha-notes.md": fact }),
+      retrievalSeed: false,
+    });
+    assert.equal(calls, 3);
+    assert.equal(result.answer, fact);
+  } finally {
+    index.close();
+  }
+});
+
+test("a text answer after the forced search does not search again", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        calls += 1;
+        const finds = messages.filter((message) => message.role === "tool" && message.toolName === "find");
+        if (turn === 1) return { content: "Your notes don't cover this.", toolCalls: [] };
+        assert.equal(finds.length, 1);
+        assert.equal(finds[0].toolCallId, "cairn_forced_find");
+        return { content: "Your notes don't cover this.", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "zzzzqqq",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.steps, 2);
+    assert.equal(result.answer, "Your notes don't cover this.");
+  } finally {
+    index.close();
+  }
+});
+
+test("a turn that already grepped does not add a find", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, messages, _tools, turn) => {
+        calls += 1;
+        if (turn === 1) return { content: "", toolCalls: [{ name: "grep", arguments: { pattern: "cooking" } }] };
+        assert.equal(messages.some((message) => message.toolName === "find"), false);
+        return { content: "Unrelated note about cooking.", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "cooking",
+      mode: "lexical",
+      readNote: makeReader({}),
+      retrievalSeed: false,
+    });
+    assert.equal(calls, 2);
+    assert.equal(result.steps, 2);
+    assert.equal(result.answer, "Unrelated note about cooking.");
   } finally {
     index.close();
   }
@@ -833,8 +978,11 @@ test("a streamed answer that ends as a miss leaves only the miss text and 0 chip
         if (turn === 1) {
           return { content: "", toolCalls: [{ name: "read", arguments: { path: "clip.mp4" } }] };
         }
-        options?.onToken?.("The clip says hello.");
-        return { content: "The clip says hello.", toolCalls: [] };
+        if (turn === 2) {
+          options?.onToken?.("The clip says hello.");
+          return { content: "The clip says hello.", toolCalls: [] };
+        }
+        return { content: "Your notes don't cover this.", toolCalls: [] };
       },
     }),
   );
