@@ -9,6 +9,7 @@ import {
   VIDEO_NO_TEXT,
   videoMimeType,
   EMPTY_TABLE_MESSAGE,
+  extractDocxText,
   extractHtmlText,
   extractPdfPages,
   HTML_NO_TEXT,
@@ -426,6 +427,7 @@ export class VaultSession {
     if (isImagePath(file)) throw new Error(IMAGE_NO_TEXT);
     if (isAudioPath(file)) throw new Error(AUDIO_NO_TEXT);
     if (isVideoPath(file)) throw new Error(VIDEO_NO_TEXT);
+    if (file.toLowerCase().endsWith(".docx")) return extractDocxText(target);
     const lower = target.toLowerCase();
     if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
@@ -439,6 +441,26 @@ export class VaultSession {
       return text;
     }
     return readFileSync(target, "utf8");
+  }
+
+  /**
+   * Open a Word file in the registered app. The vault-relative path is resolved
+   * inside the vault first. A non-empty `openPath` result means no app is registered.
+   */
+  async openDocx(
+    file: string,
+    openPath: (abs: string) => Promise<string>,
+  ): Promise<{ opened: boolean; message?: string }> {
+    if (!file.toLowerCase().endsWith(".docx")) {
+      throw new Error("Only a Word .docx file can be opened in another app.");
+    }
+    const target = this.resolveSourcePath(file);
+    if (!existsSync(target) || !statSync(target).isFile()) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    const failure = await openPath(target);
+    if (failure) return { opened: false, message: "No app on this computer opens .docx files." };
+    return { opened: true };
   }
 
   /**

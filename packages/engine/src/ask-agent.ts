@@ -20,6 +20,7 @@ import {
   type AskSearchToolState,
   type OpenAnchor,
 } from "./agent-search-tools.js";
+import { DOCX_NO_TEXT, DOCX_UNREADABLE, isDocxPath } from "./docx-text.js";
 import { HTML_NO_TEXT } from "./html-text.js";
 import { AUDIO_NO_TEXT, isAudioPath } from "./audio-files.js";
 import { IMAGE_NO_TEXT, isImagePath } from "./image-files.js";
@@ -102,18 +103,18 @@ export interface AskAgentResult {
 const UNCOVERED = "Your notes don't cover this.";
 
 const ASK_AGENT_SYSTEM = [
-  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, CSV and TSV files, HTML files, and text PDFs.",
+  "You are Cairn, a local knowledge assistant operating over the user's Markdown notes, plain text files, CSV and TSV files, HTML files, Word .docx files, and text PDFs.",
   "Answer using ONLY information you gather with your tools — do not invent facts.",
   "Tools (read-only):",
-  "- list(prefix?): list Markdown, plain text, CSV, TSV, HTML, PDF, image, audio, and video paths in the vault.",
+  "- list(prefix?): list Markdown, plain text, CSV, TSV, HTML, Word .docx, PDF, image, audio, and video paths in the vault.",
   "- find(query, k?): search indexed chunks (hybrid or keyword). PDF chunks are keyword-only and include a page.",
   "- grep(pattern, path?, limit?): substring search over indexed chunks. PDF hits include a page.",
-  "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, or the text of each PDF page.",
-  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text, CSV, TSV, or HTML file opens at a line, like a note.",
+  "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, the body text of a Word .docx file, or the text of each PDF page.",
+  "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text, CSV, TSV, HTML, or Word .docx file opens at a line, like a note.",
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
   "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
-  "Cite Markdown, plain text, CSV, TSV, and HTML as [path:line]. Cite a PDF by its page.",
-  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows. An audio file (.mp3, .wav, .m4a) has no transcript. Do not invent what it says. A video file (.mp4, .webm, .mov) has no transcript. Do not invent what it says or shows.",
+  "Cite Markdown, plain text, CSV, TSV, HTML, and Word .docx as [path:line] with the heading when you know it, for example [file.docx:line]. Cite a PDF by its page.",
+  "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. A Word .docx file that is password-protected, damaged, or has no readable text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows. An audio file (.mp3, .wav, .m4a) has no transcript. Do not invent what it says. A video file (.mp4, .webm, .mov) has no transcript. Do not invent what it says or shows.",
   "If the question names a file that cannot be read, do not answer from any other file.",
   `If the vault does not contain the answer after searching, reply exactly: "${UNCOVERED}"`,
   "When finished, stop calling tools and give a concise, direct answer.",
@@ -131,7 +132,7 @@ function normalizeVaultPath(path: string): string {
 function filesNamedInQuestion(question: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  const named = /[\w./\\-]+\.(?:markdown|txt|csv|tsv|pdf|html|htm|png|jpe?g|webp|gif|mp3|wav|m4a|mp4|webm|mov|md)\b/gi;
+  const named = /[\w./\\-]+\.(?:markdown|txt|csv|tsv|pdf|html|htm|docx|png|jpe?g|webp|gif|mp3|wav|m4a|mp4|webm|mov|md)\b/gi;
   for (const match of question.matchAll(named)) {
     const norm = normalizeVaultPath(match[0]);
     const key = norm.toLowerCase();
@@ -203,7 +204,8 @@ async function namedVideoIsPresent(opts: AskAgentOptions, name: string): Promise
 
 /**
  * The question names a file the index skipped: invalid UTF-8 text, an empty CSV or
- * TSV, an HTML file with no visible text, a PDF with no text layer, an image, audio, or video.
+ * TSV, an HTML file with no visible text, a Word file with no readable text or a
+ * damaged package, a PDF with no text layer, an image, audio, or video.
  * A readable indexed file does not count. An image, audio, or video file has no text body even if listed.
  */
 async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boolean> {
@@ -252,6 +254,16 @@ async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boole
       }
       continue;
     }
+    if (isDocxPath(lower)) {
+      try {
+        const text = await opts.readNote(name);
+        if (!text.trim()) return true;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === DOCX_NO_TEXT || message === DOCX_UNREADABLE) return true;
+      }
+      continue;
+    }
     if (!lower.endsWith(".txt")) continue;
     try {
       await opts.readNote(name);
@@ -296,8 +308,9 @@ function sourceHasBody(hit: SearchHit): boolean {
  * Drop PDF sources that never yielded a page of text, drop HTML sources with no
  * visible text, drop CSV/TSV sources with no body, drop image, audio, and video
  * sources (no text layer), and replace an invented answer when the run touched a
- * text-less PDF, an empty HTML file, an empty or unreadable table, an unreadable
- * text file, an image, an audio file, or a video file and gathered nothing else.
+ * text-less PDF, an empty HTML file, an empty or unreadable Word file, an empty or
+ * unreadable table, an unreadable text file, an image, an audio file, or a video
+ * file and gathered nothing else.
  * Leaves no-tool-use, timeout, and step-cap messages alone.
  */
 function settleTextlessPdf(
@@ -310,23 +323,26 @@ function settleTextlessPdf(
     if (isImagePath(hit.file) || isAudioPath(hit.file) || isVideoPath(hit.file)) return false;
     if (isPdfFile(hit.file)) return typeof hit.page === "number" && hit.page > 0 && sourceHasBody(hit);
     if (state.textlessHtml && isHtmlFile(hit.file)) return sourceHasBody(hit);
+    if (state.textlessDocx && isDocxPath(hit.file)) return sourceHasBody(hit);
     if (state.unreadableText && isTableFile(hit.file)) return sourceHasBody(hit);
     return true;
   });
   const keptPdf = new Set(sources.filter((hit) => isPdfFile(hit.file)).map((hit) => hit.file));
   const keptHtml = new Set(sources.filter((hit) => isHtmlFile(hit.file)).map((hit) => hit.file));
+  const keptDocx = new Set(sources.filter((hit) => isDocxPath(hit.file)).map((hit) => hit.file));
   const keptTables = new Set(sources.filter((hit) => isTableFile(hit.file)).map((hit) => hit.file));
   const opened = state.opened.filter((anchor) => {
     if (isImagePath(anchor.path) || isAudioPath(anchor.path) || isVideoPath(anchor.path)) return false;
     if (isPdfFile(anchor.path)) return keptPdf.has(anchor.path);
     if (state.textlessHtml && isHtmlFile(anchor.path)) return keptHtml.has(anchor.path);
+    if (state.textlessDocx && isDocxPath(anchor.path)) return keptDocx.has(anchor.path);
     if (state.unreadableText && isTableFile(anchor.path)) return keptTables.has(anchor.path);
     return true;
   });
   const anyBody = sources.some(sourceHasBody) || seedHits.some(sourceHasBody);
   let next = answer;
   if (
-    (state.textlessPdf || state.unreadableText || state.textlessHtml || state.textlessImage || state.textlessAudio || state.textlessVideo) &&
+    (state.textlessPdf || state.unreadableText || state.textlessHtml || state.textlessDocx || state.textlessImage || state.textlessAudio || state.textlessVideo) &&
     !anyBody &&
     stopReason === "done"
   ) {

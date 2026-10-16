@@ -16,7 +16,8 @@ import type {
 import { citationOpenTarget, citationsFromAskAgent, classicAskTurn } from "./agent-citations";
 import { nextEditorFlash } from "./citation-editor-focus";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { isAudioPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { DOCX_NO_APP, isAudioPath, isDocxPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { setDocxChipNotice } from "./docx-chip-notice";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { inlineErrorText } from "./inline-error";
@@ -691,8 +692,49 @@ export function App() {
     [savePendingNavigation],
   );
 
+  const openDocxExternal = useCallback((file: string, fromTree: boolean) => {
+    void (async () => {
+      try {
+        const result = await window.cairn.openDocx(file);
+        if (result.opened) {
+          setDocxChipNotice(null);
+          return;
+        }
+        const message = result.message || DOCX_NO_APP;
+        setDocxChipNotice({ file, message });
+        if (!fromTree) return;
+        setPdfTarget(null);
+        setImageSrc(null);
+        setAudioSrc(null);
+        setVideoSrc(null);
+        setActiveNode({ name: basename(file), path: file, type: "other" });
+        setDocKey(null);
+        setBuffer("");
+        setSavedContent("");
+        setLoadError(message);
+        setLoading(false);
+      } catch (err) {
+        setError(errorMessage(err));
+      }
+    })();
+  }, []);
+
   const openNode = useCallback(
     (node: TreeNode) => {
+      if (isDocxPath(node.path)) {
+        void (async () => {
+          if (navigatingRef.current) return;
+          navigatingRef.current = true;
+          try {
+            const saved = await savePendingNavigation();
+            if (!saved) return;
+            openDocxExternal(node.path, true);
+          } finally {
+            navigatingRef.current = false;
+          }
+        })();
+        return;
+      }
       if (isPdfPath(node.path)) {
         void openPdf(node.path, 1);
         return;
@@ -722,7 +764,7 @@ export function App() {
         setLoadError(null);
       }
     },
-    [openAudio, openImage, openMarkdown, openPdf, openVideo],
+    [openAudio, openDocxExternal, openImage, openMarkdown, openPdf, openVideo, savePendingNavigation],
   );
 
   const closeTab = useCallback(() => {
@@ -933,6 +975,10 @@ export function App() {
         void openPdf(source.file, target.page);
         return;
       }
+      if (target.kind === "docx") {
+        openDocxExternal(source.file, false);
+        return;
+      }
       if (target.kind === "image") {
         void openImage(node);
         return;
@@ -951,7 +997,7 @@ export function App() {
         true,
       );
     },
-    [openAudio, openImage, openPdf, openVideo, revealCitedEditor],
+    [openAudio, openDocxExternal, openImage, openPdf, openVideo, revealCitedEditor],
   );
 
   function submitChat(): void {
@@ -1321,6 +1367,10 @@ export function App() {
         void openPdf(hit.file, target.page);
         return;
       }
+      if (target.kind === "docx") {
+        openDocxExternal(hit.file, false);
+        return;
+      }
       if (target.kind === "image") {
         void openImage(node);
         return;
@@ -1336,7 +1386,7 @@ export function App() {
       const isMd = hit.file.toLowerCase().endsWith(".md");
       revealCitedEditor({ ...node, type: isMd ? "markdown" : "other" }, target, false);
     },
-    [openAudio, openImage, openPdf, openVideo, revealCitedEditor],
+    [openAudio, openDocxExternal, openImage, openPdf, openVideo, revealCitedEditor],
   );
 
   const composerReason = useMemo(
