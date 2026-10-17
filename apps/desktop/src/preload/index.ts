@@ -96,6 +96,17 @@ export interface CairnApi {
   /** Delete a file or folder (folders recursively). Confirmation is a renderer concern. */
   deletePath(path: string): Promise<void>;
   checkOllama(): Promise<OllamaStatus>;
+  /**
+   * Chat model a fresh profile will send. Both modes prefer qwen3:8b over the
+   * first Ollama tag. `agentic` does not change the model. Null when Ollama is
+   * down or no chat model is pulled.
+   */
+  resolveChatModel(agentic: boolean): Promise<string | null>;
+  /**
+   * Prime the chat model the next Ask will use. `agentic` selects that mode's
+   * real prompt prefix. Embedders are ignored. Never rejects.
+   */
+  warmChatModel(model: string, agentic: boolean): Promise<"warmed" | "skipped" | "failed">;
   /** Agent mode (ADR-0008): start a write run — collects proposals, applies nothing. */
   agentStart(payload: { goal: string; model?: string; scope?: string[] }): Promise<AgentStartResult>;
   /** Approve one proposed edit — the per-hunk gate; the only path to disk. */
@@ -176,6 +187,8 @@ const api: CairnApi = {
   movePath: (from, to) => ipcRenderer.invoke("vault:move", { from, to }),
   deletePath: (path) => ipcRenderer.invoke("vault:delete", { path }),
   checkOllama: () => ipcRenderer.invoke("ollama:check"),
+  resolveChatModel: (agentic) => ipcRenderer.invoke("ollama:resolveChatModel", agentic),
+  warmChatModel: (model, agentic) => ipcRenderer.invoke("ollama:warm", model, agentic),
   agentStart: (payload) => ipcRenderer.invoke("agent:start", payload),
   agentApply: (runId, proposalId) => ipcRenderer.invoke("agent:apply", { runId, proposalId }),
   agentReject: (runId, proposalId) => ipcRenderer.invoke("agent:reject", { runId, proposalId }),

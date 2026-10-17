@@ -47,6 +47,8 @@ import {
 /** ⌘K on macOS, Ctrl+K elsewhere — used for the palette hint + open chord (issue #13). */
 const IS_MAC = typeof navigator !== "undefined" && navigator.platform.toLowerCase().includes("mac");
 const PALETTE_HINT = IS_MAC ? "⌘K" : "Ctrl+K";
+/** How often to notice Ollama going down and coming back while the window stays open. */
+const OLLAMA_STATUS_POLL_MS = 3_000;
 
 function errorMessage(error: unknown): string {
   return inlineErrorText(error);
@@ -201,10 +203,13 @@ export function App() {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [agenticAskEnvDefault, setAgenticAskEnvDefault] = useState(false);
   const [agenticAskRev, setAgenticAskRev] = useState(0);
+  const [featuresReady, setFeaturesReady] = useState(false);
   const agenticAskEnabled = useMemo(
     () => isAgenticAskEnabled(window.localStorage, agenticAskEnvDefault),
     [agenticAskEnvDefault, agenticAskRev],
   );
+  const agenticRef = useRef(agenticAskEnabled);
+  agenticRef.current = agenticAskEnabled;
   // Armed escalation for the NEXT turn (null = stays local on Ollama).
   const [escalateTarget, setEscalateTarget] = useState<EscalateTarget | null>(null);
   // First-use confirm gate: once a provider is confirmed (or the session-wide skip is
@@ -234,6 +239,11 @@ export function App() {
   const [chatInput, setChatInput] = useState("");
   const [mode, setMode] = useState<AgentMode>("ask");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  /** True after the user picks a model. Until then the selection follows resolveChatModel. */
+  const modelPinnedRef = useRef(false);
+  const selectedModelRef = useRef<string | null>(null);
+  const ollamaUpRef = useRef(false);
+  const ollamaCheckRef = useRef(false);
   const [lastSources, setLastSources] = useState<SearchHit[]>([]);
   // Vault-relative file paths unchecked in the Sources tab — excluded from the NEXT
   // question's retrieval. Empty = whole index (no scope). Reset on each new answer / thread.
@@ -263,6 +273,7 @@ export function App() {
 
   useEffect(() => {
     void refreshOllama();
+    const poll = setInterval(() => void refreshOllama(), OLLAMA_STATUS_POLL_MS);
     void window.cairn.providerPresets().then(setPresets).catch(() => setPresets([]));
     void refreshProviders();
     void refreshThreads();
@@ -270,8 +281,20 @@ export function App() {
     void window.cairn.desktopFeatures().then((f) => {
       setAgenticAskEnvDefault(f.agenticAskEnvDefault);
       setAgenticAskRev((v) => v + 1);
-    });
+      setFeaturesReady(true);
+    }).catch(() => setFeaturesReady(true));
+    return () => clearInterval(poll);
   }, []);
+
+  // Warm only after we know whether this profile's next Ask is agentic. A fresh
+  // profile has no pinned model, so the target is resolveChatModel — qwen3:8b
+  // in both modes when it is installed, never tags[0]. Toggling agentic does
+  // not change that model. `recovered` stays meaningful while `up` is already
+  // true: an Ollama restart, or `/api/ps` losing the model.
+  useEffect(() => {
+    if (!featuresReady || !ollama.up) return;
+    warmChatForAsk(agenticAskEnabled);
+  }, [featuresReady, agenticAskEnabled, ollama.up, ollama.recovered]);
 
   useEffect(() => {
     writeRightTab(window.localStorage, rightTab);
@@ -399,10 +422,60 @@ export function App() {
 
   const clearScope = useCallback(() => setExcludedSources(new Set()), []);
 
+  function requestChatWarm(model: string | null, agentic: boolean): void {
+    if (!model) return;
+    // Fire and forget. A failure must not toast, disable the composer, or block the shell.
+    void window.cairn.warmChatModel(model, agentic).catch(() => {});
+  }
+
+  function warmChatForAsk(agentic: boolean): void {
+    void (async () => {
+      if (!ollamaUpRef.current) return;
+      let target: string | null;
+      if (modelPinnedRef.current) {
+        target = selectedModelRef.current;
+      } else {
+        try {
+          target = await window.cairn.resolveChatModel(agentic);
+        } catch {
+          target = null;
+        }
+        if (modelPinnedRef.current) target = selectedModelRef.current;
+        else if (target) {
+          selectedModelRef.current = target;
+          setSelectedModel(target);
+        }
+      }
+      requestChatWarm(target, agentic);
+    })();
+  }
+
   async function refreshOllama(): Promise<void> {
-    const status = await window.cairn.checkOllama();
-    setOllama(status);
-    setSelectedModel((current) => current ?? status.models[0] ?? null);
+    if (ollamaCheckRef.current) return;
+    ollamaCheckRef.current = true;
+    try {
+      const status = await window.cairn.checkOllama();
+      ollamaUpRef.current = status.up;
+      setOllama((current) => {
+        const sameModels =
+          current.models.length === status.models.length &&
+          current.models.every((model, i) => model === status.models[i]);
+        if (current.up === status.up && current.recovered === status.recovered && sameModels) return current;
+        return status;
+      });
+    } catch {
+      ollamaUpRef.current = false;
+      setOllama({ up: false, models: [] });
+    } finally {
+      ollamaCheckRef.current = false;
+    }
+  }
+
+  function selectChatModel(model: string): void {
+    modelPinnedRef.current = true;
+    selectedModelRef.current = model;
+    setSelectedModel(model);
+    requestChatWarm(model, agenticRef.current);
   }
 
   const refreshProviders = useCallback(async (): Promise<void> => {
@@ -1546,7 +1619,7 @@ export function App() {
               escalateTarget={escalateTarget}
               onInputChange={setChatInput}
               onSelectMode={setMode}
-              onSelectModel={setSelectedModel}
+              onSelectModel={selectChatModel}
               onSelectEscalation={setEscalateTarget}
               onOpenSettings={() => setSettingsOpen(true)}
               onSubmit={onSubmit}

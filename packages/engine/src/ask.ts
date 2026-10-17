@@ -32,6 +32,13 @@ export const GROUNDING_SYSTEM = [
   "- Be concise and direct; no preamble.",
 ].join("\n");
 
+/** Stable start of a classic user turn. Background warm stops here so the prefix stays cached. */
+export const CLASSIC_USER_PREFIX = "SOURCES:\n";
+
+export function classicAskUserContent(sourcesBlock: string, question: string): string {
+  return `${CLASSIC_USER_PREFIX}${sourcesBlock}\n\nQUESTION: ${question}`;
+}
+
 export async function ask(
   index: Index,
   question: string,
@@ -63,7 +70,7 @@ export async function ask(
 
   const answer = await chat(model, [
     { role: "system", content: GROUNDING_SYSTEM },
-    { role: "user", content: `SOURCES:\n${sourcesBlock}\n\nQUESTION: ${question}` },
+    { role: "user", content: classicAskUserContent(sourcesBlock, question) },
   ]);
 
   return { answer, sources: hits, mode, grounded: true, model, covered: true };

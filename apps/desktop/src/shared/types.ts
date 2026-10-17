@@ -13,6 +13,11 @@ export type { ThreadMeta, ThreadRecord, ThreadSaveInput } from "../main/thread-s
 export interface OllamaStatus {
   up: boolean;
   models: string[];
+  /**
+   * True when this check should warm again: Ollama came back up, the server
+   * instance changed, or `/api/ps` lost the model that was primed.
+   */
+  recovered?: boolean;
 }
 
 /** An explicit, confirmed BYOK escalation for one chat turn (ADR-0002). */

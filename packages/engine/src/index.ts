@@ -18,7 +18,7 @@ export type { PdfPageText } from "./pdf-text.js";
 export type { IndexStats, PendingChunk, EmbedChunksResult } from "./indexer.js";
 export { search, sanitizeForFts, rrfFuse, DEFAULT_COVERAGE_THRESHOLD } from "./retrieve.js";
 export type { Mode, SearchCoverage, SearchHit, SearchOpts } from "./retrieve.js";
-export { ask, GROUNDING_SYSTEM } from "./ask.js";
+export { ask, GROUNDING_SYSTEM, CLASSIC_USER_PREFIX, classicAskUserContent } from "./ask.js";
 export type { AskResult } from "./ask.js";
 export { ChatThread } from "./chat-thread.js";
 export type { ThreadTurn, ChatThreadOptions, ChatSendOptions, ChatSendResult, SentPayload } from "./chat-thread.js";
@@ -29,11 +29,15 @@ export type {
   CloudProviderConfig,
   CloudCredentials,
 } from "./cloud-provider.js";
-export { chat, chatStream, resolveChatModel } from "./chat.js";
+export { chat, chatStream, pickChatModel, resolveChatModel } from "./chat.js";
+export type { ResolveChatModelOptions } from "./chat.js";
 export { runAgent, DEFAULT_AGENT_STEP_CAP } from "./agent-run.js";
 export type { AgentRunOptions, AgentRunResult, EditProposal } from "./agent-run.js";
 export {
   runAskAgent,
+  ASK_AGENT_SYSTEM,
+  AGENTIC_WARM_USER_PREFIX,
+  agenticAskUserContent,
   DEFAULT_ASK_AGENT_STEP_CAP,
   DEFAULT_ASK_AGENT_WALL_MS,
   DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS,
@@ -73,8 +77,14 @@ export {
   OLLAMA_CHAT_TIMEOUT_MS,
   OLLAMA_CHAT_STREAM_TIMEOUT_MS,
   OLLAMA_CHAT_TOOLS_TIMEOUT_MS,
+  OLLAMA_WARM_TIMEOUT_MS,
   agentMessagesToOpenAI,
+  nextOllamaWarmGate,
+  ollamaInstanceToken,
+  ollamaWarmInvalidated,
 } from "./model-provider.js";
+export type { ChatWarmResult, ChatWarmKind, ChatWarmRequest, OllamaWarmProbe } from "./model-provider.js";
+export { chatWarmRequest } from "./chat-warm.js";
 export type {
   ModelProvider,
   ChatMessage,

@@ -1,7 +1,14 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { CloudProvider, getModelProvider, PROVIDER_PRESETS, studioTemplateMetas } from "@cairn/engine";
+import {
+  chatWarmRequest,
+  CloudProvider,
+  getModelProvider,
+  PROVIDER_PRESETS,
+  resolveChatModel,
+  studioTemplateMetas,
+} from "@cairn/engine";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
 import {
   ProviderStore,
@@ -542,14 +549,42 @@ export function registerIpcHandlers(): void {
     agenticAskEnvDefault: process.env.CAIRN_AGENTIC_ASK === "1",
   }));
 
+  // The client remembers the primed prompt and the Ollama instance. A restart
+  // that finishes between polls still reports `recovered` when `/api/ps` loses
+  // the model or `/api/version` shows a new process.
   ipcMain.handle("ollama:check", async () => {
     try {
       const provider = getModelProvider();
+      if (provider.probeForWarm) return await provider.probeForWarm();
       const up = await provider.isReachable();
-      if (!up) return { up: false, models: [] };
-      return { up: true, models: await provider.listModels() };
+      if (!up) return { up: false, models: [], recovered: false };
+      return { up: true, models: await provider.listModels(), recovered: false };
     } catch {
-      return { up: false, models: [] };
+      return { up: false, models: [], recovered: false };
+    }
+  });
+
+  // The model the next Ask will send when the user has not picked one. Both
+  // modes prefer qwen3:8b when it is installed. Never the first tag. Never throws.
+  ipcMain.handle("ollama:resolveChatModel", async (_event, agentic: unknown) => {
+    try {
+      return await resolveChatModel(undefined, { agentic: agentic === true });
+    } catch {
+      return null;
+    }
+  });
+
+  // Background chat-model preload. Never rejects: a down Ollama stays silent.
+  // `agentic` selects that mode's real prompt prefix, not an empty load.
+  ipcMain.handle("ollama:warm", async (_event, model: unknown, agentic: unknown) => {
+    if (typeof model !== "string" || !model.trim()) return "skipped";
+    try {
+      const provider = getModelProvider();
+      if (!provider.warmChatModel) return "skipped";
+      const request = chatWarmRequest(agentic === true ? "agentic" : "classic");
+      return await provider.warmChatModel(model, request);
+    } catch {
+      return "failed";
     }
   });
 }
