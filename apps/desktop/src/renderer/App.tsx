@@ -257,6 +257,9 @@ export function App() {
   // thread reset, or a vault switch supersedes any in-flight request).
   const requestIdRef = useRef(0);
   const activeRequestId = useRef(0);
+  // Bumps on every vault adopt so a slower reopen cannot paint over a newer choice.
+  const openGeneration = useRef(0);
+  const vaultPathRef = useRef<string | null>(null);
 
   // Vault search
   const [searchOpen, setSearchOpen] = useState(false);
@@ -490,43 +493,74 @@ export function App() {
     }
   }, []);
 
+  async function adoptVault(selected: string): Promise<void> {
+    const generation = ++openGeneration.current;
+    vaultPathRef.current = selected;
+    setVaultPath(selected);
+    setExpanded(new Set());
+    setActiveNode(null);
+    setDocKey(null);
+    setBuffer("");
+    setSavedContent("");
+    setImageSrc(null);
+    setAudioSrc(null);
+    setVideoSrc(null);
+    setPdfTarget(null);
+    setIndexStats(null);
+    setIndexState("none");
+    // Invalidate any in-flight chat and drop the server-side thread for the old vault.
+    activeRequestId.current = -1;
+    setAsking(false);
+    setCanStop(false);
+    setThread([]);
+    // Detach from any persisted thread; the new vault starts a fresh conversation.
+    activeThreadIdRef.current = null;
+    setActiveThreadId(null);
+    setLastSources([]);
+    setExcludedSources(new Set());
+    setSearchOpen(false);
+    setSearchQuery("");
+    setSearchResults([]);
+    void window.cairn.resetChat();
+    const nodes = await window.cairn.listTree(sortMode);
+    if (generation !== openGeneration.current) return;
+    setTree(nodes);
+  }
+
   async function chooseVault(): Promise<void> {
     setError(null);
     try {
       const selected = await window.cairn.selectVault();
       if (!selected) return;
-      setVaultPath(selected);
-      setExpanded(new Set());
-      setActiveNode(null);
-      setDocKey(null);
-      setBuffer("");
-      setSavedContent("");
-      setImageSrc(null);
-      setAudioSrc(null);
-      setVideoSrc(null);
-      setPdfTarget(null);
-      setIndexStats(null);
-      setIndexState("none");
-      // Invalidate any in-flight chat and drop the server-side thread for the old vault.
-      activeRequestId.current = -1;
-      setAsking(false);
-      setCanStop(false);
-      setThread([]);
-      // Detach from any persisted thread; the new vault starts a fresh conversation.
-      activeThreadIdRef.current = null;
-      setActiveThreadId(null);
-      setLastSources([]);
-      setExcludedSources(new Set());
-      setSearchOpen(false);
-      setSearchQuery("");
-      setSearchResults([]);
-      void window.cairn.resetChat();
-      const nodes = await window.cairn.listTree(sortMode);
-      setTree(nodes);
+      await adoptVault(selected);
     } catch (err) {
       setError(errorMessage(err));
     }
   }
+
+  // Reopen the last vault after the window loads. A missing or unreadable path
+  // comes back null; stay on the picker and do not raise the error toast.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      let restored: string | null = null;
+      try {
+        restored = await window.cairn.restoreLastVault();
+      } catch {
+        restored = null;
+      }
+      if (cancelled || !restored || vaultPathRef.current) return;
+      try {
+        await adoptVault(restored);
+      } catch {
+        // Tree listing failed after a path the main process already accepted.
+        // Leave the picker-or-name state as adoptVault set it; no error toast.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const toggleFolder = useCallback((path: string) => {
     setExpanded((prev) => {

@@ -49,6 +49,8 @@ export interface DesktopFeatures {
 export interface CairnApi {
   desktopFeatures(): Promise<DesktopFeatures>;
   selectVault(): Promise<string | null>;
+  /** Last successfully opened vault, or null to stay on the picker. Never rejects. */
+  restoreLastVault(): Promise<string | null>;
   indexVault(opts: { lexical: boolean }): Promise<IndexStats>;
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string, opts?: { model?: string; scope?: string[] }): Promise<AskResult>;
@@ -166,6 +168,7 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 const api: CairnApi = {
   desktopFeatures: () => ipcRenderer.invoke("app:desktopFeatures"),
   selectVault: () => ipcRenderer.invoke("vault:select"),
+  restoreLastVault: () => ipcRenderer.invoke("vault:restore"),
   indexVault: (opts) => ipcRenderer.invoke("vault:index", opts),
   searchVault: (query) => ipcRenderer.invoke("vault:search", query),
   askVault: (question, opts) => ipcRenderer.invoke("vault:ask", { question, ...opts }),

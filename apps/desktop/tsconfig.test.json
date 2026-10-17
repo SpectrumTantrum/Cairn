@@ -10,5 +10,5 @@
     "rootDir": "src/main",
     "types": ["node"]
   },
-  "include": ["src/main/vault-session.ts", "src/main/docx-open.ts", "src/main/provider-store.ts", "src/main/thread-store.ts", "src/main/user-error.ts"]
+  "include": ["src/main/vault-session.ts", "src/main/docx-open.ts", "src/main/provider-store.ts", "src/main/thread-store.ts", "src/main/last-vault.ts", "src/main/user-error.ts"]
 }

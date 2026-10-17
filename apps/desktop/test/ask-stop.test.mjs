@@ -48,7 +48,7 @@ test("Stop aborts the in-flight Ask and removes only the streaming draft", () =>
   assert.match(agent, /setCanStop\(false\)/);
   assert.equal(agent.includes("setCanStop(true)"), false);
   const load = slice(app, "const loadThread", "const deleteThread");
-  const choose = slice(app, "async function chooseVault", "const toggleFolder");
+  const choose = slice(app, "async function adoptVault", "const toggleFolder");
   assert.match(load, /setCanStop\(false\)/);
   assert.match(choose, /setCanStop\(false\)/);
   assert.match(stop, /last\?\.role === "assistant" && last\.streaming/);
