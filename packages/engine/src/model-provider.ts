@@ -272,6 +272,12 @@ export interface ChatUsage {
   costUsd?: number;
 }
 
+/**
+ * Whether `/api/show` says this chat model can call tools.
+ * `unknown` means the field was missing or Ollama could not be asked.
+ */
+export type ModelToolCapability = "capable" | "incapable" | "unknown";
+
 export interface ModelProvider {
   listModels(): Promise<string[]>;
   isReachable(): Promise<boolean>;
@@ -614,6 +620,13 @@ function versionStartedAt(body: unknown): string {
   return "";
 }
 
+function toolCapabilityFromShow(body: unknown): ModelToolCapability {
+  if (!body || typeof body !== "object") return "unknown";
+  const capabilities = (body as { capabilities?: unknown }).capabilities;
+  if (!Array.isArray(capabilities)) return "unknown";
+  return capabilities.some((entry) => entry === "tools") ? "capable" : "incapable";
+}
+
 export class OllamaClient implements ModelProvider {
   /** Chat model whose prompt this process has primed. One model at a time. */
   private heldKey: string | null = null;
@@ -632,8 +645,67 @@ export class OllamaClient implements ModelProvider {
   private warmInflight: Promise<ChatWarmResult> | null = null;
   /** Unloads already on the wire, keyed by chat model, so a newer pick can cancel one. */
   private readonly releaseAborts = new Map<string, AbortController>();
+  /** Session cache of `/api/show` tool capability, keyed by the exact model name. */
+  private readonly showCapability = new Map<string, ModelToolCapability>();
+  /** Last reachability seen by the warm probe, so the show cache clears only on up-after-down. */
+  private ollamaWasUp = false;
+  /** Bumps when the cache is cleared so an in-flight show cannot refill it. */
+  private showEpoch = 0;
 
   constructor(private readonly baseUrl = process.env.OLLAMA_HOST || "http://localhost:11434") {}
+
+  /**
+   * A down result arms the show cache; the next up result drops it. Steady up
+   * checks leave it alone. `probeForWarm` also drops it when the Ollama instance
+   * changes without a down check.
+   */
+  noteOllamaReachability(up: boolean): void {
+    if (!up) {
+      this.ollamaWasUp = false;
+      return;
+    }
+    if (!this.ollamaWasUp) this.clearShowCapability();
+    this.ollamaWasUp = true;
+  }
+
+  /**
+   * Tool capability for one chat model via `POST /api/show`. Embedders are not chat
+   * models and skip the request. Network, HTTP, timeout, and a missing `capabilities`
+   * field resolve to `"unknown"` — this never throws. Results are cached per exact name.
+   */
+  async modelInfo(model: string): Promise<ModelToolCapability> {
+    if (typeof model !== "string" || model.length === 0 || /embed/i.test(model)) return "unknown";
+    const cached = this.showCapability.get(model);
+    if (cached) return cached;
+    const epoch = this.showEpoch;
+    const capability = await this.fetchShowCapability(model);
+    if (epoch === this.showEpoch) this.showCapability.set(model, capability);
+    return capability;
+  }
+
+  private clearShowCapability(): void {
+    this.showCapability.clear();
+    this.showEpoch += 1;
+  }
+
+  private async fetchShowCapability(model: string): Promise<ModelToolCapability> {
+    try {
+      const r = await ollamaFetch(
+        `${this.baseUrl}/api/show`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model }),
+        },
+        OLLAMA_TAGS_TIMEOUT_MS,
+        "show",
+      );
+      if (!r.ok) return "unknown";
+      return toolCapabilityFromShow(await r.json());
+    } catch {
+      return "unknown";
+    }
+  }
 
   async warmChatModel(model: string, request: ChatWarmRequest): Promise<ChatWarmResult> {
     const name = model.trim();
@@ -703,6 +775,7 @@ export class OllamaClient implements ModelProvider {
       models = await this.listModels();
     } catch {
       this.wasUp = false;
+      this.noteOllamaReachability(false);
       return { up: false, models: [], recovered: false };
     }
     let running: string[] | null;
@@ -723,6 +796,11 @@ export class OllamaClient implements ModelProvider {
     const gate = nextOllamaWarmGate(this.wasUp, true);
     this.wasUp = gate.wasUp;
     const recovered = gate.recovered || invalidated;
+    // Up-after-down clears through noteOllamaReachability. A restart that stays
+    // up (new process start, or `/api/ps` losing the primed model) is the other
+    // half of `recovered` and drops the cache here. No second poll.
+    this.noteOllamaReachability(true);
+    if (invalidated) this.clearShowCapability();
     const stillSamePrime = this.heldKey === prevHeld && this.primedKind === prevKind;
     if (recovered && stillSamePrime) {
       this.forgetWarmedChatModels();

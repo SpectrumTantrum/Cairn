@@ -87,6 +87,7 @@ export type { ChatWarmResult, ChatWarmKind, ChatWarmRequest, OllamaWarmProbe } f
 export { chatWarmRequest } from "./chat-warm.js";
 export type {
   ModelProvider,
+  ModelToolCapability,
   ChatMessage,
   ChatStreamCallbacks,
   ChatUsage,

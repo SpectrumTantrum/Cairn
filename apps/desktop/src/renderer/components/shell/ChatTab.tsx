@@ -54,6 +54,8 @@ interface ChatTabProps {
   onAgentRevert(runId: string): void;
   /** When true, Ask uses the agentic tool loop (working label + richer citation pills). */
   agenticAskEnabled: boolean;
+  /** Plain one-line warning above the composer. Null leaves that spot empty. */
+  composerWarning: string | null;
 }
 
 export function ChatTab(props: ChatTabProps) {
@@ -143,6 +145,7 @@ export function ChatTab(props: ChatTabProps) {
           />
         ) : null}
       </div>
+      {props.composerWarning ? <p className="composer-model-warning">{props.composerWarning}</p> : null}
       <Composer
         value={props.input}
         disabled={props.composerDisabled}

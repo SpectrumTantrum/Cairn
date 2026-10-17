@@ -86,3 +86,100 @@ export function isAgenticAskEnabled(store: SettingsStore, envDefault = false): b
   if (pref !== null) return pref;
   return envDefault;
 }
+
+/**
+ * Default chat-model order in `resolveChatModel` (`packages/engine/src/chat.ts`).
+ * Guidance uses the same order when the chip is unset or names an embedder.
+ */
+const CHAT_MODEL_PREFER = ["qwen3:8b", "qwen3:4b", "qwen3", "llama3.2:3b", "llama3.2"] as const;
+
+/** Agentic Ask is tested on this tag. `:latest` is the same model. */
+export const TESTED_AGENTIC_MODEL = "qwen3:8b";
+
+export const TESTED_AGENTIC_LINE = "Tested with qwen3:8b.";
+
+export const AGENTIC_TOOLS_WARNING =
+  "This model can't use tools, so Agentic Ask won't work with it. Pick qwen3:8b or turn Agentic Ask off.";
+
+/** `/api/show` tool capability. `unknown` is a missing field, a failure, or Ollama down. */
+export type ModelToolCapability = "capable" | "incapable" | "unknown";
+
+export interface AgenticGuidance {
+  /** Always present under the Agentic Ask toggle. */
+  settingsLine: string;
+  /** Plain warning in Settings. Null when there is nothing to warn about. */
+  settingsWarning: string | null;
+  /** The same warning above the composer. Null for the tested and untested-but-capable cases. */
+  composerWarning: string | null;
+}
+
+/** Embedders are not chat models (`resolveChatModel` skips `/embed/i` the same way). */
+export function isEmbedderName(name: string): boolean {
+  return /embed/i.test(name);
+}
+
+/** `qwen3:8b` and `qwen3:8b:latest` are the tested tag. Other names are not. */
+export function isTestedAgenticModel(model: string): boolean {
+  return model.replace(/:latest$/i, "") === TESTED_AGENTIC_MODEL;
+}
+
+/**
+ * The chat model the next Ask will use: the chip when it names a chat model,
+ * otherwise `resolveChatModel` with no explicit request. An embedder chip does
+ * not count and falls through to that default.
+ */
+export function resolveAskChatModel(selected: string | null, models: readonly string[]): string | null {
+  const requested = selected && !isEmbedderName(selected) ? selected : undefined;
+  if (requested) {
+    if (models.includes(requested)) return requested;
+    const family = models.find((name) => name.split(":")[0] === requested.split(":")[0]);
+    return family ?? requested;
+  }
+  for (const prefer of CHAT_MODEL_PREFER) {
+    if (models.includes(prefer)) return prefer;
+  }
+  for (const prefer of CHAT_MODEL_PREFER) {
+    const family = models.find((name) => name.split(":")[0] === prefer.split(":")[0] && !isEmbedderName(name));
+    if (family) return family;
+  }
+  return models.find((name) => !isEmbedderName(name)) ?? null;
+}
+
+/**
+ * Settings copy and the composer warning for Agentic Ask.
+ * Capable + tested model names the model. Capable + anything else says it is untested
+ * (Settings only). No `tools` capability warns in Settings and above the composer.
+ * Unknown, Ollama down, and agentic off keep the tested line and show no warning.
+ */
+export function agenticGuidanceText(input: {
+  agentic: boolean;
+  ollamaUp: boolean;
+  model: string | null;
+  capability: ModelToolCapability;
+}): AgenticGuidance {
+  const quiet: AgenticGuidance = {
+    settingsLine: TESTED_AGENTIC_LINE,
+    settingsWarning: null,
+    composerWarning: null,
+  };
+  if (!input.agentic || !input.ollamaUp || !input.model || input.capability === "unknown") return quiet;
+  if (input.capability === "incapable") {
+    return {
+      settingsLine: TESTED_AGENTIC_LINE,
+      settingsWarning: AGENTIC_TOOLS_WARNING,
+      composerWarning: AGENTIC_TOOLS_WARNING,
+    };
+  }
+  if (isTestedAgenticModel(input.model)) {
+    return {
+      settingsLine: `${TESTED_AGENTIC_LINE} Using ${input.model}.`,
+      settingsWarning: null,
+      composerWarning: null,
+    };
+  }
+  return {
+    settingsLine: `${TESTED_AGENTIC_LINE} Using ${input.model}, which hasn't been tested with Agentic Ask.`,
+    settingsWarning: null,
+    composerWarning: null,
+  };
+}

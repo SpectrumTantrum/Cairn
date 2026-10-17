@@ -20,6 +20,9 @@ export interface OllamaStatus {
   recovered?: boolean;
 }
 
+/** Tool capability from `POST /api/show`. `unknown` is a failure or a missing field. */
+export type ModelToolCapability = "capable" | "incapable" | "unknown";
+
 /** An explicit, confirmed BYOK escalation for one chat turn (ADR-0002). */
 export interface EscalateTarget {
   providerId: string;
