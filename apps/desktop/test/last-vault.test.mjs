@@ -4,7 +4,7 @@
 //   * a corrupt settings file shows the picker and does not throw;
 //   * remembering a different vault replaces the entry.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -18,6 +18,11 @@ function makeStore() {
   return { store: new LastVaultStore(filePath), filePath, dir };
 }
 
+/** macOS realpath maps `/var` to `/private/var`. Compare the canonical directory. */
+function realDir(path) {
+  return realpathSync.native(path);
+}
+
 test("an existing vault is reopened, including after a restart", () => {
   const { store, filePath, dir } = makeStore();
   const vault = join(dir, "notes");
@@ -26,14 +31,14 @@ test("an existing vault is reopened, including after a restart", () => {
     store.remember(vault);
     const saved = JSON.parse(readFileSync(filePath, "utf8"));
     assert.equal(saved.version, 1);
-    assert.equal(saved.path, vault);
+    assert.equal(saved.path, realDir(vault));
 
     const restored = store.restore();
-    assert.equal(restored.path, vault);
+    assert.equal(restored.path, realDir(vault));
     assert.equal(restored.cleared, null);
 
     const again = new LastVaultStore(filePath).restore();
-    assert.equal(again.path, vault);
+    assert.equal(again.path, realDir(vault));
     assert.equal(again.cleared, null);
     assert.equal(existsSync(filePath), true);
   } finally {
@@ -91,9 +96,9 @@ test("opening a different vault replaces the saved path", () => {
     store.remember(first);
     store.remember(second);
     const restored = store.restore();
-    assert.equal(restored.path, second);
+    assert.equal(restored.path, realDir(second));
     assert.equal(restored.cleared, null);
-    assert.equal(JSON.parse(readFileSync(filePath, "utf8")).path, second);
+    assert.equal(JSON.parse(readFileSync(filePath, "utf8")).path, realDir(second));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
