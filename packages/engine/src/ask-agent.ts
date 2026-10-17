@@ -111,7 +111,7 @@ export const ASK_AGENT_SYSTEM = [
   "- read(path): read a Markdown note, a plain text file, a CSV or TSV file (rows, including the header), the visible text of an HTML file, or the text of each PDF page.",
   "- open(path, line?, heading?, page?): record a UI jump. For a PDF, pass the 1-based page. A plain text, CSV, TSV, or HTML file opens at a line, like a note.",
   "Workflow: use list/find/grep to discover relevant files, read them, then answer.",
-  "On your FIRST turn you MUST call find or grep (or list, then read) — never answer with text only before using at least one search tool.",
+  "Before you give a final answer, you MUST call find or grep about the question. A filename or path does not count. list and read do not count as that search.",
   "Cite Markdown, plain text, CSV, TSV, and HTML as [path:line]. Cite a PDF by its page.",
   "A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image (.png, .jpg, .jpeg, .webp, .gif) has no text. Do not invent what an image says or shows. An audio file (.mp3, .wav, .m4a) has no transcript. Do not invent what it says. A video file (.mp4, .webm, .mov) has no transcript. Do not invent what it says or shows.",
   "If the question names a file that cannot be read, do not answer from any other file.",
@@ -125,6 +125,65 @@ function isPdfFile(file: string): boolean {
 
 function normalizeVaultPath(path: string): string {
   return path.replace(/\\/g, "/").replace(/^\.\//, "");
+}
+
+/**
+ * Stopwords and question words from the #90 chip filter
+ * (`CLOSED_CLASS` + `EXTRA_STOP` in agent-citations.ts). They are not content words.
+ */
+const CONTENT_STOP = new Set([
+  "a", "an", "the", "and", "or", "but", "nor", "so", "if", "of", "to", "in", "on", "for",
+  "with", "at", "by", "from", "as", "into", "over", "under", "is", "are", "was", "were",
+  "be", "been", "being", "it", "its", "this", "that", "these", "those", "not", "no",
+  "what", "how", "where", "when", "who", "which", "why",
+  "your", "you", "our", "their", "there", "they", "them", "we",
+  "can", "could", "would", "should", "have", "has", "had", "will",
+  "just", "also", "than", "then", "too", "very",
+  "notes", "note", "file", "files", "say", "says", "said", "does", "do", "did", "about",
+]);
+
+function contentWords(text: string): Set<string> {
+  const words = new Set<string>();
+  for (const match of text.matchAll(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu)) {
+    const word = match[0].toLowerCase();
+    if (!CONTENT_STOP.has(word)) words.add(word);
+  }
+  return words;
+}
+
+/** A query that only names a file: `finch-roster.md`, `notes/finch-roster`, or a vault basename. */
+function isPathOrFileQuery(query: string, files: readonly string[]): boolean {
+  const q = query.trim();
+  if (!q) return false;
+  const lower = q.toLowerCase();
+  if (!/\s/u.test(q) && (q.includes("/") || q.includes("\\") || /\.[A-Za-z0-9]+$/.test(q))) return true;
+  for (const file of files) {
+    const base = normalizeVaultPath(file).split("/").pop() ?? file;
+    if (base.toLowerCase() === lower) return true;
+    const dot = base.lastIndexOf(".");
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    if (stem.toLowerCase() === lower) return true;
+  }
+  return false;
+}
+
+/** Find and grep count only when the query is about the question, not a filename or an unrelated phrase. */
+function searchAboutQuestion(
+  name: string,
+  args: Record<string, unknown>,
+  question: string,
+  files: readonly string[],
+): boolean {
+  if (name !== "find" && name !== "grep") return false;
+  const raw = name === "find" ? args.query : args.pattern;
+  if (typeof raw !== "string") return false;
+  const query = raw.trim();
+  if (!query || isPathOrFileQuery(query, files)) return false;
+  const asked = contentWords(question);
+  for (const word of contentWords(query)) {
+    if (asked.has(word)) return true;
+  }
+  return false;
 }
 
 /** File paths written in the question, in order, without duplicates. */
@@ -413,6 +472,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   ];
 
   let steps = 0;
+  let sawSearch = false;
   let answer = "";
   let stopReason: AskAgentResult["stopReason"] = "done";
   const progress = (event: AskAgentProgress): void => {
@@ -450,20 +510,24 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     );
     let turn;
     let streamed = false;
+    // Draft text before any find/grep. Kept here so it is not forwarded.
+    let heldAnswer = "";
     try {
       turn = await provider.chatWithTools(model, messages, ASK_SEARCH_TOOLS, {
         timeoutMs: turnBudget,
         requireToolCall: firstTurn,
         signal: opts.signal,
-        onToken: firstTurn
-          ? undefined
-          : (token) => {
-              if (!streamed) {
-                streamed = true;
-                progress({ kind: "status", message: "Composing answer…" });
-              }
-              progress({ kind: "token", token });
-            },
+        onToken: (token) => {
+          if (!sawSearch) {
+            heldAnswer += token;
+            return;
+          }
+          if (!streamed) {
+            streamed = true;
+            progress({ kind: "status", message: "Composing answer…" });
+          }
+          progress({ kind: "token", token });
+        },
       });
     } catch (err) {
       if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
@@ -482,20 +546,43 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     if (turn.toolCalls.length > 0 && streamed) progress({ kind: "clear-answer" });
 
     if (turn.toolCalls.length === 0) {
-      progress({ kind: "status", message: "Composing answer…" });
-      const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
-      if (firstTurn && noGroundingYet) {
-        stopReason = "no-tool-use";
-        answer =
-          turn.content.trim() ||
-          "Agentic Ask needs at least one search tool call before answering. This model replied without using tools — try qwen3:8b (not 4b), use classic Ask, or upgrade Ollama if Qwen3 thinking blocked tools.";
-      } else {
-        answer = turn.content;
-        stopReason = "done";
+      // Every Ask runs one find or grep about the question before a final
+      // answer. A filename, a path, or a query with no content word in common
+      // does not count. list and read do not count. The draft stays hidden.
+      // One shot per Ask. A search that already counted is left alone.
+      if (!sawSearch) {
+        sawSearch = true;
+        heldAnswer = "";
+        const query = opts.question.trim();
+        const args = { query };
+        const call = { id: "cairn_forced_find", name: "find", arguments: args };
+        messages.push({ role: "assistant", content: "", toolCalls: [call] });
+        progress({
+          kind: "tool",
+          step: steps,
+          name: "find",
+          label: labelAskSearchToolCall("find", args),
+        });
+        const content = await runAskSearchTool("find", args, toolCtx, toolState);
+        if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
+        messages.push({
+          role: "tool",
+          toolName: "find",
+          toolCallId: call.id,
+          content,
+        });
+        continue;
       }
+      progress({ kind: "status", message: "Composing answer…" });
+      answer = turn.content;
+      stopReason = "done";
       break;
     }
 
+    const files = opts.index.listFiles();
+    if (turn.toolCalls.some((call) => searchAboutQuestion(call.name, call.arguments, opts.question, files))) {
+      sawSearch = true;
+    }
     messages.push({ role: "assistant", content: turn.content, toolCalls: turn.toolCalls });
 
     for (const call of turn.toolCalls) {

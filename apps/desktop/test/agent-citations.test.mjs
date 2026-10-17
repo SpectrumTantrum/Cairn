@@ -2087,6 +2087,46 @@ test("the 312 question shows only the alpha-notes chip", () => {
   assert.equal(lastSources[1].file, "alpha-notes.md");
 });
 
+test("the 312 question after a forced find chips only alpha-notes", async () => {
+  const fact = "The unique cairn-alpha phrase is COPPER FINCH, 312.";
+  const roster = "COPPER FINCH is listed on the field roster beside other codenames.";
+  const index = new InMemoryIndex();
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_model, _messages, _tools, turn) => {
+        if (turn === 1) return { content: "", toolCalls: [{ name: "list", arguments: { prefix: "notes" } }] };
+        if (turn === 2) return { content: "Your notes don't cover this.", toolCalls: [] };
+        return { content: fact, toolCalls: [] };
+      },
+    }),
+  );
+  try {
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 2,
+      chunks: [
+        { id: 1, file: "alpha-notes.md", ordinal: 0, line: 1, heading: "Field notes", text: fact, hash: "alpha" },
+        { id: 2, file: "finch-roster.md", ordinal: 0, line: 2, heading: "Roster", text: roster, hash: "roster" },
+      ],
+    });
+    const result = await runAskAgent({
+      index,
+      question: CLASSIC_QUESTION,
+      mode: "lexical",
+      readNote: async () => "",
+      retrievalSeed: false,
+    });
+    const chips = citationsFromAskAgent({ ...result, question: CLASSIC_QUESTION });
+    assert.equal(result.sources.some((source) => source.file === "finch-roster.md"), true);
+    assert.equal(chips.length, 1);
+    assert.equal(chips[0].file, "alpha-notes.md");
+  } finally {
+    resetModelProvider();
+    index.close();
+  }
+});
+
 test("the line-1 answer still chips alpha-notes.md:1", () => {
   const fact = "The badge code is stored at the top of the note.";
   const { chips } = classicAskTurn(fact, [classicFtsHit("alpha-notes.md", 1, fact)], "What is the badge code?");
