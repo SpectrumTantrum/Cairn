@@ -49,8 +49,11 @@ export interface DesktopFeatures {
 export interface CairnApi {
   desktopFeatures(): Promise<DesktopFeatures>;
   selectVault(): Promise<string | null>;
-  /** Last successfully opened vault, or null to stay on the picker. Never rejects. */
-  restoreLastVault(): Promise<string | null>;
+  /**
+   * Last successfully opened vault, or a picker fallback. `message` is set when
+   * the saved folder is missing. Never rejects.
+   */
+  restoreLastVault(): Promise<{ path: string | null; message: string | null }>;
   indexVault(opts: { lexical: boolean }): Promise<IndexStats>;
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string, opts?: { model?: string; scope?: string[] }): Promise<AskResult>;

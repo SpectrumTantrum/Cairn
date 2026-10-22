@@ -268,6 +268,7 @@ export function App() {
   const [searching, setSearching] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  const [vaultNotice, setVaultNotice] = useState<string | null>(null);
 
   const vaultRail = useResizable({ spec: VAULT_WIDTH, edge: "left" });
   const rightRail = useResizable({ spec: RIGHT_WIDTH, edge: "right" });
@@ -532,26 +533,30 @@ export function App() {
     try {
       const selected = await window.cairn.selectVault();
       if (!selected) return;
+      setVaultNotice(null);
       await adoptVault(selected);
     } catch (err) {
       setError(errorMessage(err));
     }
   }
 
-  // Reopen the last vault after the window loads. A missing or unreadable path
-  // comes back null; stay on the picker and do not raise the error toast.
+  // Reopen the last vault after the window loads. A missing folder stays on the
+  // picker with a plain notice. A corrupt entry stays on the picker. No crash.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      let restored: string | null = null;
+      let restored: { path: string | null; message: string | null } = { path: null, message: null };
       try {
         restored = await window.cairn.restoreLastVault();
       } catch {
-        restored = null;
+        restored = { path: null, message: null };
       }
-      if (cancelled || !restored || vaultPathRef.current) return;
+      if (cancelled) return;
+      if (restored.message) setVaultNotice(restored.message);
+      if (!restored.path || vaultPathRef.current) return;
       try {
-        await adoptVault(restored);
+        await adoptVault(restored.path);
+        if (!cancelled) setVaultNotice(null);
       } catch {
         // Tree listing failed after a path the main process already accepted.
         // Leave the picker-or-name state as adoptVault set it; no error toast.
@@ -1605,6 +1610,7 @@ export function App() {
       <div className="pane vault-rail" style={{ width: vaultRail.width }}>
         <VaultRail
           vaultName={vaultPath ? vaultName(vaultPath) : null}
+          emptyMessage={vaultPath ? null : vaultNotice}
           paletteHint={PALETTE_HINT}
           onOpenPalette={() => setPaletteOpen(true)}
           nodes={tree}

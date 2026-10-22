@@ -19,6 +19,13 @@ export interface LastVaultRestore {
   path: string | null;
   /** Set when a saved entry was removed. Null when the file was absent or still valid. */
   cleared: LastVaultClear | null;
+  /** Plain picker sentence when the saved folder is missing. Null otherwise. */
+  message: string | null;
+}
+
+/** Shown when a saved vault folder is gone. `savedPath` is the path that was stored. */
+export function missingLastVaultMessage(savedPath: string): string {
+  return `Couldn't find your last vault at ${savedPath}. Pick a vault.`;
 }
 
 /** A readable directory, or null. Broken symlinks and permission errors are null. */
@@ -34,6 +41,12 @@ function resolveVaultDirectory(input: string): string | null {
 }
 
 export class LastVaultStore {
+  /**
+   * Picker sentence from a clear in this process. Later restores still return
+   * it until a vault is remembered or a new store is created.
+   */
+  private pendingMessage: string | null = null;
+
   constructor(private readonly filePath: string) {}
 
   /** Remember a vault that was successfully opened. Replaces any previous entry. */
@@ -42,6 +55,7 @@ export class LastVaultStore {
     if (!path) {
       throw new Error("The selected vault folder no longer exists.");
     }
+    this.pendingMessage = null;
     this.write({ version: 1, path });
   }
 
@@ -49,28 +63,47 @@ export class LastVaultStore {
    * Decide whether to reopen the saved vault.
    * A missing or unreadable path, or a corrupt settings file, clears the entry
    * and returns the picker. An absent file stays absent.
+   * The missing-folder sentence stays available for later restores in this
+   * process (the dev window mounts the restore effect twice) and is gone after
+   * a new store, which is the next launch.
    */
   restore(): LastVaultRestore {
-    if (!existsSync(this.filePath)) return { path: null, cleared: null };
+    if (!existsSync(this.filePath)) {
+      return { path: null, cleared: null, message: this.pendingMessage };
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(readFileSync(this.filePath, "utf8"));
     } catch {
+      this.pendingMessage = null;
       this.clear();
-      return { path: null, cleared: "corrupt" };
+      return { path: null, cleared: "corrupt", message: null };
     }
     const saved = readSavedPath(parsed);
     if (saved === null) {
+      this.pendingMessage = null;
       this.clear();
-      return { path: null, cleared: "corrupt" };
+      return { path: null, cleared: "corrupt", message: null };
     }
     const path = resolveVaultDirectory(saved);
     if (!path) {
-      this.clear();
-      return { path: null, cleared: "unavailable" };
+      const message = this.releaseMissing(saved);
+      return { path: null, cleared: "unavailable", message };
     }
     if (path !== saved) this.write({ version: 1, path });
-    return { path, cleared: null };
+    this.pendingMessage = null;
+    return { path, cleared: null, message: null };
+  }
+
+  /**
+   * Drop a saved entry that can no longer be opened and keep the picker
+   * sentence for a later restore in this process.
+   */
+  releaseMissing(savedPath: string): string {
+    this.clear();
+    const message = missingLastVaultMessage(savedPath);
+    this.pendingMessage = message;
+    return message;
   }
 
   clear(): void {

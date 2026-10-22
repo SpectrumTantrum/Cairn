@@ -182,7 +182,7 @@ export function registerIpcHandlers(): void {
   });
 
   // Reopen the last vault on launch. A missing, unreadable, or corrupt entry
-  // returns null so the renderer stays on the picker. Never rejects.
+  // returns no path so the renderer stays on the picker. Never rejects.
   ipcMain.handle("vault:restore", async () => {
     try {
       const decision = lastVault().restore();
@@ -190,15 +190,23 @@ export function registerIpcHandlers(): void {
         if (decision.cleared) {
           console.error(`[cairn] cleared last vault (${decision.cleared}); vault picker`);
         }
-        return null;
+        if (decision.message) console.error(`[cairn] ${decision.message}`);
+        return { path: null, message: decision.message };
       }
-      const opened = session.setVault(decision.path);
-      console.error(`[cairn] reopened vault ${opened}`);
-      return opened;
+      try {
+        const opened = session.setVault(decision.path);
+        console.error(`[cairn] reopened vault ${opened}`);
+        return { path: opened, message: null };
+      } catch {
+        const message = lastVault().releaseMissing(decision.path);
+        console.error("[cairn] cleared last vault (unavailable); vault picker");
+        console.error(`[cairn] ${message}`);
+        return { path: null, message };
+      }
     } catch {
       lastVault().clear();
       console.error("[cairn] cleared last vault (unavailable); vault picker");
-      return null;
+      return { path: null, message: null };
     }
   });
 
