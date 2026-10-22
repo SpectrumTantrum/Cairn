@@ -18,7 +18,7 @@ USAGE
   cairn ask    <question...> [--in <folder>] [-k <n>] [--model <tag>] [--lexical]
 
 COMMANDS
-  index   Chunk + index every .md/.markdown/.txt/.csv/.tsv/.html/.htm file and text PDF under <folder> into <folder>/.cairn/.
+  index   Chunk + index every .md/.markdown/.txt/.csv/.tsv/.html/.htm/.docx file and text PDF under <folder> into <folder>/.cairn/.
           Image files (.png/.jpg/.jpeg/.webp/.gif) are indexed by path only (no text, no OCR).
           Audio files (.mp3/.wav/.m4a) are indexed by path only (no transcript).
           Video files (.mp4/.webm/.mov) are indexed by path only (no transcript).

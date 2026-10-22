@@ -20,6 +20,7 @@ import { test } from "node:test";
 const { createVaultSession } = await import("../out-test/vault-session.js");
 const { InMemoryIndex, FakeModelProvider } = await import("@cairn/engine/testing");
 const { setModelProvider, resetModelProvider, AUDIO_NO_TEXT, IMAGE_NO_TEXT, VIDEO_NO_TEXT } = await import("@cairn/engine");
+const { docxBuffer } = await import("../../../packages/engine/test/docx-zip.mjs");
 const imageFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/images");
 const audioFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/audio");
 const videoFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/video");
@@ -89,6 +90,69 @@ test("resolveSourcePath returns an absolute path inside the vault", () => {
     const session = createVaultSession();
     session.setVault(vault);
     assert.equal(session.resolveSourcePath("note.md"), realpathSync(resolve(vault, "note.md")));
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+const DOCX_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+function wordDocx(body) {
+  const xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="${DOCX_NS}"><w:body>${body}</w:body></w:document>`;
+  return docxBuffer(xml);
+}
+
+test("readSource extracts a Word file, including a Chinese heading", () => {
+  const vault = makeVaultDir();
+  try {
+    const body = [
+      '<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>第二節</w:t></w:r></w:p>',
+      "<w:p><w:r><w:t>這份筆記記載欄位代碼銅雀與編號三一二。</w:t></w:r></w:p>",
+    ].join("");
+    writeFileSync(join(vault, "field.docx"), wordDocx(body));
+    const session = createVaultSession();
+    session.setVault(vault);
+    const text = session.readSource("field.docx");
+    assert.match(text, /^# 第二節$/m);
+    assert.match(text, /這份筆記記載欄位代碼銅雀與編號三一二。/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("docxOpenTarget refuses a path outside the vault", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.docxOpenTarget("../outside.docx"), /Refusing to open a path outside/);
+    assert.throws(() => session.docxOpenTarget("nested/../../outside.docx"), /Refusing to open a path outside/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("docxOpenTarget returns the resolved path inside the vault", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(join(vault, "field.docx"), wordDocx("<w:p><w:r><w:t>hello</w:t></w:r></w:p>"));
+    const session = createVaultSession();
+    session.setVault(vault);
+    const seen = session.docxOpenTarget("field.docx");
+    assert.equal(seen, session.resolveSourcePath("field.docx"));
+    assert.equal(seen, realpathSync(resolve(vault, "field.docx")));
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("docxOpenTarget errors when the file is missing and rejects a non-docx", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.docxOpenTarget("gone.docx"), /no longer available/);
+    assert.throws(() => session.docxOpenTarget("notes.md"), /Only a Word \.docx/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

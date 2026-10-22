@@ -9,6 +9,7 @@ import {
   VIDEO_NO_TEXT,
   videoMimeType,
   EMPTY_TABLE_MESSAGE,
+  extractDocxText,
   extractHtmlText,
   extractPdfPages,
   HTML_NO_TEXT,
@@ -426,6 +427,7 @@ export class VaultSession {
     if (isImagePath(file)) throw new Error(IMAGE_NO_TEXT);
     if (isAudioPath(file)) throw new Error(AUDIO_NO_TEXT);
     if (isVideoPath(file)) throw new Error(VIDEO_NO_TEXT);
+    if (file.toLowerCase().endsWith(".docx")) return extractDocxText(target);
     const lower = target.toLowerCase();
     if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
@@ -439,6 +441,21 @@ export class VaultSession {
       return text;
     }
     return readFileSync(target, "utf8");
+  }
+
+  /**
+   * Absolute path of a vault `.docx` that may be handed to the OS.
+   * Extension, vault jail, and existence are checked here, before any opener runs.
+   */
+  docxOpenTarget(file: string): string {
+    if (!file.toLowerCase().endsWith(".docx")) {
+      throw new Error("Only a Word .docx file can be opened in another app.");
+    }
+    const target = this.resolveSourcePath(file);
+    if (!existsSync(target) || !statSync(target).isFile()) {
+      throw new Error("The source file is no longer available. Try re-indexing this vault.");
+    }
+    return target;
   }
 
   /**

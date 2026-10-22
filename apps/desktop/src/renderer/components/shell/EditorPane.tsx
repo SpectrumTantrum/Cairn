@@ -1,6 +1,6 @@
 import { FileText, PanelRight, RefreshCw, X } from "lucide-react";
 import type { IndexStats, TreeNode } from "../../../shared/types.js";
-import { isAudioPath, isHtmlPath, isImagePath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, isVideoPath, opensInEditor } from "../../cite-format";
+import { DOCX_NO_APP, isAudioPath, isDocxPath, isHtmlPath, isImagePath, isPdfPath, isPlainTextPath, isReadOnlyEditorPath, isTablePath, isVideoPath, opensInEditor } from "../../cite-format";
 import { MarkdownEditor, type CitationFlash } from "./MarkdownEditor";
 
 export type IndexState = "none" | "indexing" | "indexed" | "stale";
@@ -144,6 +144,10 @@ export function EditorPane(props: EditorPaneProps) {
               <p className="muted">Loading {activeNode.name}…</p>
             </div>
           )
+        ) : isDocxPath(activeNode.path) ? (
+          <div className="editor-empty">
+            <p>{loadError || DOCX_NO_APP}</p>
+          </div>
         ) : !opensInEditor(activeNode.path) ? (
           <div className="editor-disabled-host">
             <span className="host-type">{hostType(activeNode.name)}</span>

@@ -74,6 +74,34 @@ export function isVideoPath(file: string): boolean {
   return /\.(mp4|webm|mov)$/i.test(file);
 }
 
+/** Word .docx. Opens in another app, not the editor. */
+export function isDocxPath(file: string): boolean {
+  return file.toLowerCase().endsWith(".docx");
+}
+
+/** Shown when the OS has no handler for .docx. A plain line, not a viewer. */
+export const DOCX_NO_APP = "No app on this computer opens .docx files.";
+
+/** Chip text for a Word file, e.g. `field.docx · 第二節`. */
+export function docxChipLabel(file: string, heading = ""): string {
+  const name = basename(file);
+  const title = heading.trim();
+  return title ? `${name} · ${title}` : name;
+}
+
+/**
+ * Chip text after a failed external open. The blocked file shows the plain
+ * no-app line; every other file keeps `file.docx · heading`.
+ */
+export function docxChipText(
+  file: string,
+  heading: string,
+  notice: { file: string; message: string } | null,
+): string {
+  if (notice?.message && vaultPathsEqual(notice.file, file)) return notice.message;
+  return docxChipLabel(file, heading);
+}
+
 /** Editor buffer that Ask can cite but the user cannot save (edit only Markdown). */
 export function isReadOnlyEditorPath(file: string): boolean {
   return isPlainTextPath(file) || isHtmlPath(file) || isTablePath(file);
@@ -107,6 +135,7 @@ export function pdfOpenTitle(file: string, page?: number, landsOnPage = PDF_OPEN
  */
 export function citationTitle(file: string, line: number, heading = "", page?: number): string {
   if (isPdfPath(file)) return pdfOpenTitle(file, page);
+  if (isDocxPath(file)) return `Open ${file}`;
   if (line <= 0) return `Open ${file} (file)`;
   const title = heading.trim();
   if (title) return `Open ${file} at line ${line} › ${title}`;

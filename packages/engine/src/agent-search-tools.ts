@@ -7,6 +7,7 @@ import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import type { ToolSchema } from "./model-provider.js";
 import { pdfPageHeading } from "./pdf-text.js";
+import { DOCX_NO_TEXT, DOCX_UNREADABLE, isDocxPath } from "./docx-text.js";
 import { HTML_NO_TEXT } from "./html-text.js";
 import { AUDIO_NO_TEXT, isAudioPath } from "./audio-files.js";
 import { IMAGE_NO_TEXT, isImagePath } from "./image-files.js";
@@ -54,6 +55,8 @@ export interface AskSearchToolState {
   unreadableText?: boolean;
   /** A read or open touched an HTML file with no visible text. */
   textlessHtml?: boolean;
+  /** A read or open touched a Word file with no body text, or a damaged package. */
+  textlessDocx?: boolean;
   /** A read or open touched an image. Images have no text layer. */
   textlessImage?: boolean;
   /** A read or open touched an audio file. Audio has no transcript. */
@@ -87,7 +90,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "list",
     description:
-      "List Markdown, plain text, CSV, TSV, HTML, PDF, image, audio, and video paths in the vault. Images, audio, and video are path-only and cannot be read. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
+      "List Markdown, plain text, CSV, TSV, HTML, Word .docx, PDF, image, audio, and video paths in the vault. Images, audio, and video are path-only and cannot be read. Optional prefix filters to paths starting with that folder prefix (vault-relative POSIX paths).",
     parameters: {
       type: "object",
       properties: {
@@ -125,7 +128,7 @@ export const ASK_SEARCH_TOOLS: ToolSchema[] = [
   {
     name: "read",
     description:
-      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. An image cannot be read. An audio file cannot be read. A video file cannot be read. Use after find/grep to read surrounding context.",
+      "Read a Markdown note, a plain text file, a CSV or TSV file, the visible text of an HTML file, the body text of a Word .docx file, or the text of each page of a PDF. A PDF with no text layer cannot be read. A file that is not valid UTF-8 text cannot be read. An empty CSV or TSV file cannot be read. An HTML file with no visible text cannot be read. A Word .docx file that is password-protected, damaged, or empty cannot be read. An image cannot be read. An audio file cannot be read. A video file cannot be read. Use after find/grep to read surrounding context.",
     parameters: {
       type: "object",
       properties: {
@@ -195,6 +198,14 @@ function mergeSource(state: AskSearchToolState, hit: SearchHit): void {
   const key = sourceKey(hit);
   if (state.sources.some((s) => sourceKey(s) === key)) return;
   state.sources.push(hit);
+}
+
+function firstAtxHeading(text: string): string {
+  for (const line of text.split(/\r?\n/)) {
+    const title = atxHeadingTitle(line);
+    if (title) return title;
+  }
+  return "";
 }
 
 function snippet(text: string, max = 160): string {
@@ -453,6 +464,10 @@ export async function runAskSearchTool(
         state.textlessHtml = true;
         return `ERROR: ${HTML_NO_TEXT}`;
       }
+      if (isDocxPath(norm) && !content.trim()) {
+        state.textlessDocx = true;
+        return `ERROR: ${DOCX_NO_TEXT}`;
+      }
       if (isTablePath(norm) && !content.trim()) {
         state.unreadableText = true;
         return `ERROR: ${EMPTY_TABLE_MESSAGE}`;
@@ -462,7 +477,7 @@ export async function runAskSearchTool(
       mergeSource(state, {
         file: norm,
         line: 1,
-        heading: "",
+        heading: isDocxPath(norm) ? firstAtxHeading(content) : "",
         score: NaN,
         cosine: NaN,
         snippet: snippet(content),
@@ -477,6 +492,7 @@ export async function runAskSearchTool(
       }
       if (isTablePath(norm) && message === EMPTY_TABLE_MESSAGE) state.unreadableText = true;
       if (isHtmlPath(norm) && message === HTML_NO_TEXT) state.textlessHtml = true;
+      if (isDocxPath(norm) && (message === DOCX_NO_TEXT || message === DOCX_UNREADABLE)) state.textlessDocx = true;
       return `ERROR: ${message}`;
     }
   }
@@ -539,6 +555,21 @@ export async function runAskSearchTool(
         }
         if (message === INVALID_UTF8_MESSAGE) {
           state.unreadableText = true;
+          return `ERROR: ${message}`;
+        }
+      }
+    }
+    if (isDocxPath(norm)) {
+      try {
+        const content = await ctx.readNote(norm);
+        if (!content.trim()) {
+          state.textlessDocx = true;
+          return `ERROR: ${DOCX_NO_TEXT}`;
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message === DOCX_NO_TEXT || message === DOCX_UNREADABLE) {
+          state.textlessDocx = true;
           return `ERROR: ${message}`;
         }
       }
