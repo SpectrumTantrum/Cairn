@@ -10,6 +10,9 @@ let setModelProvider;
 let resetModelProvider;
 let FakeModelProvider;
 let InMemoryIndex;
+let coverageBand;
+let UNCOVERED_ANSWER;
+let WEAK_MATCH_NOTE;
 
 function vecBuf(values) {
   return Buffer.from(Float32Array.from(values).buffer);
@@ -28,6 +31,9 @@ before(async () => {
   openIndex = engine.openIndex;
   setModelProvider = engine.setModelProvider;
   resetModelProvider = engine.resetModelProvider;
+  coverageBand = engine.coverageBand;
+  UNCOVERED_ANSWER = engine.UNCOVERED_ANSWER;
+  WEAK_MATCH_NOTE = engine.WEAK_MATCH_NOTE;
   FakeModelProvider = testing.FakeModelProvider;
   InMemoryIndex = testing.InMemoryIndex;
 
@@ -91,5 +97,192 @@ test("ask returns grounded hybrid answers when retrieval is covered", async () =
     }
   } finally {
     rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+function vec(values) {
+  return Buffer.from(Float32Array.from(values).buffer);
+}
+
+/** Unit vector whose cosine with the fake query embed [1,0,0,0] is `cosine`. */
+function cosineVec(cosine) {
+  const y = Math.sqrt(Math.max(0, 1 - cosine * cosine));
+  return vec([cosine, y, 0, 0]);
+}
+
+function hybridIndex(cosine) {
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "hybrid",
+    embedder: "test-embedder",
+    dim: 4,
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "finch.md",
+        ordinal: 0,
+        line: 1,
+        heading: "Copper finch",
+        text: "The copper finch lives in the margin of the ledger.",
+        hash: "h1",
+        vector: cosineVec(cosine),
+      },
+    ],
+  });
+  return index;
+}
+
+const FINCH_QUESTION = "Where does the copper finch live?";
+
+test("coverageBand splits strong, weak, and refuse, and leaves lexical NaN alone", () => {
+  assert.equal(coverageBand({ covered: true, poolMaxCosine: 0.5, threshold: 0.5 }), "strong");
+  assert.equal(coverageBand({ covered: false, poolMaxCosine: 0.2, threshold: 0.5 }), "weak");
+  assert.equal(coverageBand({ covered: false, poolMaxCosine: 0.199, threshold: 0.5 }), "refuse");
+  assert.equal(coverageBand({ covered: true, poolMaxCosine: Number.NaN, threshold: 0.5 }), "strong");
+  assert.equal(coverageBand({ covered: false, poolMaxCosine: Number.NaN, threshold: 0.5 }), "refuse");
+});
+
+test("ask keeps a strong hybrid answer and does not add the weak-match note", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve("It lives in the margin.");
+      },
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid" });
+    assert.equal(seen.length, 1);
+    const user = seen[0].at(-1).content;
+    assert.equal(user.includes(WEAK_MATCH_NOTE), false);
+    assert.equal(result.answer, "It lives in the margin.");
+    assert.equal(result.covered, true);
+    assert.ok(result.poolMaxCosine >= 0.5);
+  } finally {
+    index.close();
+  }
+});
+
+test("ask calls the model in the weak band and keeps an answer that cites [n]", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve("It lives in the margin of the ledger [1].");
+      },
+    }),
+  );
+  const index = hybridIndex(0.35);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid" });
+    assert.equal(seen.length, 1);
+    const user = seen[0].at(-1).content;
+    assert.ok(user.indexOf("QUESTION:") < user.indexOf(WEAK_MATCH_NOTE));
+    assert.equal(result.answer, "It lives in the margin of the ledger [1].");
+    assert.equal(result.covered, true);
+    assert.equal(result.grounded, true);
+    assert.equal(result.sources.length, 1);
+    assert.equal(result.sources[0].file, "finch.md");
+    assert.ok(result.poolMaxCosine >= 0.2 && result.poolMaxCosine < 0.5);
+  } finally {
+    index.close();
+  }
+});
+
+test("ask suppresses a weak-band answer that has no [n] citation", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => {
+        calls += 1;
+        return Promise.resolve("It lives in the margin of the ledger.");
+      },
+    }),
+  );
+  const index = hybridIndex(0.35);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid" });
+    assert.equal(calls, 1);
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.covered, false);
+    assert.equal(result.grounded, false);
+    assert.deepEqual(result.sources, []);
+    assert.equal(result.model, "qwen3:4b");
+  } finally {
+    index.close();
+  }
+});
+
+test("ask refuses below the coverage floor without calling the model", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => {
+        calls += 1;
+        return Promise.resolve("should not be called [1]");
+      },
+    }),
+  );
+  const index = hybridIndex(0.1);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid" });
+    assert.equal(calls, 0);
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.covered, false);
+    assert.equal(result.grounded, false);
+    assert.deepEqual(result.sources, []);
+    assert.match(result.reason, /coverage threshold/i);
+    assert.ok(result.poolMaxCosine < 0.2);
+  } finally {
+    index.close();
+  }
+});
+
+test("ask leaves lexical mode unchanged, including an answer with no [n]", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve("A vault is a folder of notes.");
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    index.rebuildIndex({
+      mode: "lexical",
+      files: 1,
+      chunks: [
+        {
+          id: 1,
+          file: "vault.md",
+          ordinal: 0,
+          line: 1,
+          heading: "Vaults",
+          text: "A vault is a folder of Markdown notes.",
+          hash: "h1",
+        },
+      ],
+    });
+    const result = await ask(index, "What is a vault?", { mode: "lexical" });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].at(-1).content.includes(WEAK_MATCH_NOTE), false);
+    assert.equal(result.answer, "A vault is a folder of notes.");
+    assert.equal(result.covered, true);
+    assert.equal(result.mode, "lexical");
+    assert.equal(Number.isNaN(result.poolMaxCosine), true);
+  } finally {
+    index.close();
   }
 });

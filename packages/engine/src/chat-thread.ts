@@ -3,18 +3,18 @@
 // the always-on model with the prior thread history + the retrieved SOURCES block, and
 // (c) returns the same grounded/covered/citations metadata `ask()` returns today.
 //
-// This is the multi-turn sibling of single-turn `ask()` (ask.ts is left untouched). It
-// reuses the exact same GROUNDING_SYSTEM prompt and coverage-refusal so a chat turn and a
+// This is the multi-turn sibling of single-turn `ask()`. It reuses the same
+// GROUNDING_SYSTEM prompt and the same coverage bands, so a chat turn and a
 // one-shot ask stay behaviourally identical on grounding. Streaming is opt-in via
 // `onToken` — the token stream flows through the ModelProvider seam (chatStream), so an
 // Electron IPC bridge can forward each token without the engine knowing about IPC.
 
-import { search } from "./retrieve.js";
+import { coverageBand, search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat, chatStream } from "./chat.js";
 import type { ChatMessage, ChatUsage, ModelProvider } from "./model-provider.js";
-import { classicAskUserContent, GROUNDING_SYSTEM } from "./ask.js";
+import { classicAskUserContent, GROUNDING_SYSTEM, UNCOVERED_ANSWER, hasClassicCitation } from "./ask.js";
 
 /** One recorded turn in a thread. Assistant turns carry the sources they were grounded in. */
 export interface ThreadTurn {
@@ -148,11 +148,11 @@ export class ChatThread {
       throw new DOMException("The operation was aborted.", "AbortError");
     }
 
-    if (!coverage.covered) {
-      const answer = "Your notes don't cover this.";
-      this.turns.push({ role: "assistant", content: answer, sources: [], grounded: false, covered: false });
+    const band = coverageBand(coverage);
+    if (band === "refuse") {
+      this.turns.push({ role: "assistant", content: UNCOVERED_ANSWER, sources: [], grounded: false, covered: false });
       return {
-        answer,
+        answer: UNCOVERED_ANSWER,
         sources: [],
         mode: usedMode,
         grounded: false,
@@ -170,33 +170,61 @@ export class ChatThread {
     const sourcesBlock = hits
       .map((h, i) => `[${i + 1}] ${h.file}:${h.line}${h.heading ? ` > ${h.heading}` : ""}\n${h.text}`)
       .join("\n\n");
+    const weak = band === "weak";
 
     const messages: ChatMessage[] = [
       { role: "system", content: GROUNDING_SYSTEM },
       ...history,
-      { role: "user", content: classicAskUserContent(sourcesBlock, userText) },
+      { role: "user", content: classicAskUserContent(sourcesBlock, userText, weak) },
     ];
 
     // Escalated turns always stream (cloud adapters report usage on the SSE tail).
     // A signal-bearing local turn also streams so the abort reaches the model call
     // even when the caller did not ask for tokens.
+    // Weak-band tokens stay buffered: an answer with no [n] must not reach the UI.
     let usage: ChatUsage | undefined;
-    const answer =
-      provider || send.onToken || send.signal
-        ? await chatStream(
-            model,
-            messages,
-            {
-              onToken: send.onToken,
-              onUsage: (u) => {
-                usage = u;
-              },
-              signal: send.signal,
+    const streamed = Boolean(provider || send.onToken || send.signal);
+    const raw = streamed
+      ? await chatStream(
+          model,
+          messages,
+          {
+            onToken: weak ? undefined : send.onToken,
+            onUsage: (u) => {
+              usage = u;
             },
-            false,
-            provider,
-          )
-        : await chat(model, messages);
+            signal: send.signal,
+          },
+          false,
+          provider,
+        )
+      : await chat(model, messages);
+
+    if (weak && !hasClassicCitation(raw)) {
+      this.turns.push({ role: "assistant", content: UNCOVERED_ANSWER, sources: [], grounded: false, covered: false });
+      const suppressed: ChatSendResult = {
+        answer: UNCOVERED_ANSWER,
+        sources: [],
+        mode: usedMode,
+        grounded: false,
+        covered: false,
+        model,
+      };
+      if (provider) {
+        suppressed.escalated = true;
+        if (usage) suppressed.usage = usage;
+        suppressed.sent = {
+          system: GROUNDING_SYSTEM,
+          sourcesBlock,
+          question: userText,
+          historyTurns: history.length,
+        };
+      }
+      return suppressed;
+    }
+
+    if (weak) send.onToken?.(raw);
+    const answer = raw;
 
     this.turns.push({ role: "assistant", content: answer, sources: hits, grounded: true, covered: true });
     const result: ChatSendResult = {
