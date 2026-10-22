@@ -76,8 +76,8 @@ export interface CairnApi {
   readAudio(file: string): Promise<{ mime: string; dataUrl: string }>;
   /** Vault video as a data URL for the in-app player (mp4, webm, mov). */
   readVideo(file: string): Promise<{ mime: string; dataUrl: string }>;
-  /** Open a vault .docx in the OS app. `message` is set when no app is registered. */
-  openDocx(file: string): Promise<{ opened: boolean; message?: string }>;
+  /** Open a vault .docx in the OS app. `ok: false` carries the reason. */
+  openDocx(file: string): Promise<{ ok: true } | { ok: false; message: string }>;
   /** Show a vault PDF in the in-app viewer. `page` is 1-based. Bounds are CSS pixels. */
   openPdf(payload: {
     file: string;

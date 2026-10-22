@@ -444,13 +444,10 @@ export class VaultSession {
   }
 
   /**
-   * Open a Word file in the registered app. The vault-relative path is resolved
-   * inside the vault first. A non-empty `openPath` result means no app is registered.
+   * Absolute path of a vault `.docx` that may be handed to the OS.
+   * Extension, vault jail, and existence are checked here, before any opener runs.
    */
-  async openDocx(
-    file: string,
-    openPath: (abs: string) => Promise<string>,
-  ): Promise<{ opened: boolean; message?: string }> {
+  docxOpenTarget(file: string): string {
     if (!file.toLowerCase().endsWith(".docx")) {
       throw new Error("Only a Word .docx file can be opened in another app.");
     }
@@ -458,9 +455,7 @@ export class VaultSession {
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
     }
-    const failure = await openPath(target);
-    if (failure) return { opened: false, message: "No app on this computer opens .docx files." };
-    return { opened: true };
+    return target;
   }
 
   /**

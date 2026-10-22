@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { existsSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   chatWarmRequest,
   CloudProvider,
@@ -19,6 +19,7 @@ import {
 import { ThreadStore } from "./thread-store.js";
 import { toUserError } from "./user-error.js";
 import { hidePdfView, showPdfView, type PdfViewBounds } from "./pdf-viewer.js";
+import { dispatchDocxOpen } from "./docx-open.js";
 
 const session = createVaultSession();
 
@@ -304,7 +305,13 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("docx:open", async (_event, file: unknown) => {
     return handleUserErrors(() => {
       if (typeof file !== "string") throw new Error("No source file was provided.");
-      return session.openDocx(file, (abs) => shell.openPath(abs));
+      const abs = session.docxOpenTarget(file);
+      // Pre-checks threw above. The dispatch promise always settles: on Linux it
+      // races xdg-open against a timer, and elsewhere it races shell.openPath.
+      return dispatchDocxOpen(abs, basename(file), {
+        platform: process.platform,
+        openPath: (target) => shell.openPath(target),
+      });
     });
   });
 

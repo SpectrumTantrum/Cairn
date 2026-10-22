@@ -769,7 +769,7 @@ export function App() {
     void (async () => {
       try {
         const result = await window.cairn.openDocx(file);
-        if (result.opened) {
+        if (result.ok) {
           setDocxChipNotice(null);
           return;
         }

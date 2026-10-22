@@ -120,39 +120,25 @@ test("readSource extracts a Word file, including a Chinese heading", () => {
   }
 });
 
-test("openDocx refuses a path outside the vault and does not call the opener", async () => {
+test("docxOpenTarget refuses a path outside the vault", () => {
   const vault = makeVaultDir();
   try {
     const session = createVaultSession();
     session.setVault(vault);
-    let called = 0;
-    const opener = async () => {
-      called += 1;
-      return "";
-    };
-    await assert.rejects(() => session.openDocx("../outside.docx", opener), /Refusing to open a path outside/);
-    await assert.rejects(
-      () => session.openDocx("nested/../../outside.docx", opener),
-      /Refusing to open a path outside/,
-    );
-    assert.equal(called, 0);
+    assert.throws(() => session.docxOpenTarget("../outside.docx"), /Refusing to open a path outside/);
+    assert.throws(() => session.docxOpenTarget("nested/../../outside.docx"), /Refusing to open a path outside/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }
 });
 
-test("openDocx opens the resolved path inside the vault", async () => {
+test("docxOpenTarget returns the resolved path inside the vault", () => {
   const vault = makeVaultDir();
   try {
     writeFileSync(join(vault, "field.docx"), wordDocx("<w:p><w:r><w:t>hello</w:t></w:r></w:p>"));
     const session = createVaultSession();
     session.setVault(vault);
-    let seen = "";
-    const result = await session.openDocx("field.docx", async (abs) => {
-      seen = abs;
-      return "";
-    });
-    assert.equal(result.opened, true);
+    const seen = session.docxOpenTarget("field.docx");
     assert.equal(seen, session.resolveSourcePath("field.docx"));
     assert.equal(seen, realpathSync(resolve(vault, "field.docx")));
   } finally {
@@ -160,27 +146,13 @@ test("openDocx opens the resolved path inside the vault", async () => {
   }
 });
 
-test("openDocx reports no registered app and skips a missing file", async () => {
+test("docxOpenTarget errors when the file is missing and rejects a non-docx", () => {
   const vault = makeVaultDir();
   try {
-    writeFileSync(join(vault, "field.docx"), wordDocx("<w:p><w:r><w:t>hello</w:t></w:r></w:p>"));
     const session = createVaultSession();
     session.setVault(vault);
-    const blocked = await session.openDocx("field.docx", async () => "Failed to open path");
-    assert.deepEqual(blocked, {
-      opened: false,
-      message: "No app on this computer opens .docx files.",
-    });
-    let called = 0;
-    await assert.rejects(
-      () =>
-        session.openDocx("gone.docx", async () => {
-          called += 1;
-          return "";
-        }),
-      /no longer available/,
-    );
-    assert.equal(called, 0);
+    assert.throws(() => session.docxOpenTarget("gone.docx"), /no longer available/);
+    assert.throws(() => session.docxOpenTarget("notes.md"), /Only a Word \.docx/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }
