@@ -28,7 +28,7 @@ export const UNCOVERED_ANSWER = "Your notes don't cover this.";
  * The grounding system prompt and the warm prefix stay unchanged.
  */
 export const WEAK_MATCH_NOTE =
-  'These notes may only partly cover the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."';
+  'These notes may only partly cover the question. The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."';
 
 /** True when classic prose cites a 1-based `[n]` source. `[path:line]` does not count. */
 export function hasClassicCitation(answer: string): boolean {
@@ -37,6 +37,16 @@ export function hasClassicCitation(answer: string): boolean {
     if (Number.isInteger(n) && n >= 1) return true;
   }
   return false;
+}
+
+/**
+ * Text classic Ask shows. A weak-band answer with no `[n]` becomes the refusal
+ * sentence. So does an uncited answer in any band that contains that exact
+ * sentence. A cited answer that quotes the sentence is left as written.
+ */
+export function presentClassicAnswer(raw: string, weak: boolean): { answer: string; suppressed: boolean } {
+  const suppressed = !hasClassicCitation(raw) && (weak || raw.includes(UNCOVERED_ANSWER));
+  return { answer: suppressed ? UNCOVERED_ANSWER : raw, suppressed };
 }
 
 /**
@@ -93,15 +103,17 @@ export async function ask(
     .join("\n\n");
   const weak = band === "weak";
 
-  const answer = await chat(model, [
+  const raw = await chat(model, [
     { role: "system", content: GROUNDING_SYSTEM },
     { role: "user", content: classicAskUserContent(sourcesBlock, question, weak) },
   ]);
 
-  // A weak-band answer with no [n] is not shown. The uncovered sentence is.
-  if (weak && !hasClassicCitation(answer)) {
+  // Uncited weak answers, and any uncited answer that contains the refusal
+  // sentence, are replaced by that sentence alone.
+  const { answer, suppressed } = presentClassicAnswer(raw, weak);
+  if (suppressed) {
     return {
-      answer: UNCOVERED_ANSWER,
+      answer,
       sources: [],
       mode,
       grounded: false,

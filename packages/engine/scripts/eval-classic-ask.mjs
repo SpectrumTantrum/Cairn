@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Headless classic Ask eval. One JSONL row per question.
+// `answer` is the text classic Ask shows. `band` is strong, weak, below, or lexical.
 //
 //   node packages/engine/scripts/eval-classic-ask.mjs \
 //     --vault /path/to/vault \
@@ -13,7 +14,15 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ask, indexVault, openIndex, UNCOVERED_ANSWER } from "../dist/index.js";
+import {
+  ask,
+  indexVault,
+  openIndex,
+  UNCOVERED_ANSWER,
+  coverageBand,
+  DEFAULT_COVERAGE_FLOOR,
+  DEFAULT_COVERAGE_THRESHOLD,
+} from "../dist/index.js";
 
 function usage() {
   return [
@@ -86,6 +95,20 @@ function parseCsv(text) {
   return rows;
 }
 
+/** strong, weak, below (cosine under the floor), or lexical (NaN cosine). */
+function askBand(result) {
+  if (result.mode === "lexical") return "lexical";
+  const named = coverageBand(
+    {
+      covered: Number.isFinite(result.poolMaxCosine) && result.poolMaxCosine >= DEFAULT_COVERAGE_THRESHOLD,
+      poolMaxCosine: result.poolMaxCosine,
+      threshold: DEFAULT_COVERAGE_THRESHOLD,
+    },
+    DEFAULT_COVERAGE_FLOOR,
+  );
+  return named === "refuse" ? "below" : named;
+}
+
 function citedFiles(answer, sources) {
   const files = [];
   const seen = new Set();
@@ -145,6 +168,7 @@ async function main() {
         model: result.model ?? null,
         poolMaxCosine: Number.isFinite(result.poolMaxCosine) ? result.poolMaxCosine : null,
         mode: result.mode,
+        band: askBand(result),
         elapsed_ms: elapsedMs,
       }));
     }
