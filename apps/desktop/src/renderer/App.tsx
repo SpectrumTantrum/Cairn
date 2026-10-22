@@ -494,7 +494,7 @@ export function App() {
     }
   }, []);
 
-  async function adoptVault(selected: string): Promise<void> {
+  async function adoptVault(selected: string, existingIndex: IndexStats | null = null): Promise<void> {
     const generation = ++openGeneration.current;
     vaultPathRef.current = selected;
     setVaultPath(selected);
@@ -507,8 +507,8 @@ export function App() {
     setAudioSrc(null);
     setVideoSrc(null);
     setPdfTarget(null);
-    setIndexStats(null);
-    setIndexState("none");
+    setIndexStats(existingIndex);
+    setIndexState(existingIndex ? "indexed" : "none");
     // Invalidate any in-flight chat and drop the server-side thread for the old vault.
     activeRequestId.current = -1;
     setAsking(false);
@@ -545,17 +545,21 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      let restored: { path: string | null; message: string | null } = { path: null, message: null };
+      let restored: { path: string | null; message: string | null; index: IndexStats | null } = {
+        path: null,
+        message: null,
+        index: null,
+      };
       try {
         restored = await window.cairn.restoreLastVault();
       } catch {
-        restored = { path: null, message: null };
+        restored = { path: null, message: null, index: null };
       }
       if (cancelled) return;
       if (restored.message) setVaultNotice(restored.message);
       if (!restored.path || vaultPathRef.current) return;
       try {
-        await adoptVault(restored.path);
+        await adoptVault(restored.path, restored.index ?? null);
         if (!cancelled) setVaultNotice(null);
       } catch {
         // Tree listing failed after a path the main process already accepted.

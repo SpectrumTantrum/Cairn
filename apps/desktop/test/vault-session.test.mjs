@@ -61,6 +61,31 @@ test("search throws when no vault is selected", async () => {
   await assert.rejects(() => session.search("query"), /Choose a vault folder first/);
 });
 
+test("readExistingIndex returns the saved stats and does not invent an index", async () => {
+  const vault = makeIndexedVaultDir();
+  const index = buildLexicalIndex(vault, [{ file: "notes.md", text: "copper finch lives in the margin" }]);
+  try {
+    const session = createVaultSession({ openIndex: () => index });
+    assert.equal(await session.readExistingIndex(), null);
+    session.setVault(vault);
+    const stats = await session.readExistingIndex();
+    assert.equal(stats.mode, "lexical");
+    assert.equal(stats.files, 1);
+    assert.equal(stats.chunks, 1);
+
+    const bare = makeVaultDir();
+    try {
+      const empty = createVaultSession({ openIndex: () => index });
+      empty.setVault(bare);
+      assert.equal(await empty.readExistingIndex(), null);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
 test("search throws when the vault is not indexed", async () => {
   const vault = makeVaultDir();
   try {

@@ -3,7 +3,7 @@
 // is not imported — the file path is injected — so this module runs under
 // `node --test` against a tmp dir.
 
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 interface StoreFile {
@@ -28,12 +28,17 @@ export function missingLastVaultMessage(savedPath: string): string {
   return `Couldn't find your last vault at ${savedPath}. Pick a vault.`;
 }
 
-/** A readable directory, or null. Broken symlinks and permission errors are null. */
+/**
+ * A directory we can list, or null. `stat` succeeds on a chmod 000 folder when
+ * the parent is searchable, and `readdir` then throws EACCES. Require R_OK|X_OK
+ * so an unreadable folder is the same as a missing one.
+ */
 function resolveVaultDirectory(input: string): string | null {
   if (input.trim() === "") return null;
   try {
     const vaultPath = realpathSync.native(resolve(input));
     if (!statSync(vaultPath).isDirectory()) return null;
+    accessSync(vaultPath, constants.R_OK | constants.X_OK);
     return vaultPath;
   } catch {
     return null;

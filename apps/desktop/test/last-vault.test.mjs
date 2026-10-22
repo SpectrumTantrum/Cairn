@@ -4,7 +4,7 @@
 //   * a corrupt settings file shows the picker and does not throw;
 //   * remembering a different vault replaces the entry.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -86,6 +86,27 @@ test("a missing vault shows the picker and clears the stale entry", () => {
   }
 });
 
+test("an unreadable vault shows the picker and clears the stale entry", { skip: process.getuid?.() === 0 }, () => {
+  const { store, filePath, dir } = makeStore();
+  const vault = join(dir, "locked");
+  mkdirSync(vault);
+  writeFileSync(join(vault, "secret.md"), "hidden\n", "utf8");
+  try {
+    store.remember(vault);
+    const savedPath = realDir(vault);
+    chmodSync(vault, 0o000);
+
+    const restored = store.restore();
+    assert.equal(restored.path, null);
+    assert.equal(restored.cleared, "unavailable");
+    assert.equal(restored.message, missingLastVaultMessage(savedPath));
+    assert.equal(existsSync(filePath), false);
+  } finally {
+    chmodSync(vault, 0o755);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a corrupt settings file shows the picker and does not throw", () => {
   const { store, filePath, dir } = makeStore();
   try {
@@ -147,6 +168,23 @@ test("a non-directory and a broken symlink show the picker and are cleared", () 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("reopen applies an existing index the same way a finished Index does", () => {
+  const app = readFileSync(new URL("../src/renderer/App.tsx", import.meta.url), "utf8");
+  const adoptStart = app.indexOf("async function adoptVault");
+  const adoptEnd = app.indexOf("async function chooseVault", adoptStart);
+  assert.ok(adoptStart !== -1 && adoptEnd !== -1);
+  const adopt = app.slice(adoptStart, adoptEnd);
+  assert.match(adopt, /existingIndex: IndexStats \| null = null/);
+  assert.match(adopt, /setIndexStats\(existingIndex\)/);
+  assert.match(adopt, /setIndexState\(existingIndex \? "indexed" : "none"\)/);
+
+  const restoreStart = app.indexOf("restored = await window.cairn.restoreLastVault()");
+  const restoreEnd = app.indexOf("const toggleFolder", restoreStart);
+  assert.ok(restoreStart !== -1 && restoreEnd !== -1);
+  const restore = app.slice(restoreStart, restoreEnd);
+  assert.match(restore, /adoptVault\(restored\.path, restored\.index \?\? null\)/);
 });
 
 test("no saved file stays absent and shows the picker", () => {

@@ -191,22 +191,30 @@ export function registerIpcHandlers(): void {
           console.error(`[cairn] cleared last vault (${decision.cleared}); vault picker`);
         }
         if (decision.message) console.error(`[cairn] ${decision.message}`);
-        return { path: null, message: decision.message };
+        return { path: null, message: decision.message, index: null };
       }
       try {
         const opened = session.setVault(decision.path);
         console.error(`[cairn] reopened vault ${opened}`);
-        return { path: opened, message: null };
+        let index = null;
+        try {
+          index = await session.readExistingIndex();
+        } catch (err) {
+          console.error("[cairn] could not read the existing index");
+          console.error(err);
+          index = null;
+        }
+        return { path: opened, message: null, index };
       } catch {
         const message = lastVault().releaseMissing(decision.path);
         console.error("[cairn] cleared last vault (unavailable); vault picker");
         console.error(`[cairn] ${message}`);
-        return { path: null, message };
+        return { path: null, message, index: null };
       }
     } catch {
       lastVault().clear();
       console.error("[cairn] cleared last vault (unavailable); vault picker");
-      return { path: null, message: null };
+      return { path: null, message: null, index: null };
     }
   });
 

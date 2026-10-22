@@ -51,9 +51,14 @@ export interface CairnApi {
   selectVault(): Promise<string | null>;
   /**
    * Last successfully opened vault, or a picker fallback. `message` is set when
-   * the saved folder is missing. Never rejects.
+   * the saved folder is missing. `index` is the on-disk index when one exists.
+   * Never rejects.
    */
-  restoreLastVault(): Promise<{ path: string | null; message: string | null }>;
+  restoreLastVault(): Promise<{
+    path: string | null;
+    message: string | null;
+    index: IndexStats | null;
+  }>;
   indexVault(opts: { lexical: boolean }): Promise<IndexStats>;
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string, opts?: { model?: string; scope?: string[] }): Promise<AskResult>;
