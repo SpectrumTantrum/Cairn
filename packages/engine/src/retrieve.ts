@@ -11,6 +11,24 @@ import type { Index } from "./vault-index.js";
 
 const K_RRF = 60; // G10 RRF constant
 export const DEFAULT_COVERAGE_THRESHOLD = 0.5;
+/** Hybrid cosine below this refuses before the model. Between this and the threshold is the weak band. */
+export const DEFAULT_COVERAGE_FLOOR = 0.2;
+
+export type CoverageBand = "strong" | "weak" | "refuse";
+
+/**
+ * `strong` is a cosine at or above the coverage threshold, or a lexical hit
+ * (cosine is NaN). `weak` is a finite cosine from the floor up to the threshold.
+ * `refuse` is below the floor, or lexical retrieval with no hits.
+ */
+export function coverageBand(coverage: SearchCoverage, floor = DEFAULT_COVERAGE_FLOOR): CoverageBand {
+  if (!Number.isFinite(coverage.poolMaxCosine)) {
+    return coverage.covered ? "strong" : "refuse";
+  }
+  if (coverage.poolMaxCosine >= coverage.threshold) return "strong";
+  if (coverage.poolMaxCosine >= floor) return "weak";
+  return "refuse";
+}
 
 export function sanitizeForFts(raw: string): string {
   const tokens = (raw.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(Boolean);

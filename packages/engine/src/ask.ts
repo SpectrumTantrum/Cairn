@@ -3,7 +3,7 @@
 // answer plus the numbered sources it was allowed to use. If retrieval finds nothing, refuse
 // rather than answer from outside knowledge (the G10 "your notes don't cover this" gate).
 
-import { search } from "./retrieve.js";
+import { coverageBand, search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat } from "./chat.js";
@@ -16,6 +16,27 @@ export interface AskResult {
   model?: string;
   covered: boolean;
   reason?: string;
+  /** Max dense cosine for this retrieval. NaN when the turn was lexical. */
+  poolMaxCosine: number;
+}
+
+/** Shown when classic Ask will not answer from the notes. */
+export const UNCOVERED_ANSWER = "Your notes don't cover this.";
+
+/**
+ * Appended after the question only when retrieval is in the weak band.
+ * The grounding system prompt and the warm prefix stay unchanged.
+ */
+export const WEAK_MATCH_NOTE =
+  'These notes may only partly cover the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."';
+
+/** True when classic prose cites a 1-based `[n]` source. `[path:line]` does not count. */
+export function hasClassicCitation(answer: string): boolean {
+  for (const match of answer.matchAll(/\[(\d+)\]/g)) {
+    const n = Number(match[1]);
+    if (Number.isInteger(n) && n >= 1) return true;
+  }
+  return false;
 }
 
 /**
@@ -35,8 +56,9 @@ export const GROUNDING_SYSTEM = [
 /** Stable start of a classic user turn. Background warm stops here so the prefix stays cached. */
 export const CLASSIC_USER_PREFIX = "SOURCES:\n";
 
-export function classicAskUserContent(sourcesBlock: string, question: string): string {
-  return `${CLASSIC_USER_PREFIX}${sourcesBlock}\n\nQUESTION: ${question}`;
+export function classicAskUserContent(sourcesBlock: string, question: string, weak = false): string {
+  const body = `${CLASSIC_USER_PREFIX}${sourcesBlock}\n\nQUESTION: ${question}`;
+  return weak ? `${body}\n\n${WEAK_MATCH_NOTE}` : body;
 }
 
 export async function ask(
@@ -52,14 +74,16 @@ export async function ask(
     coverageThreshold: opts.coverageThreshold,
   });
 
-  if (!coverage.covered) {
+  const band = coverageBand(coverage);
+  if (band === "refuse") {
     return {
-      answer: "Your notes don't cover this.",
+      answer: UNCOVERED_ANSWER,
       sources: [],
       mode,
       grounded: false,
       covered: false,
       reason: "Retrieved context did not meet the coverage threshold.",
+      poolMaxCosine: coverage.poolMaxCosine,
     };
   }
 
@@ -67,11 +91,25 @@ export async function ask(
   const sourcesBlock = hits
     .map((h, i) => `[${i + 1}] ${h.file}:${h.line}${h.heading ? ` > ${h.heading}` : ""}\n${h.text}`)
     .join("\n\n");
+  const weak = band === "weak";
 
   const answer = await chat(model, [
     { role: "system", content: GROUNDING_SYSTEM },
-    { role: "user", content: classicAskUserContent(sourcesBlock, question) },
+    { role: "user", content: classicAskUserContent(sourcesBlock, question, weak) },
   ]);
 
-  return { answer, sources: hits, mode, grounded: true, model, covered: true };
+  // A weak-band answer with no [n] is not shown. The uncovered sentence is.
+  if (weak && !hasClassicCitation(answer)) {
+    return {
+      answer: UNCOVERED_ANSWER,
+      sources: [],
+      mode,
+      grounded: false,
+      covered: false,
+      model,
+      poolMaxCosine: coverage.poolMaxCosine,
+    };
+  }
+
+  return { answer, sources: hits, mode, grounded: true, model, covered: true, poolMaxCosine: coverage.poolMaxCosine };
 }

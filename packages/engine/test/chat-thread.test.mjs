@@ -7,6 +7,8 @@ let setModelProvider;
 let resetModelProvider;
 let FakeModelProvider;
 let InMemoryIndex;
+let UNCOVERED_ANSWER;
+let WEAK_MATCH_NOTE;
 
 // Lexical-only index (no vectors) so retrieval runs without embedding.
 function seed(index) {
@@ -29,6 +31,8 @@ before(async () => {
   resetModelProvider = engine.resetModelProvider;
   FakeModelProvider = testing.FakeModelProvider;
   InMemoryIndex = testing.InMemoryIndex;
+  UNCOVERED_ANSWER = engine.UNCOVERED_ANSWER;
+  WEAK_MATCH_NOTE = engine.WEAK_MATCH_NOTE;
 });
 
 after(() => {
@@ -393,6 +397,172 @@ test("signal without onToken still cancels the model call", async () => {
     assert.equal(thread.messages.length, 0);
   } finally {
     release();
+    index.close();
+  }
+});
+
+function vec(values) {
+  return Buffer.from(Float32Array.from(values).buffer);
+}
+
+function cosineVec(cosine) {
+  const y = Math.sqrt(Math.max(0, 1 - cosine * cosine));
+  return vec([cosine, y, 0, 0]);
+}
+
+function hybridIndex(cosine) {
+  const index = new InMemoryIndex();
+  index.rebuildIndex({
+    mode: "hybrid",
+    embedder: "test-embedder",
+    dim: 4,
+    files: 1,
+    chunks: [
+      {
+        id: 1,
+        file: "finch.md",
+        ordinal: 0,
+        line: 1,
+        heading: "Copper finch",
+        text: "The copper finch lives in the margin of the ledger.",
+        hash: "h1",
+        vector: cosineVec(cosine),
+      },
+    ],
+  });
+  return index;
+}
+
+const FINCH_QUESTION = "Where does the copper finch live?";
+
+test("ChatThread keeps a strong answer and does not add the weak-match note", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve("It lives in the margin.");
+      },
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const thread = new ChatThread(index, { mode: "hybrid" });
+    const result = await thread.send(FINCH_QUESTION);
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].at(-1).content.includes(WEAK_MATCH_NOTE), false);
+    assert.equal(result.answer, "It lives in the margin.");
+    assert.equal(result.covered, true);
+    assert.equal(thread.messages.at(-1).content, "It lives in the margin.");
+  } finally {
+    index.close();
+  }
+});
+
+test("ChatThread calls the model in the weak band and keeps an answer that cites [n]", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve("It lives in the margin of the ledger [1].");
+      },
+    }),
+  );
+  const index = hybridIndex(0.35);
+  try {
+    const thread = new ChatThread(index, { mode: "hybrid" });
+    const tokens = [];
+    const result = await thread.send(FINCH_QUESTION, { onToken: (t) => tokens.push(t) });
+    const user = seen[0].at(-1).content;
+    assert.ok(user.indexOf("QUESTION:") < user.indexOf(WEAK_MATCH_NOTE));
+    assert.equal(result.answer, "It lives in the margin of the ledger [1].");
+    assert.equal(tokens.join(""), result.answer);
+    assert.equal(result.covered, true);
+    assert.equal(result.sources[0].file, "finch.md");
+    assert.equal(thread.messages.at(-1).content, result.answer);
+  } finally {
+    index.close();
+  }
+});
+
+test("ChatThread suppresses a weak-band answer that has no [n] citation", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => {
+        calls += 1;
+        return Promise.resolve("It lives in the margin of the ledger.");
+      },
+    }),
+  );
+  const index = hybridIndex(0.35);
+  try {
+    const thread = new ChatThread(index, { mode: "hybrid" });
+    const tokens = [];
+    const result = await thread.send(FINCH_QUESTION, { onToken: (t) => tokens.push(t) });
+    assert.equal(calls, 1);
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.covered, false);
+    assert.equal(result.grounded, false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(tokens, []);
+    assert.equal(thread.messages.at(-1).content, UNCOVERED_ANSWER);
+    assert.equal(thread.messages.at(-1).content.includes("margin"), false);
+  } finally {
+    index.close();
+  }
+});
+
+test("ChatThread refuses below the coverage floor without calling the model", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => {
+        calls += 1;
+        return Promise.resolve("should not be called [1]");
+      },
+    }),
+  );
+  const index = hybridIndex(0.1);
+  try {
+    const thread = new ChatThread(index, { mode: "hybrid" });
+    const result = await thread.send(FINCH_QUESTION);
+    assert.equal(calls, 0);
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.covered, false);
+    assert.match(result.reason, /coverage threshold/i);
+    assert.deepEqual(result.sources, []);
+  } finally {
+    index.close();
+  }
+});
+
+test("ChatThread leaves lexical mode unchanged, including an answer with no [n]", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve("A vault is a folder of notes.");
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const thread = new ChatThread(index, { mode: "lexical" });
+    const result = await thread.send("What is cache invalidation?");
+    assert.equal(seen[0].at(-1).content.includes(WEAK_MATCH_NOTE), false);
+    assert.equal(result.answer, "A vault is a folder of notes.");
+    assert.equal(result.covered, true);
+    assert.equal(result.mode, "lexical");
+  } finally {
     index.close();
   }
 });
