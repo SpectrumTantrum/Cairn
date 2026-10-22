@@ -14,7 +14,7 @@ import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat, chatStream } from "./chat.js";
 import type { ChatMessage, ChatUsage, ModelProvider } from "./model-provider.js";
-import { classicAskUserContent, GROUNDING_SYSTEM, UNCOVERED_ANSWER, hasClassicCitation } from "./ask.js";
+import { classicAskUserContent, GROUNDING_SYSTEM, UNCOVERED_ANSWER, hasClassicCitation, presentClassicAnswer } from "./ask.js";
 
 /** One recorded turn in a thread. Assistant turns carry the sources they were grounded in. */
 export interface ThreadTurn {
@@ -181,15 +181,31 @@ export class ChatThread {
     // Escalated turns always stream (cloud adapters report usage on the SSE tail).
     // A signal-bearing local turn also streams so the abort reaches the model call
     // even when the caller did not ask for tokens.
-    // Weak-band tokens stay buffered: an answer with no [n] must not reach the UI.
+    // Tokens stay buffered until a [n] citation. An uncited refusal — weak-band,
+    // or any band whose text contains the refusal sentence — is not forwarded, so
+    // a preamble cannot flash before the turn settles on that sentence alone.
     let usage: ChatUsage | undefined;
     const streamed = Boolean(provider || send.onToken || send.signal);
+    const held: string[] = [];
+    let released = false;
+    const forwardToken = (token: string) => {
+      if (!send.onToken) return;
+      if (released) {
+        send.onToken(token);
+        return;
+      }
+      held.push(token);
+      if (!hasClassicCitation(held.join(""))) return;
+      released = true;
+      for (const part of held) send.onToken(part);
+      held.length = 0;
+    };
     const raw = streamed
       ? await chatStream(
           model,
           messages,
           {
-            onToken: weak ? undefined : send.onToken,
+            onToken: forwardToken,
             onUsage: (u) => {
               usage = u;
             },
@@ -200,39 +216,28 @@ export class ChatThread {
         )
       : await chat(model, messages);
 
-    if (weak && !hasClassicCitation(raw)) {
-      this.turns.push({ role: "assistant", content: UNCOVERED_ANSWER, sources: [], grounded: false, covered: false });
-      const suppressed: ChatSendResult = {
-        answer: UNCOVERED_ANSWER,
-        sources: [],
-        mode: usedMode,
-        grounded: false,
-        covered: false,
-        model,
-      };
-      if (provider) {
-        suppressed.escalated = true;
-        if (usage) suppressed.usage = usage;
-        suppressed.sent = {
-          system: GROUNDING_SYSTEM,
-          sourcesBlock,
-          question: userText,
-          historyTurns: history.length,
-        };
+    const { answer, suppressed } = presentClassicAnswer(raw, weak);
+    if (!suppressed && send.onToken && !released) {
+      if (held.length > 0) {
+        for (const part of held) send.onToken(part);
+      } else {
+        send.onToken(raw);
       }
-      return suppressed;
     }
 
-    if (weak) send.onToken?.(raw);
-    const answer = raw;
-
-    this.turns.push({ role: "assistant", content: answer, sources: hits, grounded: true, covered: true });
+    this.turns.push({
+      role: "assistant",
+      content: answer,
+      sources: suppressed ? [] : hits,
+      grounded: !suppressed,
+      covered: !suppressed,
+    });
     const result: ChatSendResult = {
       answer,
-      sources: hits,
+      sources: suppressed ? [] : hits,
       mode: usedMode,
-      grounded: true,
-      covered: true,
+      grounded: !suppressed,
+      covered: !suppressed,
       model,
     };
     if (provider) {

@@ -196,6 +196,56 @@ test("ask calls the model in the weak band and keeps an answer that cites [n]", 
   }
 });
 
+test("the weak-band note mentions tables, lists, and different wording", () => {
+  assert.equal(
+    WEAK_MATCH_NOTE,
+    'These notes may only partly cover the question. The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."',
+  );
+});
+
+test("ask collapses a strong-band preamble plus the refusal sentence when it has no [n]", async () => {
+  const preamble = `The sources do not mention an enterprise plan; they only describe the Free and Pro plans. ${UNCOVERED_ANSWER}`;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => Promise.resolve(preamble),
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid" });
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.covered, false);
+    assert.equal(result.grounded, false);
+    assert.deepEqual(result.sources, []);
+    assert.equal(result.model, "qwen3:4b");
+    assert.equal(result.reason, undefined);
+    assert.ok(result.poolMaxCosine >= 0.5);
+  } finally {
+    index.close();
+  }
+});
+
+test("ask leaves a strong answer that quotes the refusal sentence and cites [n]", async () => {
+  const quoted = `The notes record the limit, then say "${UNCOVERED_ANSWER}" [1]`;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => Promise.resolve(quoted),
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid" });
+    assert.equal(result.answer, quoted);
+    assert.equal(result.covered, true);
+    assert.equal(result.grounded, true);
+    assert.equal(result.sources[0].file, "finch.md");
+  } finally {
+    index.close();
+  }
+});
+
 test("ask suppresses a weak-band answer that has no [n] citation", async () => {
   let calls = 0;
   setModelProvider(

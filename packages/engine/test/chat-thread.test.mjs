@@ -488,6 +488,54 @@ test("ChatThread calls the model in the weak band and keeps an answer that cites
   }
 });
 
+test("ChatThread collapses a strong-band preamble plus the refusal sentence and does not stream it", async () => {
+  const preamble = `The sources do not mention an enterprise plan; they only describe the Free and Pro plans. ${UNCOVERED_ANSWER}`;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => Promise.resolve(preamble),
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const thread = new ChatThread(index, { mode: "hybrid" });
+    const tokens = [];
+    const result = await thread.send(FINCH_QUESTION, { onToken: (t) => tokens.push(t) });
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.covered, false);
+    assert.equal(result.grounded, false);
+    assert.deepEqual(result.sources, []);
+    assert.deepEqual(tokens, []);
+    assert.equal(thread.messages.at(-1).content, UNCOVERED_ANSWER);
+    assert.equal(thread.messages.at(-1).content.includes("enterprise"), false);
+  } finally {
+    index.close();
+  }
+});
+
+test("ChatThread leaves a strong answer that quotes the refusal sentence and cites [n]", async () => {
+  const quoted = `The notes record the limit, then say "${UNCOVERED_ANSWER}" [1]`;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => Promise.resolve(quoted),
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const thread = new ChatThread(index, { mode: "hybrid" });
+    const tokens = [];
+    const result = await thread.send(FINCH_QUESTION, { onToken: (t) => tokens.push(t) });
+    assert.equal(result.answer, quoted);
+    assert.equal(tokens.join(""), quoted);
+    assert.equal(result.covered, true);
+    assert.equal(result.sources[0].file, "finch.md");
+    assert.equal(thread.messages.at(-1).content, quoted);
+  } finally {
+    index.close();
+  }
+});
+
 test("ChatThread suppresses a weak-band answer that has no [n] citation", async () => {
   let calls = 0;
   setModelProvider(
