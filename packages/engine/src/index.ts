@@ -35,7 +35,7 @@ export type { IndexStats, PendingChunk, EmbedChunksResult } from "./indexer.js";
 export { search, sanitizeForFts, rrfFuse, coverageBand, DEFAULT_COVERAGE_THRESHOLD, DEFAULT_COVERAGE_FLOOR } from "./retrieve.js";
 export type { CoverageBand, Mode, SearchCoverage, SearchHit, SearchOpts } from "./retrieve.js";
 export { ask, GROUNDING_SYSTEM, CLASSIC_USER_PREFIX, UNCOVERED_ANSWER, WEAK_MATCH_NOTE, classicAskUserContent, hasClassicCitation } from "./ask.js";
-export type { ClassicAskGate } from "./ask.js";
+export type { ClassicAskGate, AskTopChunk } from "./ask.js";
 export type { AskResult } from "./ask.js";
 export { ChatThread } from "./chat-thread.js";
 export type { ThreadTurn, ChatThreadOptions, ChatSendOptions, ChatSendResult, SentPayload } from "./chat-thread.js";
@@ -105,6 +105,7 @@ export { chatWarmRequest } from "./chat-warm.js";
 export type {
   ModelProvider,
   ChatMessage,
+  ChatSampling,
   ChatStreamCallbacks,
   ChatUsage,
   AgentMessage,
