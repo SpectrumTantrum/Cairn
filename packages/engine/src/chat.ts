@@ -2,10 +2,16 @@
 // Defaults to a Qwen3 chat model; thinking is disabled (think:false) to keep answers clean
 // and fast. Override with CHAT_MODEL or --model.
 
-import { getModelProvider, type ChatMessage, type ChatStreamCallbacks, type ModelProvider } from "./model-provider.js";
+import {
+  getModelProvider,
+  type ChatMessage,
+  type ChatSampling,
+  type ChatStreamCallbacks,
+  type ModelProvider,
+} from "./model-provider.js";
 import { listModels } from "./embed.js";
 
-export type { ChatMessage, ChatStreamCallbacks };
+export type { ChatMessage, ChatSampling, ChatStreamCallbacks };
 
 /**
  * Fresh-profile default for both Ask modes. `qwen3:8b` wins whenever it is
@@ -70,8 +76,9 @@ export async function chat(
   messages: ChatMessage[],
   think = false,
   provider?: ModelProvider,
+  sampling?: ChatSampling,
 ): Promise<string> {
-  const raw = await (provider ?? getModelProvider()).chat(model, messages, think);
+  const raw = await (provider ?? getModelProvider()).chat(model, messages, think, sampling);
   return stripThinking(raw);
 }
 

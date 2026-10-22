@@ -7,6 +7,15 @@ import { coverageBand, search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
 import { resolveChatModel, chat } from "./chat.js";
+import type { ChatSampling } from "./chat.js";
+
+/** One retrieved chunk from the top-k classic Ask selects for the model. */
+export interface AskTopChunk {
+  file: string;
+  id: number | null;
+  heading: string;
+  cosine: number | null;
+}
 
 export interface AskResult {
   answer: string;
@@ -18,6 +27,11 @@ export interface AskResult {
   reason?: string;
   /** Max dense cosine for this retrieval. NaN when the turn was lexical. */
   poolMaxCosine: number;
+  /**
+   * Top-k selected for the model. Present when the gate refuses before the
+   * call too, so a legacy row still shows the chunks that were retrieved.
+   */
+  topChunks: AskTopChunk[];
 }
 
 /** Shown when classic Ask will not answer from the notes. */
@@ -27,8 +41,11 @@ export const UNCOVERED_ANSWER = "Your notes don't cover this.";
  * Appended after the question only when retrieval is in the weak band.
  * The grounding system prompt and the warm prefix stay unchanged.
  */
-export const WEAK_MATCH_NOTE =
-  'These notes may only partly cover the question. The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."';
+export const WEAK_MATCH_NOTE = [
+  "These notes may only partly cover the question.",
+  "The question may use different words than the notes (for example \u2018throttle\u2019 or \u2018cap\u2019 for a rate limit); the answer may sit in a table or list.",
+  'The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."',
+].join("\n");
 
 /** True when classic prose cites a 1-based `[n]` source. `[path:line]` does not count. */
 export function hasClassicCitation(answer: string): boolean {
@@ -88,6 +105,12 @@ export async function ask(
      * Uncited refusal-sentence normalization still runs in both gates.
      */
     gate?: ClassicAskGate;
+    /**
+     * Eval-only Ollama sampling. Omitted by the app, so desktop Ask keeps the
+     * current request body.
+     */
+    temperature?: number;
+    seed?: number;
   } = {},
 ): Promise<AskResult> {
   const gate = opts.gate ?? "current";
@@ -103,6 +126,8 @@ export async function ask(
   });
 
   const band = coverageBand(coverage);
+  const topChunks = topChunksOf(hits);
+  const sampling = samplingOf(opts);
   // Legacy has no weak band: anything under the 0.5 threshold refuses, model uncalled.
   if (band === "refuse" || (gate === "legacy" && band === "weak")) {
     return {
@@ -113,6 +138,7 @@ export async function ask(
       covered: false,
       reason: "Retrieved context did not meet the coverage threshold.",
       poolMaxCosine: coverage.poolMaxCosine,
+      topChunks,
     };
   }
 
@@ -122,10 +148,16 @@ export async function ask(
     .join("\n\n");
   const weak = band === "weak";
 
-  const raw = await chat(model, [
-    { role: "system", content: GROUNDING_SYSTEM },
-    { role: "user", content: classicAskUserContent(sourcesBlock, question, weak) },
-  ]);
+  const raw = await chat(
+    model,
+    [
+      { role: "system", content: GROUNDING_SYSTEM },
+      { role: "user", content: classicAskUserContent(sourcesBlock, question, weak) },
+    ],
+    false,
+    undefined,
+    sampling,
+  );
 
   // Uncited weak answers, and any uncited answer that contains the refusal
   // sentence, are replaced by that sentence alone.
@@ -139,8 +171,41 @@ export async function ask(
       covered: false,
       model,
       poolMaxCosine: coverage.poolMaxCosine,
+      topChunks,
     };
   }
 
-  return { answer, sources: hits, mode, grounded: true, model, covered: true, poolMaxCosine: coverage.poolMaxCosine };
+  return {
+    answer,
+    sources: hits,
+    mode,
+    grounded: true,
+    model,
+    covered: true,
+    poolMaxCosine: coverage.poolMaxCosine,
+    topChunks,
+  };
+}
+
+function topChunksOf(hits: SearchHit[]): AskTopChunk[] {
+  return hits.map((hit) => ({
+    file: hit.file,
+    id: hit.id ?? null,
+    heading: hit.heading,
+    cosine: Number.isFinite(hit.cosine) ? hit.cosine : null,
+  }));
+}
+
+function samplingOf(opts: { temperature?: number; seed?: number }): ChatSampling | undefined {
+  if (opts.temperature === undefined && opts.seed === undefined) return undefined;
+  const sampling: ChatSampling = {};
+  if (opts.temperature !== undefined) {
+    if (!Number.isFinite(opts.temperature)) throw new Error("ask temperature must be a finite number");
+    sampling.temperature = opts.temperature;
+  }
+  if (opts.seed !== undefined) {
+    if (!Number.isInteger(opts.seed)) throw new Error("ask seed must be an integer");
+    sampling.seed = opts.seed;
+  }
+  return sampling;
 }

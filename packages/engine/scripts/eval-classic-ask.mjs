@@ -6,14 +6,17 @@
 //     --vault /path/to/vault \
 //     --questions /path/to/questions.csv \
 //     --out /tmp/cairn-eval.jsonl \
-//     [--model <tag>] [--gate current|legacy]
+//     [--model <tag>] [--gate current|legacy] [--temperature <n>] [--seed <n>]
 //
 // CSV header: id,bucket,question,gold_file
 // Indexes the vault (hybrid) when <vault>/.cairn/index.db is missing.
 // A second run with the other --gate reuses that index.
 // --gate legacy is the pre-#102 0.5-only ask() path (no weak band, no weak note).
+// --temperature and --seed default to 0 and 42 in this script only. They are
+// Ollama options on the eval ask() call. The app does not send them.
 // The chat model is resolveChatModel(): the app preference list, unless --model is set.
-// The first JSONL line is a summary record. Later lines are questions and include `gate`.
+// The first JSONL line is a summary record. Later lines are questions and include
+// `gate`, `temperature`, `seed`, and `topChunks`.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
@@ -29,9 +32,10 @@ import {
 
 function usage() {
   return [
-    "usage: node packages/engine/scripts/eval-classic-ask.mjs --vault <path> --questions <csv> --out <jsonl> [--model <tag>] [--gate current|legacy]",
+    "usage: node packages/engine/scripts/eval-classic-ask.mjs --vault <path> --questions <csv> --out <jsonl> [--model <tag>] [--gate current|legacy] [--temperature <n>] [--seed <n>]",
     "CSV header: id,bucket,question,gold_file",
     "--gate legacy refuses every cosine under 0.5 before the model. Default is current.",
+    "--temperature defaults to 0 and --seed defaults to 42. App Ask does not send them.",
     "Indexing runs only when <vault>/.cairn/index.db is missing.",
   ].join("\n");
 }
@@ -40,7 +44,15 @@ function parseArgs(argv) {
   const flags = {};
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === "--vault" || arg === "--questions" || arg === "--out" || arg === "--model" || arg === "--gate") {
+    if (
+      arg === "--vault" ||
+      arg === "--questions" ||
+      arg === "--out" ||
+      arg === "--model" ||
+      arg === "--gate" ||
+      arg === "--temperature" ||
+      arg === "--seed"
+    ) {
       const value = argv[i + 1];
       if (!value || value.startsWith("--")) {
         throw new Error(`${arg} needs a value`);
@@ -119,8 +131,14 @@ function extensionOf(file) {
   return ext || "(none)";
 }
 
+function finiteFlag(name, raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) throw new Error(`${name} must be a finite number`);
+  return n;
+}
+
 /** Counts from the open index. Totals are the chunk table, which is what Ask searches. */
-function indexSummary(index, gate) {
+function indexSummary(index, gate, temperature, seed) {
   const files = index.listFiles();
   const chunkFiles = index.listChunkFiles();
   const byExt = new Map();
@@ -145,6 +163,8 @@ function indexSummary(index, gate) {
     chunks: chunkFiles.length,
     extensions,
     gate,
+    temperature,
+    seed,
   };
 }
 
@@ -153,7 +173,7 @@ function writeSummary(summary) {
     .map((row) => `${row.ext} ${row.files} files/${row.chunks} chunks`)
     .join(", ");
   process.stderr.write(
-    `index ${summary.vault} embedder=${summary.embedder ?? "none"} mode=${summary.mode ?? "unknown"} files=${summary.files} chunks=${summary.chunks}\n${extensions}\n`,
+    `index ${summary.vault} embedder=${summary.embedder ?? "none"} mode=${summary.mode ?? "unknown"} files=${summary.files} chunks=${summary.chunks} temperature=${summary.temperature} seed=${summary.seed}\n${extensions}\n`,
   );
 }
 
@@ -184,6 +204,9 @@ async function main() {
   if (gate !== "current" && gate !== "legacy") {
     throw new Error("--gate must be current or legacy");
   }
+  const temperature = flags.temperature === undefined ? 0 : finiteFlag("--temperature", flags.temperature);
+  const seed = flags.seed === undefined ? 42 : finiteFlag("--seed", flags.seed);
+  if (!Number.isInteger(seed)) throw new Error("--seed must be an integer");
 
   const vault = resolve(flags.vault);
   const questionsPath = resolve(flags.questions);
@@ -202,10 +225,10 @@ async function main() {
   const index = openIndex(vault);
   const lines = [];
   try {
-    const summary = indexSummary(index, gate);
+    const summary = indexSummary(index, gate, temperature, seed);
     writeSummary(summary);
     lines.push(JSON.stringify(summary));
-    const askOpts = { gate };
+    const askOpts = { gate, temperature, seed };
     if (flags.model) askOpts.model = flags.model;
     for (const cells of table.slice(1)) {
       const [id = "", bucket = "", question = "", goldFile = ""] = cells;
@@ -227,6 +250,9 @@ async function main() {
         mode: result.mode,
         band: askBand(result),
         gate,
+        temperature,
+        seed,
+        topChunks: result.topChunks,
         elapsed_ms: elapsedMs,
       }));
     }

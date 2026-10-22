@@ -47,6 +47,8 @@ export function rrfFuse(arms: number[][]): { id: number; score: number }[] {
 }
 
 export interface SearchHit {
+  /** Index chunk id. Set on retrieval hits; absent on hits built outside search. */
+  id?: number;
   file: string;
   heading: string;
   line: number;
@@ -151,6 +153,7 @@ function toHit(index: Index, id: number, score: number, cosine: number, inDense:
   const c = index.getChunk(id);
   const arms = inDense && inFts ? "dense+fts" : inDense ? "dense" : "fts";
   return {
+    id,
     file: c?.file ?? "?",
     heading: c?.heading ?? "",
     line: c?.line ?? 0,

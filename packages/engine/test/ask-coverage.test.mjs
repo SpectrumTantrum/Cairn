@@ -196,10 +196,14 @@ test("ask calls the model in the weak band and keeps an answer that cites [n]", 
   }
 });
 
-test("the weak-band note mentions tables, lists, and different wording", () => {
+test("the weak-band note adds the paraphrase line and keeps the decline sentence", () => {
   assert.equal(
     WEAK_MATCH_NOTE,
-    'These notes may only partly cover the question. The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."',
+    [
+      "These notes may only partly cover the question.",
+      "The question may use different words than the notes (for example \u2018throttle\u2019 or \u2018cap\u2019 for a rate limit); the answer may sit in a table or list.",
+      'The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."',
+    ].join("\n"),
   );
 });
 
@@ -291,6 +295,11 @@ test("ask legacy gate refuses a 0.35 cosine without calling the model", async ()
     assert.equal(result.covered, false);
     assert.match(result.reason, /coverage threshold/i);
     assert.ok(result.poolMaxCosine >= 0.2 && result.poolMaxCosine < 0.5);
+    assert.equal(result.topChunks.length, 1);
+    assert.equal(result.topChunks[0].file, "finch.md");
+    assert.equal(result.topChunks[0].id, 1);
+    assert.equal(result.topChunks[0].heading, "Copper finch");
+    assert.equal(result.topChunks[0].cosine, result.poolMaxCosine);
   } finally {
     index.close();
   }
@@ -318,6 +327,36 @@ test("ask legacy gate still collapses an uncited strong answer that contains the
     assert.deepEqual(result.sources, []);
   } finally {
     index.close();
+  }
+});
+
+test("ask forwards temperature and seed only when the caller sets them", async () => {
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, _messages, _think, sampling) => {
+        seen.push(sampling);
+        return Promise.resolve("It lives in the margin of the ledger [1].");
+      },
+    }),
+  );
+  const sampled = hybridIndex(0.9);
+  try {
+    const result = await ask(sampled, FINCH_QUESTION, { mode: "hybrid", temperature: 0, seed: 42 });
+    assert.deepEqual(seen, [{ temperature: 0, seed: 42 }]);
+    assert.equal(result.topChunks[0].file, "finch.md");
+    assert.equal(result.topChunks[0].id, 1);
+  } finally {
+    sampled.close();
+  }
+  seen.length = 0;
+  const plain = hybridIndex(0.9);
+  try {
+    await ask(plain, FINCH_QUESTION, { mode: "hybrid" });
+    assert.deepEqual(seen, [undefined]);
+  } finally {
+    plain.close();
   }
 });
 
