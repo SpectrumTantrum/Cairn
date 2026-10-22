@@ -272,11 +272,20 @@ export interface ChatUsage {
   costUsd?: number;
 }
 
+/**
+ * Optional Ollama sampling for one non-streaming chat call.
+ * Absent on the app path, so classic Ask and warm keep their current body.
+ */
+export interface ChatSampling {
+  temperature?: number;
+  seed?: number;
+}
+
 export interface ModelProvider {
   listModels(): Promise<string[]>;
   isReachable(): Promise<boolean>;
   embed(model: string, input: string[]): Promise<number[][]>;
-  chat(model: string, messages: ChatMessage[], think?: boolean): Promise<string>;
+  chat(model: string, messages: ChatMessage[], think?: boolean, sampling?: ChatSampling): Promise<string>;
   /**
    * Optional streaming variant. Providers that implement it emit tokens via
    * `callbacks.onToken` and resolve to the accumulated text. Optional so existing
@@ -495,6 +504,15 @@ function openAiAskBody(
   };
   if (requireToolCall) body.tool_choice = "required";
   return body;
+}
+
+/** Ollama `options` for an eval chat. Empty when the app did not ask for sampling. */
+function samplingOptions(sampling?: ChatSampling): Record<string, number> | undefined {
+  if (!sampling) return undefined;
+  const options: Record<string, number> = {};
+  if (sampling.temperature !== undefined) options.temperature = sampling.temperature;
+  if (sampling.seed !== undefined) options.seed = sampling.seed;
+  return Object.keys(options).length > 0 ? options : undefined;
 }
 
 /** Native `/api/chat` body. Prime and classic Ask must send this same shape. */
@@ -1049,9 +1067,16 @@ export class OllamaClient implements ModelProvider {
     return j.embeddings;
   }
 
-  async chat(model: string, messages: ChatMessage[], think = false): Promise<string> {
+  async chat(
+    model: string,
+    messages: ChatMessage[],
+    think = false,
+    sampling?: ChatSampling,
+  ): Promise<string> {
     const body = nativeAskBody(model, messages, false);
     if (think !== false) delete body.think;
+    const options = samplingOptions(sampling);
+    if (options) body.options = options;
 
     const r = await postHonoringThink(`${this.baseUrl}/api/chat`, body, OLLAMA_CHAT_TIMEOUT_MS, "chat");
     if (!r.ok) {

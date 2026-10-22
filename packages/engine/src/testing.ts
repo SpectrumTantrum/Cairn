@@ -1,6 +1,7 @@
 import type {
   AgentMessage,
   ChatMessage,
+  ChatSampling,
   ChatStreamCallbacks,
   ChatWithToolsOptions,
   ModelProvider,
@@ -14,7 +15,12 @@ export interface FakeModelProviderOpts {
   models?: string[];
   reachable?: boolean;
   embed?: (model: string, input: string[]) => Promise<number[][]>;
-  chat?: (model: string, messages: ChatMessage[]) => Promise<string>;
+  chat?: (
+    model: string,
+    messages: ChatMessage[],
+    think?: boolean,
+    sampling?: ChatSampling,
+  ) => Promise<string>;
   /**
    * Optional streaming override. When absent, `chatStream` streams the `chat()`
    * result whitespace-token by token — enough to exercise the onToken seam in gates.
@@ -79,8 +85,13 @@ export class FakeModelProvider implements ModelProvider {
     return input.map(() => [1, 0, 0, 0]);
   }
 
-  async chat(model: string, messages: ChatMessage[]): Promise<string> {
-    if (this.chatFn) return this.chatFn(model, messages);
+  async chat(
+    model: string,
+    messages: ChatMessage[],
+    think = false,
+    sampling?: ChatSampling,
+  ): Promise<string> {
+    if (this.chatFn) return this.chatFn(model, messages, think, sampling);
     return "Cairn keeps Markdown vaults local and cites source lines [1].";
   }
 
