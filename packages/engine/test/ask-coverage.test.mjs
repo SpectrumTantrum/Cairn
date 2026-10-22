@@ -271,6 +271,56 @@ test("ask suppresses a weak-band answer that has no [n] citation", async () => {
   }
 });
 
+test("ask legacy gate refuses a 0.35 cosine without calling the model", async () => {
+  let calls = 0;
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: () => {
+        calls += 1;
+        return Promise.resolve("It lives in the margin of the ledger [1].");
+      },
+    }),
+  );
+  const index = hybridIndex(0.35);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid", gate: "legacy" });
+    assert.equal(calls, 0);
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.model, undefined);
+    assert.equal(result.covered, false);
+    assert.match(result.reason, /coverage threshold/i);
+    assert.ok(result.poolMaxCosine >= 0.2 && result.poolMaxCosine < 0.5);
+  } finally {
+    index.close();
+  }
+});
+
+test("ask legacy gate still collapses an uncited strong answer that contains the refusal sentence", async () => {
+  const preamble = `The sources do not mention an enterprise plan. ${UNCOVERED_ANSWER}`;
+  const seen = [];
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b", "test-embedder"],
+      chat: (_model, messages) => {
+        seen.push(messages);
+        return Promise.resolve(preamble);
+      },
+    }),
+  );
+  const index = hybridIndex(0.9);
+  try {
+    const result = await ask(index, FINCH_QUESTION, { mode: "hybrid", gate: "legacy" });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].at(-1).content.includes(WEAK_MATCH_NOTE), false);
+    assert.equal(result.answer, UNCOVERED_ANSWER);
+    assert.equal(result.model, "qwen3:4b");
+    assert.deepEqual(result.sources, []);
+  } finally {
+    index.close();
+  }
+});
+
 test("ask refuses below the coverage floor without calling the model", async () => {
   let calls = 0;
   setModelProvider(
