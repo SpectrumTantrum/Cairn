@@ -71,11 +71,29 @@ export function classicAskUserContent(sourcesBlock: string, question: string, we
   return weak ? `${body}\n\n${WEAK_MATCH_NOTE}` : body;
 }
 
+export type ClassicAskGate = "current" | "legacy";
+
 export async function ask(
   index: Index,
   question: string,
-  opts: { k?: number; mode?: Mode; model?: string; scope?: string[]; coverageThreshold?: number } = {},
+  opts: {
+    k?: number;
+    mode?: Mode;
+    model?: string;
+    scope?: string[];
+    coverageThreshold?: number;
+    /**
+     * `current` is the weak-band gate. `legacy` is the pre-#102 0.5-only path:
+     * a cosine under 0.5 refuses before the model, with no weak note.
+     * Uncited refusal-sentence normalization still runs in both gates.
+     */
+    gate?: ClassicAskGate;
+  } = {},
 ): Promise<AskResult> {
+  const gate = opts.gate ?? "current";
+  if (gate !== "current" && gate !== "legacy") {
+    throw new Error('ask gate must be "current" or "legacy"');
+  }
   const k = opts.k ?? 6;
   const { hits, mode, coverage } = await search(index, question, {
     k,
@@ -85,7 +103,8 @@ export async function ask(
   });
 
   const band = coverageBand(coverage);
-  if (band === "refuse") {
+  // Legacy has no weak band: anything under the 0.5 threshold refuses, model uncalled.
+  if (band === "refuse" || (gate === "legacy" && band === "weak")) {
     return {
       answer: UNCOVERED_ANSWER,
       sources: [],
