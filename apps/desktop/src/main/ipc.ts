@@ -17,6 +17,7 @@ import {
   type SecretCrypto,
 } from "./provider-store.js";
 import { ThreadStore } from "./thread-store.js";
+import { LastVaultStore } from "./last-vault.js";
 import { toUserError } from "./user-error.js";
 import { hidePdfView, showPdfView, type PdfViewBounds } from "./pdf-viewer.js";
 import { dispatchDocxOpen } from "./docx-open.js";
@@ -50,6 +51,16 @@ function threads(): ThreadStore {
     });
   }
   return threadStore;
+}
+
+// Last successfully opened vault. Lives in userData, not the vault and not
+// renderer localStorage, so a relaunch can reopen it without a network call.
+let lastVaultStore: LastVaultStore | null = null;
+function lastVault(): LastVaultStore {
+  if (!lastVaultStore) {
+    lastVaultStore = new LastVaultStore(join(app.getPath("userData"), "last-vault.json"));
+  }
+  return lastVaultStore;
 }
 
 async function handleUserErrors<T>(fn: () => T | Promise<T>): Promise<T> {
@@ -160,8 +171,51 @@ export function registerIpcHandlers(): void {
       });
 
       if (result.canceled || !result.filePaths[0]) return null;
-      return session.setVault(result.filePaths[0]);
+      const opened = session.setVault(result.filePaths[0]);
+      try {
+        lastVault().remember(opened);
+      } catch {
+        // The folder opened. A settings-file write must not become an error toast.
+      }
+      return opened;
     });
+  });
+
+  // Reopen the last vault on launch. A missing, unreadable, or corrupt entry
+  // returns no path so the renderer stays on the picker. Never rejects.
+  ipcMain.handle("vault:restore", async () => {
+    try {
+      const decision = lastVault().restore();
+      if (!decision.path) {
+        if (decision.cleared) {
+          console.error(`[cairn] cleared last vault (${decision.cleared}); vault picker`);
+        }
+        if (decision.message) console.error(`[cairn] ${decision.message}`);
+        return { path: null, message: decision.message, index: null };
+      }
+      try {
+        const opened = session.setVault(decision.path);
+        console.error(`[cairn] reopened vault ${opened}`);
+        let index = null;
+        try {
+          index = await session.readExistingIndex();
+        } catch (err) {
+          console.error("[cairn] could not read the existing index");
+          console.error(err);
+          index = null;
+        }
+        return { path: opened, message: null, index };
+      } catch {
+        const message = lastVault().releaseMissing(decision.path);
+        console.error("[cairn] cleared last vault (unavailable); vault picker");
+        console.error(`[cairn] ${message}`);
+        return { path: null, message, index: null };
+      }
+    } catch {
+      lastVault().clear();
+      console.error("[cairn] cleared last vault (unavailable); vault picker");
+      return { path: null, message: null, index: null };
+    }
   });
 
   ipcMain.handle("vault:index", async (_event, opts: unknown) => {

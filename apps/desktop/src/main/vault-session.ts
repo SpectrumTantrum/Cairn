@@ -110,6 +110,12 @@ function compareTreeNodes(a: TreeNode, b: TreeNode, sort: TreeSortMode): number 
   return compareByName(a, b);
 }
 
+function numberMeta(value: string | undefined): number {
+  if (value === undefined) return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function normalizeVaultPath(input: string): string {
   if (input.trim() === "") {
     throw new Error("Choose a vault folder first.");
@@ -314,6 +320,34 @@ export class VaultSession {
     if (!existsSync(join(vaultPath, ".cairn", "index.db"))) {
       throw new Error("Index this vault before searching or asking.");
     }
+  }
+
+  /**
+   * Stats already stored in `.cairn/index.db`, or null when this vault has not
+   * been indexed. Does not re-index. Used on relaunch so Search and Ask match
+   * the state a finished Index leaves behind.
+   */
+  async readExistingIndex(): Promise<IndexStats | null> {
+    if (!this.selectedVaultPath) return null;
+    const vaultPath = this.selectedVaultPath;
+    if (!existsSync(join(vaultPath, ".cairn", "index.db"))) return null;
+    return this.withIndex(vaultPath, async (index) => {
+      const mode = index.getMeta("mode") === "lexical" ? "lexical" : "hybrid";
+      const files = numberMeta(index.getMeta("files"));
+      const chunks = numberMeta(index.getMeta("chunks"));
+      const embedder = index.getMeta("embedder");
+      const dim = numberMeta(index.getMeta("dim"));
+      const stats: IndexStats = {
+        mode,
+        files,
+        chunks,
+        embedded: 0,
+        cached: 0,
+      };
+      if (embedder) stats.embedder = embedder;
+      if (index.getMeta("dim") !== undefined) stats.dim = dim;
+      return stats;
+    });
   }
 
   private async withIndex<T>(vaultPath: string, fn: (index: Index) => Promise<T>): Promise<T> {
