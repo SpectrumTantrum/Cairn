@@ -44,7 +44,7 @@ export const UNCOVERED_ANSWER = "Your notes don't cover this.";
 export const WEAK_MATCH_NOTE = [
   "These notes may only partly cover the question.",
   "The question may use different words than the notes (for example \u2018throttle\u2019 or \u2018cap\u2019 for a rate limit); the answer may sit in a table or list.",
-  'The answer may sit in a table, a list, or wording that differs from the question. Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."',
+  'Answer only from them, and cite each claim with [n]. If they do not contain the answer, reply exactly: "Your notes don\'t cover this."',
 ].join("\n");
 
 /** True when classic prose cites a 1-based `[n]` source. `[path:line]` does not count. */
