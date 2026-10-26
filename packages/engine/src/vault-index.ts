@@ -67,8 +67,11 @@ export interface Index {
   /** FTS5 keyword arm; same `scope` semantics as {@link denseArm}. */
   ftsArm(match: string, pool: number, scope?: readonly string[]): { id: number; rank: number }[];
 
-  /** Distinct vault-relative Markdown paths present in the index (sorted). */
+  /** Distinct vault-relative paths present in the index (sorted). */
   listFiles(scope?: readonly string[]): string[];
+
+  /** Vault-relative path of every chunk, in id order. */
+  listChunkFiles(): string[];
 
   /** Case-insensitive substring matches over indexed chunk text (agentic grep). */
   grepChunks(
@@ -288,6 +291,11 @@ export class SqliteIndex implements Index {
     return rows.map((r) => r.file);
   }
 
+  listChunkFiles(): string[] {
+    const rows = this.db.prepare("SELECT file FROM chunks ORDER BY id").all() as { file: string }[];
+    return rows.map((r) => r.file);
+  }
+
   grepChunks(
     needle: string,
     limit: number,
@@ -448,6 +456,12 @@ export class InMemoryIndex implements Index {
       if (inScope(chunk.file)) set.add(chunk.file);
     }
     return [...set].sort((a, b) => a.localeCompare(b));
+  }
+
+  listChunkFiles(): string[] {
+    return [...this.chunks.values()]
+      .sort((a, b) => a.id - b.id)
+      .map((chunk) => chunk.file);
   }
 
   grepChunks(

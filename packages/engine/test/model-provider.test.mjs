@@ -552,6 +552,35 @@ async function waitFor(predicate) {
   }
 }
 
+test("eval sampling is an Ollama options object and the default chat body omits it", async () => {
+  const state = { calls: [] };
+  const restore = installOllama(state);
+  try {
+    const engine = await import("../dist/index.js");
+    engine.resetOllamaHttpClient();
+    const client = new engine.OllamaClient("http://ollama.test");
+    const messages = [{ role: "user", content: "hi" }];
+    await client.chat("qwen3:4b", messages);
+    const plain = state.calls.find((call) => call.path.endsWith("/api/chat"));
+    assert.deepEqual(plain.body, { model: "qwen3:4b", messages, stream: false, think: false });
+    state.calls.length = 0;
+    await client.chat("qwen3:4b", messages, false, { temperature: 0, seed: 42 });
+    const sampled = state.calls.find((call) => call.path.endsWith("/api/chat"));
+    assert.deepEqual(sampled.body, {
+      model: "qwen3:4b",
+      messages,
+      stream: false,
+      think: false,
+      options: { temperature: 0, seed: 42 },
+    });
+  } finally {
+    restore();
+    const engine = await import("../dist/index.js");
+    engine.resetModelProvider();
+    engine.resetOllamaHttpClient();
+  }
+});
+
 test("warm prompts are the real Ask prefixes", async () => {
   const engine = await import("../dist/index.js");
   const agentic = engine.chatWarmRequest("agentic");
