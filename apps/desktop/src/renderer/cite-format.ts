@@ -99,6 +99,32 @@ export function pdfOpenTitle(file: string, page?: number, landsOnPage = PDF_OPEN
 }
 
 /**
+ * Visible chip when the caller has no open handler. Stays the location label
+ * (`notes.md:4 › Heading`, `report.pdf p.3`). Never a paragraph, "undefined",
+ * or an error sentence.
+ */
+export interface CitationChipFace {
+  /** False when nothing can open this chip. Render it as a label, not a button. */
+  interactive: boolean;
+  text: string;
+  title: string;
+}
+
+export function citationChipFace(
+  hit: { file: string; line: number; heading?: string; page?: number },
+  handler: boolean,
+): CitationChipFace {
+  const page = isPdfPath(hit.file) && hit.page && hit.page > 0 ? hit.page : 0;
+  const heading = (hit.heading ?? "").trim();
+  const text =
+    page > 0
+      ? pdfChipLabel(hit.file, page)
+      : `${basename(hit.file)}:${citationLineLabel(hit.line)}${heading ? ` › ${heading}` : ""}`;
+  const title = handler ? citationTitle(hit.file, hit.line, heading, page > 0 ? page : undefined) : text;
+  return { interactive: handler, text, title };
+}
+
+/**
  * Hover title for a citation open target.
  * A located passage is "Open <path> at line <n> › <heading>" when a heading is known.
  * The line is the click target (the heading line), not a later fact line.

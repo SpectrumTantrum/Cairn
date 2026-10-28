@@ -634,6 +634,15 @@ button {
   border-radius: 7px;
   cursor: pointer;
 }
+.citation-card-static {
+  cursor: default;
+}
+.citation-card-pill.citation-card-static:hover {
+  background: var(--accent-fill);
+}
+.citation-card-full.citation-card-static:hover {
+  background: transparent;
+}
 .citation-card-pill {
   flex-direction: row;
   align-items: center;
