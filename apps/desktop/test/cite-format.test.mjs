@@ -22,9 +22,16 @@ const {
   isAudioPath,
   isVideoPath,
   isDocxPath,
+  isPptxPath,
+  isOfficePath,
   DOCX_NO_APP,
+  PPTX_NO_APP,
   docxChipLabel,
   docxChipText,
+  headingChipLabel,
+  headingChipText,
+  officeNoAppLine,
+  officeOpenNotice,
   isReadOnlyEditorPath,
   opensInEditor,
 } = await import("../out-test/cite-format.js");
@@ -183,6 +190,40 @@ test("a Word file chips as file.docx · heading and does not open in the editor"
   );
   assert.equal(citationTitle("notes/field.docx", 4, "第二節"), "Open notes/field.docx");
   assert.equal(citationTitle("notes/field.docx", 4, "第二節").includes("line"), false);
+});
+
+test("a PowerPoint file chips as deck.pptx · slide heading and does not open in the editor", () => {
+  assert.equal(isPptxPath("notes/deck.pptx"), true);
+  assert.equal(isPptxPath("notes/deck.PPTX"), true);
+  assert.equal(isPptxPath("notes/old.ppt"), false);
+  assert.equal(isPptxPath("notes/macro.pptm"), false);
+  assert.equal(isPptxPath("notes/show.ppsx"), false);
+  assert.equal(isPptxPath("notes/template.potx"), false);
+  assert.equal(isOfficePath("notes/deck.pptx"), true);
+  assert.equal(isOfficePath("notes/field.docx"), true);
+  assert.equal(isOfficePath("notes/old.ppt"), false);
+  assert.equal(opensInEditor("notes/deck.pptx"), false);
+  const heading = "Slide 2 · 中文標題";
+  assert.equal(headingChipLabel("notes/deck.pptx", heading), "deck.pptx · Slide 2 · 中文標題");
+  assert.equal(headingChipLabel("notes/deck.pptx", "  "), "deck.pptx");
+  assert.equal(headingChipText("notes/deck.pptx", heading, null), "deck.pptx · Slide 2 · 中文標題");
+  assert.equal(
+    headingChipText("notes/deck.pptx", heading, { file: "notes/deck.pptx", message: PPTX_NO_APP }),
+    "No app on this computer opens .pptx files.",
+  );
+  assert.equal(
+    headingChipText("notes/other.pptx", heading, { file: "notes/deck.pptx", message: PPTX_NO_APP }),
+    "other.pptx · Slide 2 · 中文標題",
+  );
+  assert.equal(docxChipLabel("notes/field.docx", "第二節"), headingChipLabel("notes/field.docx", "第二節"));
+  assert.equal(officeNoAppLine("notes/deck.pptx"), PPTX_NO_APP);
+  assert.equal(officeNoAppLine("notes/field.docx"), DOCX_NO_APP);
+  assert.equal(officeOpenNotice("deck.pptx", "No app found to open deck.pptx"), PPTX_NO_APP);
+  assert.equal(officeOpenNotice("field.docx", "No app found to open field.docx"), DOCX_NO_APP);
+  assert.equal(officeOpenNotice("deck.pptx", ""), PPTX_NO_APP);
+  assert.equal(officeOpenNotice("deck.pptx", "File not found"), "File not found");
+  assert.equal(citationTitle("notes/deck.pptx", 4, heading), "Open notes/deck.pptx");
+  assert.equal(citationTitle("notes/deck.pptx", 4, heading).includes("line"), false);
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

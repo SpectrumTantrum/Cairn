@@ -10,6 +10,9 @@ import {
   videoMimeType,
   EMPTY_TABLE_MESSAGE,
   extractDocxText,
+  extractPptxText,
+  isDocxPath,
+  isPptxPath,
   extractHtmlText,
   extractPdfPages,
   HTML_NO_TEXT,
@@ -427,7 +430,8 @@ export class VaultSession {
     if (isImagePath(file)) throw new Error(IMAGE_NO_TEXT);
     if (isAudioPath(file)) throw new Error(AUDIO_NO_TEXT);
     if (isVideoPath(file)) throw new Error(VIDEO_NO_TEXT);
-    if (file.toLowerCase().endsWith(".docx")) return extractDocxText(target);
+    if (isDocxPath(file)) return extractDocxText(target);
+    if (isPptxPath(file)) return extractPptxText(target);
     const lower = target.toLowerCase();
     if (lower.endsWith(".txt") || /\.(csv|tsv)$/i.test(lower) || /\.html?$/i.test(lower)) {
       const text = decodeUtf8Text(readFileSync(target));
@@ -444,18 +448,24 @@ export class VaultSession {
   }
 
   /**
-   * Absolute path of a vault `.docx` that may be handed to the OS.
+   * Absolute path of a vault `.docx` or `.pptx` that may be handed to the OS.
    * Extension, vault jail, and existence are checked here, before any opener runs.
    */
-  docxOpenTarget(file: string): string {
-    if (!file.toLowerCase().endsWith(".docx")) {
-      throw new Error("Only a Word .docx file can be opened in another app.");
-    }
+  private externalOpenTarget(file: string, ext: ".docx" | ".pptx", reject: string): string {
+    if (!file.toLowerCase().endsWith(ext)) throw new Error(reject);
     const target = this.resolveSourcePath(file);
     if (!existsSync(target) || !statSync(target).isFile()) {
       throw new Error("The source file is no longer available. Try re-indexing this vault.");
     }
     return target;
+  }
+
+  docxOpenTarget(file: string): string {
+    return this.externalOpenTarget(file, ".docx", "Only a Word .docx file can be opened in another app.");
+  }
+
+  pptxOpenTarget(file: string): string {
+    return this.externalOpenTarget(file, ".pptx", "Only a PowerPoint .pptx file can be opened in another app.");
   }
 
   /**

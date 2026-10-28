@@ -302,10 +302,10 @@ export function registerIpcHandlers(): void {
     if (win) hidePdfView(win);
   });
 
-  ipcMain.handle("docx:open", async (_event, file: unknown) => {
+  const openInSystemApp = (file: unknown, resolveAbs: (name: string) => string) => {
     return handleUserErrors(() => {
       if (typeof file !== "string") throw new Error("No source file was provided.");
-      const abs = session.docxOpenTarget(file);
+      const abs = resolveAbs(file);
       // Pre-checks threw above. The dispatch promise always settles: on Linux it
       // races xdg-open against a timer, and elsewhere it races shell.openPath.
       return dispatchDocxOpen(abs, basename(file), {
@@ -313,6 +313,14 @@ export function registerIpcHandlers(): void {
         openPath: (target) => shell.openPath(target),
       });
     });
+  };
+
+  ipcMain.handle("docx:open", async (_event, file: unknown) => {
+    return openInSystemApp(file, (name) => session.docxOpenTarget(name));
+  });
+
+  ipcMain.handle("pptx:open", async (_event, file: unknown) => {
+    return openInSystemApp(file, (name) => session.pptxOpenTarget(name));
   });
 
   ipcMain.handle("source:read", async (_event, file: unknown) => {

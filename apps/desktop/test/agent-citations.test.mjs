@@ -12,7 +12,7 @@ const {
   resolveCitationLine,
   splitInlineCites,
 } = await import("../out-test/agent-citations.js");
-const { FILE_CITE_LINE, citationLineLabel, citationTitle, docxChipLabel, pdfChipLabel, pdfOpenTitle, PDF_OPEN_LANDS_ON_PAGE } =
+const { FILE_CITE_LINE, citationLineLabel, citationTitle, docxChipLabel, headingChipLabel, pdfChipLabel, pdfOpenTitle, PDF_OPEN_LANDS_ON_PAGE } =
   await import("../out-test/cite-format.js");
 
 test("citationsFromAskAgent prefers opened anchors with source snippets", () => {
@@ -2038,6 +2038,7 @@ test("media and PDF chips do not open as an editor line", () => {
   assert.deepEqual(citationOpenTarget(openHit("report.pdf", 4, { page: 3 })), { kind: "pdf", page: 3 });
   assert.deepEqual(citationOpenTarget(openHit("report.pdf", 4)), { kind: "pdf", page: 1 });
   assert.deepEqual(citationOpenTarget(openHit("field.docx", 4, { heading: "第二節" })), { kind: "docx" });
+  assert.deepEqual(citationOpenTarget(openHit("deck.pptx", 6, { heading: "Slide 3 · Title" })), { kind: "pptx" });
   const fact = "The orphan fact lives on this exact line.";
   assert.deepEqual(citationOpenTarget(openHit("notes/a.md", 5, { text: fact })), {
     kind: "editor",
@@ -2100,6 +2101,37 @@ test("the 312 question still chips only alpha-notes when a docx neighbor is retr
   assert.equal(chips[0].file, "alpha-notes.md");
   assert.equal(chips[0].line, 5);
   assert.equal(lastSources.some((source) => source.file === "field.docx"), true);
+});
+
+test("the 312 question still chips only alpha-notes when a pptx neighbor is retrieved", () => {
+  const pptx = classicFtsHit(
+    "deck.pptx",
+    3,
+    "這份簡報記載欄位代碼。 The roster lists other codes.",
+    "Slide 2 · 中文標題",
+  );
+  const { chips, lastSources } = classicAskTurn("312.", [FINCH_ROSTER, ALPHA_312, pptx], CLASSIC_QUESTION);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].file, "alpha-notes.md");
+  assert.equal(chips[0].line, 5);
+  assert.equal(lastSources.some((source) => source.file === "deck.pptx"), true);
+});
+
+test("a Traditional Chinese pptx slide heading is the chip label", () => {
+  const heading = "Slide 2 · 中文標題";
+  const body = "這份 簡報 記載 欄位 代碼";
+  const text = `# ${heading}\n${body}\n`;
+  const hit = { ...readHit("deck.pptx", text), heading };
+  const cites = citationsFromAskAgent({
+    answer: body,
+    sources: [hit],
+    opened: [],
+    ...agentShell,
+  });
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].heading, heading);
+  assert.equal(headingChipLabel(cites[0].file, cites[0].heading), "deck.pptx · Slide 2 · 中文標題");
+  assert.equal(citationOpenTarget(cites[0]).kind, "pptx");
 });
 
 test("a Traditional Chinese docx heading is the chip label", () => {

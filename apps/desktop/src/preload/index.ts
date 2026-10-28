@@ -78,6 +78,8 @@ export interface CairnApi {
   readVideo(file: string): Promise<{ mime: string; dataUrl: string }>;
   /** Open a vault .docx in the OS app. `ok: false` carries the reason. */
   openDocx(file: string): Promise<{ ok: true } | { ok: false; message: string }>;
+  /** Open a vault .pptx in the OS app. `ok: false` carries the reason. */
+  openPptx(file: string): Promise<{ ok: true } | { ok: false; message: string }>;
   /** Show a vault PDF in the in-app viewer. `page` is 1-based. Bounds are CSS pixels. */
   openPdf(payload: {
     file: string;
@@ -181,6 +183,7 @@ const api: CairnApi = {
   readAudio: (file) => ipcRenderer.invoke("source:readAudio", file),
   readVideo: (file) => ipcRenderer.invoke("source:readVideo", file),
   openDocx: (file) => ipcRenderer.invoke("docx:open", file),
+  openPptx: (file) => ipcRenderer.invoke("pptx:open", file),
   openPdf: (payload) => ipcRenderer.invoke("pdf:open", payload),
   hidePdf: () => ipcRenderer.invoke("pdf:hide"),
   writeSource: (file, content) => ipcRenderer.invoke("source:write", { file, content }),

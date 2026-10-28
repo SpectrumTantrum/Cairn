@@ -1,4 +1,4 @@
-// Open a .docx in the OS app without letting a stuck opener hold the IPC reply.
+// Open a .docx or .pptx in the OS app without letting a stuck opener hold the IPC reply.
 // On Linux, Electron 42's shell.openPath promise never settles (the reply is dropped
 // at the next GC). Spawn xdg-open and race its exit against our own timer instead.
 

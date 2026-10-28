@@ -23,6 +23,15 @@ export {
   renderDocxXml,
 } from "./docx-text.js";
 export {
+  PPTX_NO_TEXT,
+  PPTX_SLIDE_CAP,
+  PPTX_TEXT_CAP,
+  PPTX_UNREADABLE,
+  extractPptxText,
+  isPptxPath,
+  splitPptxSlides,
+} from "./pptx-text.js";
+export {
   readZipEntry,
   ZIP_RATIO_CAP,
   ZIP_RATIO_MIN_UNCOMPRESSED,

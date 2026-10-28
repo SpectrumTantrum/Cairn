@@ -16,8 +16,8 @@ import type {
 import { citationOpenTarget, citationsFromAskAgent, classicAskTurn } from "./agent-citations";
 import { nextEditorFlash } from "./citation-editor-focus";
 import { initialAgenticProgress, reduceAgenticProgress } from "./agentic-progress";
-import { DOCX_NO_APP, isAudioPath, isDocxPath, isImagePath, isPdfPath, isReadOnlyEditorPath, isVideoPath, opensInEditor, vaultPathsEqual } from "./cite-format";
-import { setDocxChipNotice } from "./docx-chip-notice";
+import { isAudioPath, isImagePath, isOfficePath, isPdfPath, isPptxPath, isReadOnlyEditorPath, isVideoPath, officeOpenNotice, opensInEditor, vaultPathsEqual } from "./cite-format";
+import { setOfficeChipNotice } from "./docx-chip-notice";
 import { pendingSaveBeforeNavigate } from "./editor-nav";
 import { composerDisabledReason } from "./ask-availability";
 import { inlineErrorText } from "./inline-error";
@@ -765,16 +765,16 @@ export function App() {
     [savePendingNavigation],
   );
 
-  const openDocxExternal = useCallback((file: string, fromTree: boolean) => {
+  const openOfficeExternal = useCallback((file: string, fromTree: boolean) => {
     void (async () => {
       try {
-        const result = await window.cairn.openDocx(file);
+        const result = isPptxPath(file) ? await window.cairn.openPptx(file) : await window.cairn.openDocx(file);
         if (result.ok) {
-          setDocxChipNotice(null);
+          setOfficeChipNotice(null);
           return;
         }
-        const message = result.message || DOCX_NO_APP;
-        setDocxChipNotice({ file, message });
+        const message = officeOpenNotice(file, result.message);
+        setOfficeChipNotice({ file, message });
         if (!fromTree) return;
         setPdfTarget(null);
         setImageSrc(null);
@@ -794,14 +794,14 @@ export function App() {
 
   const openNode = useCallback(
     (node: TreeNode) => {
-      if (isDocxPath(node.path)) {
+      if (isOfficePath(node.path)) {
         void (async () => {
           if (navigatingRef.current) return;
           navigatingRef.current = true;
           try {
             const saved = await savePendingNavigation();
             if (!saved) return;
-            openDocxExternal(node.path, true);
+            openOfficeExternal(node.path, true);
           } finally {
             navigatingRef.current = false;
           }
@@ -837,7 +837,7 @@ export function App() {
         setLoadError(null);
       }
     },
-    [openAudio, openDocxExternal, openImage, openMarkdown, openPdf, openVideo, savePendingNavigation],
+    [openAudio, openOfficeExternal, openImage, openMarkdown, openPdf, openVideo, savePendingNavigation],
   );
 
   const closeTab = useCallback(() => {
@@ -1048,8 +1048,8 @@ export function App() {
         void openPdf(source.file, target.page);
         return;
       }
-      if (target.kind === "docx") {
-        openDocxExternal(source.file, false);
+      if (target.kind === "docx" || target.kind === "pptx") {
+        openOfficeExternal(source.file, false);
         return;
       }
       if (target.kind === "image") {
@@ -1070,7 +1070,7 @@ export function App() {
         true,
       );
     },
-    [openAudio, openDocxExternal, openImage, openPdf, openVideo, revealCitedEditor],
+    [openAudio, openOfficeExternal, openImage, openPdf, openVideo, revealCitedEditor],
   );
 
   function submitChat(): void {
@@ -1440,8 +1440,8 @@ export function App() {
         void openPdf(hit.file, target.page);
         return;
       }
-      if (target.kind === "docx") {
-        openDocxExternal(hit.file, false);
+      if (target.kind === "docx" || target.kind === "pptx") {
+        openOfficeExternal(hit.file, false);
         return;
       }
       if (target.kind === "image") {
@@ -1459,7 +1459,7 @@ export function App() {
       const isMd = hit.file.toLowerCase().endsWith(".md");
       revealCitedEditor({ ...node, type: isMd ? "markdown" : "other" }, target, false);
     },
-    [openAudio, openDocxExternal, openImage, openPdf, openVideo, revealCitedEditor],
+    [openAudio, openOfficeExternal, openImage, openPdf, openVideo, revealCitedEditor],
   );
 
   const composerReason = useMemo(
