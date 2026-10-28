@@ -42,7 +42,7 @@ export {
   DEFAULT_ASK_AGENT_WALL_MS,
   DEFAULT_ASK_AGENT_FIRST_TURN_TIMEOUT_MS,
 } from "./ask-agent.js";
-export type { AskAgentOptions, AskAgentResult, AskAgentProgress, RetrievalSeedOption } from "./ask-agent.js";
+export type { AskAgentOptions, AskAgentResult, AskAgentProgress, AskAgentStepTrace, RetrievalSeedOption } from "./ask-agent.js";
 export {
   ASK_SEARCH_TOOLS,
   ASK_SEARCH_TOOL_NAMES,

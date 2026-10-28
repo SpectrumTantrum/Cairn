@@ -124,6 +124,52 @@ test("runAskAgent drives list → find → read and returns tool-gathered source
   }
 });
 
+test("runAskAgent leaves a step trace when steps occurred", async () => {
+  const files = { "notes/topic.md": "# Topic\n\nBody about spaced repetition.\n" };
+  setModelProvider(
+    new FakeModelProvider({
+      models: ["qwen3:4b"],
+      chatWithTools: async (_m, _msg, _t, turn) => {
+        if (turn === 1) {
+          return { content: "", toolCalls: [{ name: "find", arguments: { query: "spaced repetition", k: 4 } }] };
+        }
+        if (turn === 2) {
+          return { content: "", toolCalls: [{ name: "read", arguments: { path: "notes/topic.md" } }] };
+        }
+        return { content: "Reviews use intervals [1].", toolCalls: [] };
+      },
+    }),
+  );
+  const index = new InMemoryIndex();
+  try {
+    seed(index);
+    const result = await runAskAgent({
+      index,
+      question: "How does spaced repetition work?",
+      mode: "lexical",
+      readNote: makeReader(files),
+      retrievalSeed: false,
+    });
+    assert.ok(result.steps > 0, "the run must take steps for this fixture");
+    assert.ok(Array.isArray(result.trace), "trace is missing");
+    assert.ok(result.trace.length > 0, "trace is empty even though steps occurred");
+    for (const row of result.trace) {
+      assert.equal(typeof row.step, "number");
+      assert.ok(row.step >= 1 && row.step <= result.steps);
+      assert.equal(typeof row.name, "string");
+      assert.ok(row.name.length > 0);
+      assert.equal(typeof row.label, "string");
+      assert.ok(row.label.trim().length > 0);
+    }
+    assert.deepEqual(
+      result.trace.map((row) => row.name),
+      ["find", "read"],
+    );
+  } finally {
+    index.close();
+  }
+});
+
 test("runAskAgent records open anchors without reading the file", async () => {
   setModelProvider(
     new FakeModelProvider({

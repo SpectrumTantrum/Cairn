@@ -85,6 +85,13 @@ export interface AskAgentOptions {
   signal?: AbortSignal;
 }
 
+/** One tool step that ran. `label` is the same line the progress UI shows. */
+export interface AskAgentStepTrace {
+  step: number;
+  name: string;
+  label: string;
+}
+
 export interface AskAgentResult {
   answer: string;
   /** Chunks and notes the agent touched via find/grep/read/open (citation metadata). */
@@ -94,6 +101,8 @@ export interface AskAgentResult {
   /** Seed hits when retrievalSeed was enabled (not counted as "opened" by default). */
   seedHits: SearchHit[];
   steps: number;
+  /** Tool steps that ran, in order. Empty when the loop made no tool call. */
+  trace: AskAgentStepTrace[];
   stopReason: "done" | "step-cap" | "timeout" | "no-tool-support" | "no-tool-use" | "cancelled";
   grounded: boolean;
   model?: string;
@@ -263,13 +272,19 @@ async function questionNamesUnreadableFile(opts: AskAgentOptions): Promise<boole
   return false;
 }
 
-function cancelledAsk(seedHits: SearchHit[], steps: number, model?: string): AskAgentResult {
+function cancelledAsk(
+  seedHits: SearchHit[],
+  steps: number,
+  model: string | undefined,
+  trace: AskAgentStepTrace[],
+): AskAgentResult {
   return {
     answer: "",
     sources: [],
     opened: [],
     seedHits,
     steps,
+    trace,
     stopReason: "cancelled",
     grounded: false,
     model,
@@ -283,6 +298,7 @@ function honestMiss(): AskAgentResult {
     opened: [],
     seedHits: [],
     steps: 0,
+    trace: [],
     stopReason: "done",
     grounded: false,
   };
@@ -390,6 +406,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       opened: [],
       seedHits,
       steps: 0,
+      trace: [],
       stopReason: "no-tool-support",
       grounded: seedHits.length > 0,
     };
@@ -415,6 +432,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   let steps = 0;
   let answer = "";
   let stopReason: AskAgentResult["stopReason"] = "done";
+  const trace: AskAgentStepTrace[] = [];
   const progress = (event: AskAgentProgress): void => {
     opts.onProgress?.(event);
   };
@@ -422,7 +440,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
   progress({ kind: "status", message: "Starting agentic search…" });
 
   for (;;) {
-    if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
+    if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model, trace);
     if (steps >= stepCap) {
       stopReason = "step-cap";
       break;
@@ -466,7 +484,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
             },
       });
     } catch (err) {
-      if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
+      if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model, trace);
       const noGroundingYet = toolState.sources.length === 0 && seedHits.length === 0;
       if (firstTurn && noGroundingYet && err instanceof OllamaTimeoutError) {
         steps++;
@@ -476,7 +494,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
       }
       throw err;
     }
-    if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model);
+    if (opts.signal?.aborted) return cancelledAsk(seedHits, steps, model, trace);
     steps++;
 
     if (turn.toolCalls.length > 0 && streamed) progress({ kind: "clear-answer" });
@@ -500,6 +518,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
 
     for (const call of turn.toolCalls) {
       const label = labelAskSearchToolCall(call.name, call.arguments);
+      trace.push({ step: steps, name: call.name, label });
       progress({ kind: "tool", step: steps, name: call.name, label });
       const content = await runAskSearchTool(call.name, call.arguments, toolCtx, toolState);
       messages.push({
@@ -519,6 +538,7 @@ export async function runAskAgent(opts: AskAgentOptions): Promise<AskAgentResult
     opened: settled.opened,
     seedHits,
     steps,
+    trace,
     stopReason,
     grounded: settled.grounded,
     model,

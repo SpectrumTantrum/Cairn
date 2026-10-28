@@ -1,6 +1,6 @@
 import type { SearchHit } from "../../../shared/types.js";
 import { citationLandingLine } from "../../agent-citations";
-import { basename, citationLineLabel, citationTitle, isPdfPath, pdfChipLabel, pdfOpenTitle } from "../../cite-format";
+import { basename, citationChipFace, citationLineLabel, isPdfPath, pdfChipLabel } from "../../cite-format";
 
 interface CitationCardProps {
   hit: SearchHit;
@@ -13,13 +13,15 @@ interface CitationCardProps {
   index?: number;
   /** Force snippet visibility. Defaults: `full` → shown, `pill` → hidden. */
   showSnippet?: boolean;
-  onOpen(hit: SearchHit): void;
+  /** Absent when this chip cannot be opened. The card stays an inline location label. */
+  onOpen?(hit: SearchHit): void;
 }
 
 /**
  * One citation card reused across the three surfaces that reference a source chunk
  * (issue #15). Click-through routing stays the caller's concern: `onOpen` wires to the
  * surface's existing handler (`openSearchResult` / `openCitation`) unchanged.
+ * With no handler the same location label is a span, not a button and not a fallback paragraph.
  */
 export function CitationCard({ hit, variant, index, showSnippet, onOpen }: CitationCardProps) {
   const withSnippet = showSnippet ?? variant === "full";
@@ -28,27 +30,47 @@ export function CitationCard({ hit, variant, index, showSnippet, onOpen }: Citat
   // later fact line; the heading on the chip stays the click target.
   // A PDF chip names the page (`report.pdf p.3`) and does not use a line or heading.
   const landing = pdfPage > 0 ? hit.line : citationLandingLine(hit);
-  const title = pdfPage > 0 ? pdfOpenTitle(hit.file, pdfPage) : citationTitle(hit.file, landing, hit.heading);
-  return (
-    <button
-      type="button"
-      className={`citation-card citation-card-${variant}`}
-      title={title}
-      onClick={() => onOpen(hit)}
-    >
+  const face = citationChipFace(
+    {
+      file: hit.file,
+      line: landing,
+      heading: hit.heading,
+      page: pdfPage > 0 ? pdfPage : undefined,
+    },
+    typeof onOpen === "function",
+  );
+  const className = `citation-card citation-card-${variant}${face.interactive ? "" : " citation-card-static"}`;
+  const body = (
+    <>
       {index !== undefined ? <span className="citation-index">{index}</span> : null}
       <span className="citation-loc">
-        {pdfPage > 0 ? (
-          pdfChipLabel(hit.file, pdfPage)
+        {face.interactive ? (
+          pdfPage > 0 ? (
+            pdfChipLabel(hit.file, pdfPage)
+          ) : (
+            <>
+              {basename(hit.file)}
+              <span className="citation-line">:{citationLineLabel(landing)}</span>
+              {hit.heading ? <span className="citation-heading"> › {hit.heading}</span> : null}
+            </>
+          )
         ) : (
-          <>
-            {basename(hit.file)}
-            <span className="citation-line">:{citationLineLabel(landing)}</span>
-            {hit.heading ? <span className="citation-heading"> › {hit.heading}</span> : null}
-          </>
+          face.text
         )}
       </span>
       {withSnippet && hit.snippet ? <span className="citation-snippet">{hit.snippet}</span> : null}
+    </>
+  );
+  if (!face.interactive) {
+    return (
+      <span className={className} title={face.title}>
+        {body}
+      </span>
+    );
+  }
+  return (
+    <button type="button" className={className} title={face.title} onClick={() => onOpen?.(hit)}>
+      {body}
     </button>
   );
 }

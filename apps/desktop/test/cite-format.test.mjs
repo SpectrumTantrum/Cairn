@@ -4,11 +4,13 @@
 // Sources-tab rows.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 const {
   basename,
   typeChip,
+  citationChipFace,
   citationLineLabel,
   citationTitle,
   vaultPathsEqual,
@@ -158,6 +160,36 @@ test("audio opens in the player and not in the editor", () => {
   assert.equal(opensInEditor("notes/section-b.mp3"), false);
   assert.equal(opensInEditor("notes/tone.wav"), false);
   assert.equal(isReadOnlyEditorPath("notes/clip.m4a"), false);
+});
+
+test("a citation chip with no handler stays the location label", () => {
+  const face = citationChipFace({ file: "notes/a.md", line: 4, heading: "Topic" }, false);
+  assert.equal(face.interactive, false);
+  assert.equal(face.text, "a.md:4 › Topic");
+  assert.equal(face.title, "a.md:4 › Topic");
+  assert.equal(face.text.includes("undefined"), false);
+  assert.equal(face.text.includes("No app"), false);
+  assert.equal(face.title.includes("undefined"), false);
+
+  const pdf = citationChipFace({ file: "notes/report.pdf", line: 2, page: 3 }, false);
+  assert.equal(pdf.interactive, false);
+  assert.equal(pdf.text, "report.pdf p.3");
+  assert.equal(pdf.title, "report.pdf p.3");
+
+  const open = citationChipFace({ file: "notes/a.md", line: 4, heading: "Topic" }, true);
+  assert.equal(open.interactive, true);
+  assert.equal(open.text, "a.md:4 › Topic");
+  assert.equal(open.title, "Open notes/a.md at line 4 › Topic");
+});
+
+test("CitationCard renders a no-handler chip as an inline span", () => {
+  const src = readFileSync(new URL("../src/renderer/components/shell/CitationCard.tsx", import.meta.url), "utf8");
+  assert.equal(src.includes("citation-plain"), false);
+  assert.equal(src.includes("No app"), false);
+  assert.match(src, /citationChipFace/);
+  assert.match(src, /if \(!face\.interactive\)/);
+  assert.match(src, /<span className=\{className\} title=\{face\.title\}>/);
+  assert.match(src, /face\.text/);
 });
 
 test("vaultPathsEqual matches paths case-insensitively", () => {

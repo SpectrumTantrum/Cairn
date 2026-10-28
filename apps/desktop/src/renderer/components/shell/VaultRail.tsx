@@ -28,6 +28,8 @@ const SORT_NEXT: Record<TreeSortMode, TreeSortMode> = {
 
 interface VaultRailProps {
   vaultName: string | null;
+  /** Plain line in the empty rail, such as a missing last-vault notice. */
+  emptyMessage?: string | null;
   // command palette (issue #13) — discoverable ⌘K/Ctrl+K hint in the header
   paletteHint: string;
   onOpenPalette(): void;
@@ -65,6 +67,7 @@ interface VaultRailProps {
 
 export function VaultRail({
   vaultName,
+  emptyMessage,
   paletteHint,
   onOpenPalette,
   nodes,
@@ -185,7 +188,9 @@ export function VaultRail({
         />
       ) : (
         <div className="file-tree">
-          <p className="tree-empty">Choose a vault folder to browse your Markdown notes.</p>
+          <p className="tree-empty">
+            {emptyMessage || "Choose a vault folder to browse your Markdown notes."}
+          </p>
         </div>
       )}
 

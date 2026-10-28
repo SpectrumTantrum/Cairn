@@ -827,6 +827,7 @@ export function classicAskTurn(
         opened: [] as AskAgentResult["opened"],
         seedHits: [] as SearchHit[],
         steps: 0,
+        trace: [],
         stopReason: "done" as const,
         grounded: true,
       },

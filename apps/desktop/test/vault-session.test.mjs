@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -18,6 +19,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 const { createVaultSession } = await import("../out-test/vault-session.js");
+const { couldntFindVaultMessage } = await import("../out-test/vault-open.js");
 const { InMemoryIndex, FakeModelProvider } = await import("@cairn/engine/testing");
 const { setModelProvider, resetModelProvider, AUDIO_NO_TEXT, IMAGE_NO_TEXT, VIDEO_NO_TEXT } = await import("@cairn/engine");
 const imageFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/images");
@@ -58,6 +60,81 @@ function buildLexicalIndex(vault, entries) {
 test("search throws when no vault is selected", async () => {
   const session = createVaultSession({ openIndex: () => new InMemoryIndex() });
   await assert.rejects(() => session.search("query"), /Choose a vault folder first/);
+});
+
+test("setVault says Couldn't find for a missing folder, a file, and an unreadable folder", () => {
+  const session = createVaultSession();
+  assert.throws(() => session.setVault("  "), /Choose a vault folder first\./);
+
+  const dir = makeVaultDir();
+  const missing = join(dir, "gone");
+  const file = join(dir, "note.md");
+  writeFileSync(file, "x\n");
+  try {
+    assert.throws(
+      () => session.setVault(missing),
+      (err) => err instanceof Error && err.message === couldntFindVaultMessage(resolve(missing)),
+    );
+    assert.throws(
+      () => session.setVault(file),
+      (err) => err instanceof Error && err.message === couldntFindVaultMessage(resolve(file)),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setVault says Couldn't find for a chmod 000 folder", { skip: process.getuid?.() === 0 }, () => {
+  const vault = makeVaultDir();
+  try {
+    chmodSync(vault, 0o000);
+    const session = createVaultSession();
+    assert.throws(
+      () => session.setVault(vault),
+      (err) => err instanceof Error && err.message === couldntFindVaultMessage(resolve(vault)),
+    );
+  } finally {
+    chmodSync(vault, 0o755);
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("openVault reads an existing index once and returns those stats", async () => {
+  const vault = makeIndexedVaultDir();
+  let reads = 0;
+  try {
+    const session = createVaultSession({
+      openIndex: () => {
+        reads += 1;
+        return buildLexicalIndex(vault, [{ file: "note.md", text: "alpha finch" }]);
+      },
+    });
+    const first = session.openVault(vault);
+    const second = session.openVault(vault);
+    const [opened, again] = await Promise.all([first, second]);
+    assert.equal(reads, 1);
+    assert.equal(opened.path, realpathSync(vault));
+    assert.equal(opened.index?.mode, "lexical");
+    assert.equal(opened.index?.files, 1);
+    assert.equal(opened.index?.chunks, 1);
+    assert.equal(again.index?.chunks, 1);
+    const third = await session.openVault(vault);
+    assert.equal(reads, 1);
+    assert.equal(third.index?.files, 1);
+
+    const other = makeVaultDir();
+    try {
+      const bare = await session.openVault(other);
+      assert.equal(bare.index, null);
+      assert.equal(reads, 1);
+      await session.openVault(vault);
+      assert.equal(reads, 2);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
 });
 
 test("search throws when the vault is not indexed", async () => {

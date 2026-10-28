@@ -55,6 +55,7 @@ import {
   gitAvailable,
   revertRun,
 } from "./agent-checkpoint.js";
+import { couldntFindVaultMessage, resolveOpenableVault } from "./vault-open.js";
 
 export interface VaultSessionDeps {
   openIndex: (vaultRoot: string) => Index;
@@ -109,15 +110,21 @@ function compareTreeNodes(a: TreeNode, b: TreeNode, sort: TreeSortMode): number 
   return compareByName(a, b);
 }
 
+function numberMeta(value: string | undefined): number {
+  if (value === undefined) return 0;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function normalizeVaultPath(input: string): string {
   if (input.trim() === "") {
     throw new Error("Choose a vault folder first.");
   }
-  const vaultPath = resolve(input);
-  if (!existsSync(vaultPath) || !statSync(vaultPath).isDirectory()) {
-    throw new Error("The selected vault folder no longer exists.");
+  const vaultPath = resolveOpenableVault(input);
+  if (!vaultPath) {
+    throw new Error(couldntFindVaultMessage(resolve(input)));
   }
-  return realpathSync.native(vaultPath);
+  return vaultPath;
 }
 
 function resolveInsideVault(vaultPath: string, file: string): string {
@@ -212,6 +219,13 @@ export class VaultSession {
   /** Aborts the in-flight agentic Ask HTTP call. Cleared when that call finishes. */
   private askAbort: AbortController | null = null;
 
+  /** Stats from the last open of this path. A second call for that open does not re-read. */
+  private openRead: { path: string; stats: IndexStats | null } | null = null;
+  private openFlight: Promise<{ path: string; index: IndexStats | null }> | null = null;
+  private openFlightPath: string | null = null;
+  /** Bumped when the vault changes or the index is rewritten, so a stale read is not cached. */
+  private openEpoch = 0;
+
   constructor(deps: VaultSessionDeps) {
     this.openIndexFn = deps.openIndex;
   }
@@ -225,6 +239,8 @@ export class VaultSession {
     if (vaultPath !== this.selectedVaultPath) {
       this.resetChat();
       this.activeRun = null;
+      this.openEpoch += 1;
+      this.openRead = null;
     }
     this.selectedVaultPath = vaultPath;
     return vaultPath;
@@ -233,7 +249,26 @@ export class VaultSession {
   clearVault(): void {
     this.resetChat();
     this.activeRun = null;
+    this.openEpoch += 1;
+    this.openRead = null;
     this.selectedVaultPath = null;
+  }
+
+  /**
+   * Open a vault and read `.cairn/index.db` once. A second call for the same
+   * path returns the stats from that read. `index()` drops the cache.
+   */
+  async openVault(path: string): Promise<{ path: string; index: IndexStats | null }> {
+    const vaultPath = this.setVault(path);
+    if (this.openRead?.path === vaultPath) {
+      return { path: vaultPath, index: this.openRead.stats };
+    }
+    if (this.openFlight && this.openFlightPath === vaultPath) return this.openFlight;
+    const epoch = this.openEpoch;
+    const pending = this.loadOpenStats(vaultPath, epoch);
+    this.openFlight = pending;
+    this.openFlightPath = vaultPath;
+    return pending;
   }
 
   /** Cancel the in-flight agentic Ask and drop the classic thread. New thread, vault switch, load, delete. */
@@ -315,6 +350,58 @@ export class VaultSession {
     }
   }
 
+  /**
+   * Stats already stored in `.cairn/index.db`, or null when this vault has not
+   * been indexed. Does not re-index. One `openIndex` when the file exists.
+   */
+  async readExistingIndex(): Promise<IndexStats | null> {
+    if (!this.selectedVaultPath) return null;
+    return this.readExistingIndexAt(this.selectedVaultPath);
+  }
+
+  private async readExistingIndexAt(vaultPath: string): Promise<IndexStats | null> {
+    if (!existsSync(join(vaultPath, ".cairn", "index.db"))) return null;
+    return this.withIndex(vaultPath, async (index) => {
+      const mode = index.getMeta("mode") === "lexical" ? "lexical" : "hybrid";
+      const files = numberMeta(index.getMeta("files"));
+      const chunks = numberMeta(index.getMeta("chunks"));
+      const embedder = index.getMeta("embedder");
+      const dim = numberMeta(index.getMeta("dim"));
+      const stats: IndexStats = {
+        mode,
+        files,
+        chunks,
+        embedded: 0,
+        cached: 0,
+      };
+      if (embedder) stats.embedder = embedder;
+      if (index.getMeta("dim") !== undefined) stats.dim = dim;
+      return stats;
+    });
+  }
+
+  private async loadOpenStats(
+    vaultPath: string,
+    epoch: number,
+  ): Promise<{ path: string; index: IndexStats | null }> {
+    let stats: IndexStats | null = null;
+    try {
+      stats = await this.readExistingIndexAt(vaultPath);
+    } catch (err) {
+      console.error("[cairn] could not read the existing index");
+      console.error(err);
+      stats = null;
+    }
+    if (this.openEpoch === epoch && this.selectedVaultPath === vaultPath) {
+      this.openRead = { path: vaultPath, stats };
+    }
+    if (this.openFlightPath === vaultPath) {
+      this.openFlight = null;
+      this.openFlightPath = null;
+    }
+    return { path: vaultPath, index: stats };
+  }
+
   private async withIndex<T>(vaultPath: string, fn: (index: Index) => Promise<T>): Promise<T> {
     const index = this.openIndexFn(vaultPath);
     return fn(index).finally(() => {
@@ -324,6 +411,8 @@ export class VaultSession {
 
   async index(opts: { lexical?: boolean } = {}): Promise<IndexStats> {
     const vaultPath = this.requireVault();
+    this.openEpoch += 1;
+    this.openRead = null;
     const stats = await indexVault(vaultPath, { lexical: !!opts.lexical });
     // The index changed on disk; drop the classic chat Index so the next turn
     // rebinds. Leave an in-flight agentic Ask running: it holds its own Index,
