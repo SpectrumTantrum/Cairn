@@ -20,7 +20,7 @@ import { test } from "node:test";
 const { createVaultSession } = await import("../out-test/vault-session.js");
 const { InMemoryIndex, FakeModelProvider } = await import("@cairn/engine/testing");
 const { setModelProvider, resetModelProvider, AUDIO_NO_TEXT, IMAGE_NO_TEXT, VIDEO_NO_TEXT } = await import("@cairn/engine");
-const { docxBuffer } = await import("../../../packages/engine/test/docx-zip.mjs");
+const { docxBuffer, zipEntries } = await import("../../../packages/engine/test/docx-zip.mjs");
 const imageFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/images");
 const audioFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/audio");
 const videoFixtures = join(dirname(fileURLToPath(import.meta.url)), "../../../packages/engine/test/fixtures/video");
@@ -141,6 +141,79 @@ test("docxOpenTarget returns the resolved path inside the vault", () => {
     const seen = session.docxOpenTarget("field.docx");
     assert.equal(seen, session.resolveSourcePath("field.docx"));
     assert.equal(seen, realpathSync(resolve(vault, "field.docx")));
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+const PPT = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const DRAW = "http://schemas.openxmlformats.org/drawingml/2006/main";
+const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+function oneSlidePptx(title, body) {
+  const shape = (ph, text) =>
+    `<p:sp><p:nvSpPr><p:cNvPr id="2" name="Shape"/><p:cNvSpPr/><p:nvPr><p:ph type="${ph}"/></p:nvPr></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp>`;
+  const slide = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="${DRAW}" xmlns:r="${REL}" xmlns:p="${PPT}"><p:cSld><p:spTree>${shape("title", title)}${shape("body", body)}</p:spTree></p:cSld></p:sld>`;
+  const presentation = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:r="${REL}" xmlns:p="${PPT}"><p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst></p:presentation>`;
+  const rels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>`;
+  return zipEntries([
+    { name: "ppt/slides/slide1.xml", data: slide },
+    { name: "ppt/presentation.xml", data: presentation },
+    { name: "ppt/_rels/presentation.xml.rels", data: rels },
+  ]);
+}
+
+test("readSource extracts a PowerPoint file, including a Chinese slide title", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(join(vault, "deck.pptx"), oneSlidePptx("中文標題", "這份簡報記載欄位代碼。"));
+    const session = createVaultSession();
+    session.setVault(vault);
+    const text = session.readSource("deck.pptx");
+    assert.match(text, /^# Slide 1 · 中文標題$/m);
+    assert.match(text, /這份簡報記載欄位代碼。/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("pptxOpenTarget refuses a path outside the vault", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.pptxOpenTarget("../outside.pptx"), /Refusing to open a path outside/);
+    assert.throws(() => session.pptxOpenTarget("nested/../../outside.pptx"), /Refusing to open a path outside/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("pptxOpenTarget returns the resolved path inside the vault", () => {
+  const vault = makeVaultDir();
+  try {
+    writeFileSync(join(vault, "deck.pptx"), oneSlidePptx("中文標題", "這份簡報記載欄位代碼。"));
+    const session = createVaultSession();
+    session.setVault(vault);
+    const seen = session.pptxOpenTarget("deck.pptx");
+    assert.equal(seen, session.resolveSourcePath("deck.pptx"));
+    assert.equal(seen, realpathSync(resolve(vault, "deck.pptx")));
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test("pptxOpenTarget errors when the file is missing and rejects a non-pptx", () => {
+  const vault = makeVaultDir();
+  try {
+    const session = createVaultSession();
+    session.setVault(vault);
+    assert.throws(() => session.pptxOpenTarget("gone.pptx"), /no longer available/);
+    assert.throws(() => session.pptxOpenTarget("notes.md"), /Only a PowerPoint \.pptx/);
+    assert.throws(() => session.pptxOpenTarget("field.docx"), /Only a PowerPoint \.pptx/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

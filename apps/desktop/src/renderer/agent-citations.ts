@@ -32,7 +32,7 @@
 // page is not a default.
 
 import type { AskAgentResult, SearchHit } from "@cairn/engine";
-import { FILE_CITE_LINE, isAudioPath, isDocxPath, isImagePath, isPdfPath, isVideoPath } from "./cite-format.js";
+import { FILE_CITE_LINE, isAudioPath, isDocxPath, isImagePath, isPdfPath, isPptxPath, isVideoPath } from "./cite-format.js";
 
 /** Answer prose split around inline `[path:line]` cites. */
 export type InlineAnswerSegment = { kind: "text"; text: string } | { kind: "cite"; hit: SearchHit };
@@ -1020,6 +1020,7 @@ export type CitationOpenTarget =
   | { kind: "audio" }
   | { kind: "video" }
   | { kind: "docx" }
+  | { kind: "pptx" }
   | { kind: "editor"; line: number; highlight: boolean };
 
 export function citationOpenTarget(
@@ -1027,6 +1028,7 @@ export function citationOpenTarget(
 ): CitationOpenTarget {
   if (isPdfPath(hit.file)) return { kind: "pdf", page: hit.page && hit.page > 0 ? hit.page : 1 };
   if (isDocxPath(hit.file)) return { kind: "docx" };
+  if (isPptxPath(hit.file)) return { kind: "pptx" };
   if (isImagePath(hit.file)) return { kind: "image" };
   if (isAudioPath(hit.file)) return { kind: "audio" };
   if (isVideoPath(hit.file)) return { kind: "video" };

@@ -74,32 +74,88 @@ export function isVideoPath(file: string): boolean {
   return /\.(mp4|webm|mov)$/i.test(file);
 }
 
+export type OfficeExt = "docx" | "pptx";
+
+/** Word .docx or PowerPoint .pptx. Both open in another app, not the editor. */
+export function officeExt(file: string): OfficeExt | null {
+  const lower = file.toLowerCase();
+  if (lower.endsWith(".docx")) return "docx";
+  if (lower.endsWith(".pptx")) return "pptx";
+  return null;
+}
+
 /** Word .docx. Opens in another app, not the editor. */
 export function isDocxPath(file: string): boolean {
-  return file.toLowerCase().endsWith(".docx");
+  return officeExt(file) === "docx";
+}
+
+/** PowerPoint .pptx. Opens in another app, not the editor. .ppt, .pptm, .ppsx, and .potx do not. */
+export function isPptxPath(file: string): boolean {
+  return officeExt(file) === "pptx";
+}
+
+/** A heading chip that opens in another app (Word or PowerPoint). */
+export function isOfficePath(file: string): boolean {
+  return officeExt(file) !== null;
 }
 
 /** Shown when the OS has no handler for .docx. A plain line, not a viewer. */
 export const DOCX_NO_APP = "No app on this computer opens .docx files.";
 
-/** Chip text for a Word file, e.g. `field.docx · 第二節`. */
-export function docxChipLabel(file: string, heading = ""): string {
+/** Shown when the OS has no handler for .pptx. A plain line, not a viewer. */
+export const PPTX_NO_APP = "No app on this computer opens .pptx files.";
+
+/** Per-extension no-app line. Empty when the file does not open externally. */
+export function officeNoAppLine(file: string): string {
+  const ext = officeExt(file);
+  if (ext === "pptx") return PPTX_NO_APP;
+  if (ext === "docx") return DOCX_NO_APP;
+  return "";
+}
+
+/**
+ * Message stored on a failed external open. A missing OS handler becomes the
+ * per-extension no-app line; other opener errors stay as returned.
+ */
+export function officeOpenNotice(file: string, openerMessage: string): string {
+  const line = officeNoAppLine(file);
+  if (!line) return openerMessage;
+  if (!openerMessage || openerMessage.startsWith("No app found to open ")) return line;
+  return openerMessage;
+}
+
+/** Chip text for a heading-bearing file, e.g. `field.docx · 第二節` or `deck.pptx · Slide 2 · 中文標題`. */
+export function headingChipLabel(file: string, heading = ""): string {
   const name = basename(file);
   const title = heading.trim();
   return title ? `${name} · ${title}` : name;
 }
 
+/** Chip text for a Word file. Same heading-chip format as PowerPoint. */
+export function docxChipLabel(file: string, heading = ""): string {
+  return headingChipLabel(file, heading);
+}
+
 /**
  * Chip text after a failed external open. The blocked file shows the plain
- * no-app line; every other file keeps `file.docx · heading`.
+ * no-app line; every other file keeps `name · heading`.
  */
-export function docxChipText(
+export function headingChipText(
   file: string,
   heading: string,
   notice: { file: string; message: string } | null,
 ): string {
   if (notice?.message && vaultPathsEqual(notice.file, file)) return notice.message;
-  return docxChipLabel(file, heading);
+  return headingChipLabel(file, heading);
+}
+
+/** Word-file chip text. Same helper as `headingChipText`. */
+export function docxChipText(
+  file: string,
+  heading: string,
+  notice: { file: string; message: string } | null,
+): string {
+  return headingChipText(file, heading, notice);
 }
 
 /** Editor buffer that Ask can cite but the user cannot save (edit only Markdown). */
@@ -135,7 +191,7 @@ export function pdfOpenTitle(file: string, page?: number, landsOnPage = PDF_OPEN
  */
 export function citationTitle(file: string, line: number, heading = "", page?: number): string {
   if (isPdfPath(file)) return pdfOpenTitle(file, page);
-  if (isDocxPath(file)) return `Open ${file}`;
+  if (isOfficePath(file)) return `Open ${file}`;
   if (line <= 0) return `Open ${file} (file)`;
   const title = heading.trim();
   if (title) return `Open ${file} at line ${line} › ${title}`;

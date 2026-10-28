@@ -10,6 +10,7 @@ import { chunkHash } from "./normalize.js";
 import { resolveEmbedder, embed } from "./embed.js";
 import { extractPdfPages, pdfPageHeading } from "./pdf-text.js";
 import { extractDocxText } from "./docx-text.js";
+import { extractPptxText, splitPptxSlides } from "./pptx-text.js";
 import { extractHtmlText } from "./html-text.js";
 import { isAudioPath } from "./audio-files.js";
 import { isImagePath } from "./image-files.js";
@@ -37,8 +38,9 @@ export interface PendingChunk {
 }
 
 /**
- * PDF text is keyword-only in this slice. Markdown, plain text, HTML, tables, and Word
- * .docx body text are embedded. Image files never become chunks, so they are not embedded.
+ * PDF text is keyword-only in this slice. Markdown, plain text, HTML, tables, Word
+ * .docx body text, and PowerPoint .pptx slide text are embedded. Image files never
+ * become chunks, so they are not embedded.
  */
 export function chunkNeedsEmbedding(chunk: PendingChunk): boolean {
   return chunk.page == null;
@@ -71,7 +73,7 @@ export function discoverMarkdownFiles(root: string): string[] {
   return discoverFiles(root, /\.(md|markdown)$/i);
 }
 
-const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|docx|pdf|png|jpe?g|webp|gif|mp3|wav|m4a|mp4|webm|mov)$/i;
+const INDEXABLE_EXT = /\.(md|markdown|txt|csv|tsv|html|htm|docx|pptx|pdf|png|jpe?g|webp|gif|mp3|wav|m4a|mp4|webm|mov)$/i;
 
 function isHtmlPath(path: string): boolean {
   return /\.html?$/i.test(path);
@@ -86,8 +88,9 @@ function isTablePath(path: string): boolean {
 }
 
 /**
- * Markdown, plain UTF-8 text, CSV, TSV, HTML, Word .docx, PDF, images, audio (mp3, wav, m4a),
- * and video (mp4, webm, mov). .doc, .docm, and .dotx stay out.
+ * Markdown, plain UTF-8 text, CSV, TSV, HTML, Word .docx, PowerPoint .pptx, PDF, images,
+ * audio (mp3, wav, m4a), and video (mp4, webm, mov). .doc, .docm, .dotx, .ppt, .pptm,
+ * .ppsx, and .potx stay out.
  * Images, audio, and video are path-only: no text body.
  */
 export function isIndexableVaultPath(path: string): boolean {
@@ -103,7 +106,8 @@ function readUtf8TextFile(abs: string): string | null {
 }
 
 /**
- * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, Word `.docx`, PDF, images, audio, and video.
+ * Markdown notes, UTF-8 `.txt`, UTF-8 `.csv` / `.tsv`, UTF-8 `.html` / `.htm`, Word `.docx`,
+ * PowerPoint `.pptx`, PDF, images, audio, and video.
  * A text, table, or HTML file that is not valid UTF-8 is skipped.
  * Images, audio, and video are included by extension only. Other containers stay out.
  */
@@ -151,6 +155,31 @@ async function chunkDocxFile(rel: string, abs: string): Promise<PendingChunk[]> 
   }
 }
 
+async function chunkPptxFile(rel: string, abs: string): Promise<PendingChunk[]> {
+  try {
+    const text = extractPptxText(abs);
+    if (!text.trim()) return [];
+    // One chunk span per slide. A short deck would otherwise be a single chunk
+    // whose stored heading is only the first slide.
+    const pending: PendingChunk[] = [];
+    let ordinal = 0;
+    for (const section of splitPptxSlides(text)) {
+      const chunks = await chunkMarkdown(section.text);
+      for (const ch of chunks) {
+        pending.push({
+          file: rel,
+          chunk: { ...ch, ordinal: ordinal++, line: section.startLine + ch.line - 1 },
+          hash: chunkHash(ch.text),
+        });
+      }
+    }
+    return pending;
+  } catch {
+    // Password-protected, damaged, or empty: index nothing from this file.
+    return [];
+  }
+}
+
 export async function chunkVaultFiles(root: string, files: string[]): Promise<PendingChunk[]> {
   const pending: PendingChunk[] = [];
   for (const abs of files) {
@@ -163,6 +192,10 @@ export async function chunkVaultFiles(root: string, files: string[]): Promise<Pe
     }
     if (/\.docx$/i.test(rel)) {
       pending.push(...(await chunkDocxFile(rel, abs)));
+      continue;
+    }
+    if (/\.pptx$/i.test(rel)) {
+      pending.push(...(await chunkPptxFile(rel, abs)));
       continue;
     }
     if (/\.txt$/i.test(rel) || isTablePath(rel)) {

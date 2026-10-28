@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from "react";
 import type { SearchHit } from "../../../shared/types.js";
 import { citationLandingLine } from "../../agent-citations";
-import { basename, citationLineLabel, citationTitle, docxChipText, isDocxPath, isPdfPath, pdfChipLabel, pdfOpenTitle, vaultPathsEqual } from "../../cite-format";
-import { getDocxChipNotice, subscribeDocxChipNotice } from "../../docx-chip-notice";
+import { basename, citationLineLabel, citationTitle, headingChipText, isOfficePath, isPdfPath, pdfChipLabel, pdfOpenTitle, vaultPathsEqual } from "../../cite-format";
+import { getOfficeChipNotice, subscribeOfficeChipNotice } from "../../docx-chip-notice";
 
 interface CitationCardProps {
   hit: SearchHit;
@@ -24,11 +24,11 @@ interface CitationCardProps {
  * surface's existing handler (`openSearchResult` / `openCitation`) unchanged.
  */
 export function CitationCard({ hit, variant, index, showSnippet, onOpen }: CitationCardProps) {
-  const notice = useSyncExternalStore(subscribeDocxChipNotice, getDocxChipNotice, getDocxChipNotice);
+  const notice = useSyncExternalStore(subscribeOfficeChipNotice, getOfficeChipNotice, getOfficeChipNotice);
   const withSnippet = showSnippet ?? variant === "full";
   const pdfPage = isPdfPath(hit.file) ? (hit.page ?? 0) : 0;
-  if (isDocxPath(hit.file) && notice && vaultPathsEqual(notice.file, hit.file)) {
-    return <p className="citation-plain">{docxChipText(hit.file, hit.heading, notice)}</p>;
+  if (isOfficePath(hit.file) && notice && vaultPathsEqual(notice.file, hit.file)) {
+    return <p className="citation-plain">{headingChipText(hit.file, hit.heading, notice)}</p>;
   }
   // Label and tooltip use the heading line the click opens. hit.line can be a
   // later fact line; the heading on the chip stays the click target.
@@ -46,8 +46,8 @@ export function CitationCard({ hit, variant, index, showSnippet, onOpen }: Citat
       <span className="citation-loc">
         {pdfPage > 0 ? (
           pdfChipLabel(hit.file, pdfPage)
-        ) : isDocxPath(hit.file) ? (
-          docxChipText(hit.file, hit.heading, null)
+        ) : isOfficePath(hit.file) ? (
+          headingChipText(hit.file, hit.heading, null)
         ) : (
           <>
             {basename(hit.file)}
