@@ -46,9 +46,24 @@ export interface DesktopFeatures {
   agenticAskEnvDefault: boolean;
 }
 
+export interface OpenedVault {
+  path: string;
+  index: IndexStats | null;
+}
+
 export interface CairnApi {
   desktopFeatures(): Promise<DesktopFeatures>;
-  selectVault(): Promise<string | null>;
+  selectVault(): Promise<OpenedVault | null>;
+  /**
+   * Last successfully opened vault, or a picker fallback. `message` is set when
+   * the saved folder is missing. `index` is the on-disk index when one exists.
+   * Never rejects.
+   */
+  restoreLastVault(): Promise<{
+    path: string | null;
+    message: string | null;
+    index: IndexStats | null;
+  }>;
   indexVault(opts: { lexical: boolean }): Promise<IndexStats>;
   searchVault(query: string): Promise<SearchHit[]>;
   askVault(question: string, opts?: { model?: string; scope?: string[] }): Promise<AskResult>;
@@ -164,6 +179,7 @@ function subscribe<T>(channel: string, listener: (payload: T) => void): () => vo
 const api: CairnApi = {
   desktopFeatures: () => ipcRenderer.invoke("app:desktopFeatures"),
   selectVault: () => ipcRenderer.invoke("vault:select"),
+  restoreLastVault: () => ipcRenderer.invoke("vault:restore"),
   indexVault: (opts) => ipcRenderer.invoke("vault:index", opts),
   searchVault: (query) => ipcRenderer.invoke("vault:search", query),
   askVault: (question, opts) => ipcRenderer.invoke("vault:ask", { question, ...opts }),

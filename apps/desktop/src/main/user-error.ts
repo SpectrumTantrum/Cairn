@@ -4,6 +4,7 @@
 const USER_ERROR_PREFIXES = [
   "Local Ollama request timed out",
   "Choose",
+  "Couldn't",
   "Index",
   "No source",
   "No content",

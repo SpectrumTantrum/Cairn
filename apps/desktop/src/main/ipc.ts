@@ -9,7 +9,9 @@ import {
   resolveChatModel,
   studioTemplateMetas,
 } from "@cairn/engine";
+import { LastVaultStore, runLastVaultRestore } from "./last-vault.js";
 import { createVaultSession, type TreeSortMode } from "./vault-session.js";
+import { createVaultOpenGate } from "./vault-open.js";
 import {
   ProviderStore,
   testConnection,
@@ -21,6 +23,15 @@ import { toUserError } from "./user-error.js";
 import { hidePdfView, showPdfView, type PdfViewBounds } from "./pdf-viewer.js";
 
 const session = createVaultSession();
+const openGate = createVaultOpenGate<Awaited<ReturnType<typeof runLastVaultRestore>>>();
+
+let lastVaultStore: LastVaultStore | null = null;
+function lastVault(): LastVaultStore {
+  if (!lastVaultStore) {
+    lastVaultStore = new LastVaultStore(join(app.getPath("userData"), "last-vault.json"));
+  }
+  return lastVaultStore;
+}
 
 // Lazily constructed after app-ready (getPath("userData") needs the app initialized).
 let providerStore: ProviderStore | null = null;
@@ -159,9 +170,28 @@ export function registerIpcHandlers(): void {
       });
 
       if (result.canceled || !result.filePaths[0]) return null;
-      return session.setVault(result.filePaths[0]);
+      openGate.reset();
+      const opened = await session.openVault(result.filePaths[0]);
+      try {
+        lastVault().remember(opened.path);
+      } catch {
+        // The folder opened. A settings-file write must not become an error toast.
+      }
+      return { path: opened.path, index: opened.index };
     });
   });
+
+  // Reopen the last vault on launch. The dev window calls this twice; the gate
+  // runs the decision once so the log line and the index read happen once.
+  ipcMain.handle("vault:restore", () =>
+    openGate.run("launch", () =>
+      runLastVaultRestore({
+        store: lastVault(),
+        openVault: (path) => session.openVault(path),
+        log: (line) => console.error(line),
+      }),
+    ),
+  );
 
   ipcMain.handle("vault:index", async (_event, opts: unknown) => {
     return handleUserErrors(() => {

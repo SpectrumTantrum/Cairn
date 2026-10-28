@@ -87,6 +87,11 @@ test("undici HeadersTimeoutError cause maps to an explicit Ollama timeout messag
   assert.equal(message.includes("re-index"), false);
 });
 
+test("a missing vault sentence is shown unchanged", () => {
+  const message = "Couldn't find your last vault at /tmp/notes. Pick a vault.";
+  assert.equal(toUserError(new Error(message)).message, message);
+});
+
 test("OllamaTimeoutError text passes through verbatim", () => {
   const error = new Error(
     "Local Ollama request timed out after 600s (chat-with-tools). The model may be too slow under load for this path — retry when the machine is quieter, use a faster model, or turn off agentic Ask.",
