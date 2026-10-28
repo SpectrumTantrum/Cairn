@@ -3,6 +3,7 @@
 // answer plus the numbered sources it was allowed to use. If retrieval finds nothing, refuse
 // rather than answer from outside knowledge (the G10 "your notes don't cover this" gate).
 
+import { alignClockCitations } from "./cite-align.js";
 import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
@@ -68,10 +69,11 @@ export async function ask(
     .map((h, i) => `[${i + 1}] ${h.file}:${h.line}${h.heading ? ` > ${h.heading}` : ""}\n${h.text}`)
     .join("\n\n");
 
-  const answer = await chat(model, [
+  const raw = await chat(model, [
     { role: "system", content: GROUNDING_SYSTEM },
     { role: "user", content: classicAskUserContent(sourcesBlock, question) },
   ]);
+  const answer = alignClockCitations(raw, hits);
 
   return { answer, sources: hits, mode, grounded: true, model, covered: true };
 }
