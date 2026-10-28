@@ -9,6 +9,7 @@
 // `onToken` — the token stream flows through the ModelProvider seam (chatStream), so an
 // Electron IPC bridge can forward each token without the engine knowing about IPC.
 
+import { alignClockCitations } from "./cite-align.js";
 import { search } from "./retrieve.js";
 import type { Mode, SearchHit } from "./retrieve.js";
 import type { Index } from "./vault-index.js";
@@ -181,7 +182,7 @@ export class ChatThread {
     // A signal-bearing local turn also streams so the abort reaches the model call
     // even when the caller did not ask for tokens.
     let usage: ChatUsage | undefined;
-    const answer =
+    const raw =
       provider || send.onToken || send.signal
         ? await chatStream(
             model,
@@ -197,6 +198,9 @@ export class ChatThread {
             provider,
           )
         : await chat(model, messages);
+    // Settled prose uses the renumbered marker. A live token stream may still
+    // show the model's original [n] until the turn is replaced with this answer.
+    const answer = alignClockCitations(raw, hits);
 
     this.turns.push({ role: "assistant", content: answer, sources: hits, grounded: true, covered: true });
     const result: ChatSendResult = {
